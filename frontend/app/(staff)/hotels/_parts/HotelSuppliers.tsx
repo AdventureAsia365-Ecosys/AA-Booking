@@ -190,22 +190,25 @@ function RoomNames({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
 
 function FactsConfirmation({ h, canWrite }: { h: HotelDetail; canWrite: boolean }) {
   const t = useT(MSG);
-  const [source, setSource] = useState<FactsSource>("dmc_sheet");
-  const [supplier, setSupplier] = useState(h.suppliers?.[0]?.supplier_id ?? "");
-  const confirm = useHotelMutation(
-    () => supplyApi.confirmFacts(h.code, { source, supplier_id: source === "dmc_sheet" ? supplier || null : null }),
-    t("Facts confirmed."),
-  );
   const label: Record<FactsSource, string> = {
     dmc_sheet: t("Supplier's sheet"),
     hotel_website: t("Hotel website"),
     site_visit: t("Site visit"),
   };
-  const by = h.suppliers?.find((l) => l.supplier_id === h.facts_source_supplier_id)?.supplier_name;
-  const overdue = !h.facts_reconfirm_due || h.facts_reconfirm_due <= new Date().toISOString().slice(0, 10);
-  const codes = Object.entries(h.external_codes ?? {});
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-card p-3 text-[13px]">
+      <FactsSummary h={h} label={label} />
+      {canWrite && <FactsForm h={h} label={label} />}
+    </div>
+  );
+}
+
+function FactsSummary({ h, label }: { h: HotelDetail; label: Record<FactsSource, string> }) {
+  const t = useT(MSG);
+  const by = h.suppliers?.find((l) => l.supplier_id === h.facts_source_supplier_id)?.supplier_name;
+  const due = h.facts_reconfirm_due ?? null;
+  return (
+    <>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium text-ink">{t("Facts confirmed")}</span>
         {h.facts_confirmed_on ? (
@@ -216,42 +219,57 @@ function FactsConfirmation({ h, canWrite }: { h: HotelDetail; canWrite: boolean 
         ) : (
           <span className="text-muted">{t("Never")}</span>
         )}
-        <Pill tone={overdue ? "warning" : "success"}>
-          {h.facts_reconfirm_due ? t("Due again {0}", h.facts_reconfirm_due) : t("Confirmation due")}
-        </Pill>
+        <Pill tone={isOverdue(due) ? "warning" : "success"}>{due ? t("Due again {0}", due) : t("Confirmation due")}</Pill>
       </div>
-      {codes.length > 0 && (
-        <p className="text-xs text-muted">
-          {t("Codes in other systems:")} {codes.map(([k, v]) => `${k} ${v}`).join(" · ")}
-        </p>
-      )}
-      {canWrite && (
-        <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <Select className={inputCls} value={source} onChange={(e) => setSource(e.target.value as FactsSource)} aria-label={t("Source")}>
-            {SOURCES.map((s) => (
-              <option key={s} value={s}>
-                {label[s]}
-              </option>
-            ))}
-          </Select>
-          <Select
-            className={inputCls}
-            value={supplier}
-            disabled={source !== "dmc_sheet"}
-            onChange={(e) => setSupplier(e.target.value)}
-            aria-label={t("Supplier")}
-          >
-            {(h.suppliers ?? []).map((l) => (
-              <option key={l.supplier_id} value={l.supplier_id}>
-                {l.supplier_name}
-              </option>
-            ))}
-          </Select>
-          <Button variant="secondary" disabled={confirm.isPending || (source === "dmc_sheet" && !supplier)} onClick={() => confirm.mutate(undefined)}>
-            <CheckCircle2 size={13} /> {t("Confirm the facts today")}
-          </Button>
-        </div>
-      )}
+      <ExternalCodes codes={h.external_codes} />
+    </>
+  );
+}
+
+/** A confirmation is due when it never happened or its due day has come. */
+function isOverdue(due: string | null): boolean {
+  return !due || due <= new Date().toISOString().slice(0, 10);
+}
+
+function ExternalCodes({ codes }: { codes?: Record<string, string> }) {
+  const t = useT(MSG);
+  const list = Object.entries(codes ?? {});
+  if (!list.length) return null;
+  return (
+    <p className="text-xs text-muted">
+      {t("Codes in other systems:")} {list.map(([k, v]) => `${k} ${v}`).join(" · ")}
+    </p>
+  );
+}
+
+function FactsForm({ h, label }: { h: HotelDetail; label: Record<FactsSource, string> }) {
+  const t = useT(MSG);
+  const [source, setSource] = useState<FactsSource>("dmc_sheet");
+  const [supplier, setSupplier] = useState(h.suppliers?.[0]?.supplier_id ?? "");
+  const fromSheet = source === "dmc_sheet";
+  const confirm = useHotelMutation(
+    () => supplyApi.confirmFacts(h.code, { source, supplier_id: fromSheet ? supplier || null : null }),
+    t("Facts confirmed."),
+  );
+  return (
+    <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
+      <Select className={inputCls} value={source} onChange={(e) => setSource(e.target.value as FactsSource)} aria-label={t("Source")}>
+        {SOURCES.map((s) => (
+          <option key={s} value={s}>
+            {label[s]}
+          </option>
+        ))}
+      </Select>
+      <Select className={inputCls} value={supplier} disabled={!fromSheet} onChange={(e) => setSupplier(e.target.value)} aria-label={t("Supplier")}>
+        {(h.suppliers ?? []).map((l) => (
+          <option key={l.supplier_id} value={l.supplier_id}>
+            {l.supplier_name}
+          </option>
+        ))}
+      </Select>
+      <Button variant="secondary" disabled={confirm.isPending || (fromSheet && !supplier)} onClick={() => confirm.mutate(undefined)}>
+        <CheckCircle2 size={13} /> {t("Confirm the facts today")}
+      </Button>
     </div>
   );
 }

@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.b2b import components, quotes
 from app.errors import Invalid
 from app.pricing import policy_guides, policy_params, policy_params_hotels
-from app.routers.b2b import QuoteLineRequest, line_ask
+from app.routers.b2b import QuoteLineRequest
 from app.supply import hotel_master, rate_checks, rate_sheet
 from tests.unit.fakes import POLICY_SEED, ScriptedConn
 
@@ -241,7 +241,7 @@ def test_request_line_ages_match_the_children() -> None:
         "meal_plan": "HB",
         "child_ages": [7],
     }
-    ask = line_ask(QuoteLineRequest(**body))
+    ask = components.ask_from_request(QuoteLineRequest(**body))
     assert (ask.meal_plan, ask.child_ages) == ("HB", (7,))
     with pytest.raises(ValidationError):
         QuoteLineRequest(**{**body, "child_ages": [7, 9]})

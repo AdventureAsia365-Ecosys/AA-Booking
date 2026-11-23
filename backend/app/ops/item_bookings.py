@@ -9,7 +9,9 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from app.errors import Conflict
+import asyncpg
+
+from app.errors import Conflict, Invalid, NotFound
 from app.supply import rates as supply_rates
 
 
@@ -83,3 +85,42 @@ def from_item(case: Any, item: Any) -> dict[str, Any]:
         "b2b_hold_id": item["b2b_hold_id"] if linked else None,
         "b2b_line_ref": item["b2b_line_ref"] if linked else None,
     }
+
+
+# AA-1153 (T8): the DMC of the rate that priced an item (a hotel may be sold by several): its first cost row's rate,
+# else the B2B quote line's first rate (a room line), else the hotel's / service's supplier. Over ITEMS_SQL's aliases.
+RATE_SUPPLIER_SQL = """coalesce(
+           (SELECT k.supplier_id FROM booking.version_item_costs c
+              JOIN booking.supplier_rates x ON x.id = c.supplier_rate_id
+              JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
+             WHERE c.version_item_id = i.id ORDER BY c.created_at, c.id LIMIT 1),
+           (SELECT k.supplier_id FROM booking.b2b_quote_lines ql
+              JOIN booking.supplier_rates x ON x.id = ql.supplier_rate_ids[1]
+              JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
+             WHERE ql.quote_id = bh.quote_id AND ql.line_no = i.position AND rt.id IS NOT NULL),
+           h.supplier_id, sv.supplier_id)::text"""
+
+
+def hotel_ref(row: Any, value: str | None) -> dict[str, Any]:
+    """AA-1153 (T11): the hotel's own confirmation number a confirm records (a room booking only; trimmed, 100 max)."""
+    text = (value or "").strip()
+    return {"hotel_confirmation_ref": text[:100]} if text and row["hotel_room_type_id"] else {}
+
+
+async def check_supply(conn: asyncpg.Connection, supplier_id: str, room: str | None, service: str | None) -> None:
+    supplier = await conn.fetchrow("SELECT status, code FROM booking.suppliers WHERE id = $1::uuid", supplier_id)
+    if supplier is None:
+        raise NotFound("supplier_not_found", f"supplier {supplier_id} not found")
+    if supplier["status"] != "active":
+        raise Conflict("supplier_inactive", f"supplier {supplier['code']} is inactive")
+    if room and not await conn.fetchval(  # AA-1153: a hotel linked (active) to the supplier
+        "SELECT 1 FROM booking.hotel_room_types rt JOIN booking.hotel_supplier_links l ON l.hotel_id = rt.hotel_id"
+        " WHERE rt.id = $1::uuid AND l.supplier_id = $2::uuid AND l.status = 'active'",
+        room,
+        supplier_id,
+    ):
+        raise Invalid("supply_not_of_supplier", "the room type is not one of this supplier's hotels")
+    if service and not await conn.fetchval(
+        "SELECT 1 FROM booking.services WHERE id = $1::uuid AND supplier_id = $2::uuid", service, supplier_id
+    ):
+        raise Invalid("supply_not_of_supplier", "the service is not one of this supplier's services")

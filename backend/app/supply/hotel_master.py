@@ -321,19 +321,8 @@ async def add_link(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[
     return await list_links(conn, hotel["id"])
 
 
-async def update_link(
-    conn: asyncpg.Connection, staff: Staff, ref: str, supplier_id: str, changes: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """Change a DMC's code for the hotel, make it the preferred DMC (or not), or set the link active / inactive."""
-    hotel = await _hotel(conn, ref)
-    row = await conn.fetchrow(
-        "SELECT supplier_hotel_code, is_preferred, status FROM booking.hotel_supplier_links"
-        " WHERE hotel_id = $1::uuid AND supplier_id = $2::uuid FOR UPDATE",
-        hotel["id"],
-        supplier_id,
-    )
-    if row is None:
-        raise NotFound("link_not_found", "this supplier does not sell this hotel")
+def _link_values(row: Any, changes: dict[str, Any]) -> dict[str, Any]:
+    """The link columns a change asks (an inactive link is never preferred)."""
     values: dict[str, Any] = {}
     if "supplier_hotel_code" in changes:
         values["supplier_hotel_code"] = _code(changes["supplier_hotel_code"])
@@ -347,7 +336,23 @@ async def update_link(
         values["is_preferred"] = bool(changes["is_preferred"])
     elif changes.get("is_preferred"):
         raise Conflict("link_inactive", "an inactive supplier link cannot be the preferred one")
-    changed = {k: v for k, v in values.items() if row[k] != v}
+    return values
+
+
+async def update_link(
+    conn: asyncpg.Connection, staff: Staff, ref: str, supplier_id: str, changes: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Change a DMC's code for the hotel, make it the preferred DMC (or not), or set the link active / inactive."""
+    hotel = await _hotel(conn, ref)
+    row = await conn.fetchrow(
+        "SELECT supplier_hotel_code, is_preferred, status FROM booking.hotel_supplier_links"
+        " WHERE hotel_id = $1::uuid AND supplier_id = $2::uuid FOR UPDATE",
+        hotel["id"],
+        supplier_id,
+    )
+    if row is None:
+        raise NotFound("link_not_found", "this supplier does not sell this hotel")
+    changed = {k: v for k, v in _link_values(row, changes).items() if row[k] != v}
     if not changed:
         return await list_links(conn, hotel["id"])
     if changed.get("is_preferred"):

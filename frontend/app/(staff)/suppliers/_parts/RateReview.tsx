@@ -6,7 +6,7 @@
 // tick "I checked these warnings".
 
 import { useQuery } from "@tanstack/react-query";
-import { suppliersApi, type RateCheck, type RateDiff } from "@/lib/api/suppliers";
+import { suppliersApi, type RateCheck, type RateDiff, type RateSheetResult } from "@/lib/api/suppliers";
 import { Checkbox, Pill, Skeleton } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -67,18 +67,35 @@ export function RateDiffSummary({ diff }: { diff: RateDiff }) {
   );
 }
 
+/** AA-1153: the checks and diff of a rate-sheet Check (dry run), when the API sent them. */
+export function SheetReview({ preview }: { preview: RateSheetResult | null }) {
+  if (!preview) return null;
+  return (
+    <>
+      {preview.checks && <RateChecks checks={preview.checks} />}
+      {preview.diff && <RateDiffSummary diff={preview.diff} />}
+    </>
+  );
+}
+
 /** The live review of a draft in the publish dialog; ``onAcknowledge`` is told whether publishing may go ahead. */
 export function ContractPublishReview({
-  contractId,
+  contract,
   acknowledged,
   onAcknowledge,
 }: {
-  contractId: string;
+  contract: { id: string } | null | undefined;
   acknowledged: boolean;
   onAcknowledge: (value: boolean) => void;
 }) {
   const t = useT(MSG);
-  const q = useQuery({ queryKey: ["contract-review", contractId], queryFn: () => suppliersApi.review(contractId) });
+  const contractId = contract?.id;
+  const q = useQuery({
+    queryKey: ["contract-review", contractId],
+    queryFn: () => suppliersApi.review(contractId ?? ""),
+    enabled: !!contractId,
+  });
+  if (!contractId) return null;
   if (q.isLoading) return <Skeleton h={60} />;
   if (q.isError || !q.data) return <p className="text-xs text-muted">{t("The rate review could not be loaded.")}</p>;
   const r = q.data;

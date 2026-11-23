@@ -19,7 +19,7 @@ import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./RateSheetDrawer.messages";
-import { RateChecks, RateDiffSummary } from "./RateReview";
+import { SheetReview } from "./RateReview";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPACT_LISTED = 12;
@@ -184,8 +184,7 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
           {preview.ignored_sheets.length > 0 && <p className="text-muted">{t("Not read:")} {preview.ignored_sheets.join(", ")}</p>}
         </div>
       )}
-      {preview?.checks && <RateChecks checks={preview.checks} />}
-      {preview?.diff && <RateDiffSummary diff={preview.diff} />}
+      <SheetReview preview={preview} />
       {preview?.impact && <Impact impact={preview.impact} />}
     </FormDrawer>
   );

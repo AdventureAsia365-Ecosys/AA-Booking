@@ -24,7 +24,7 @@ from app.auth.staff import Staff, get_pool, require
 from app.errors import Invalid
 from app.routers.trip_cases import Email
 from app.suppliers import service
-from app.supply import rate_sheet
+from app.supply import rate_review, rate_sheet
 
 router = APIRouter(prefix="/booking", tags=["suppliers"])
 
@@ -241,7 +241,7 @@ async def contract_review(contract_id: ContractId, _: CanRead, pool: Pool) -> di
     """AA-1153 (T10): the business checks and the diff against the supplier's previous contract, live, with the
     contract's seasons, hotel child prices and the rate-sheet import it came from (what the publisher reviews)."""
     async with pool.acquire() as conn:
-        return await rate_sheet.review(conn, contract_id)
+        return await rate_review.review(conn, contract_id)
 
 
 @router.patch("/contracts/{contract_id}")

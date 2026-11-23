@@ -238,6 +238,13 @@ def _board_hash(line: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _cost_notes(lc: LineCost, supply_note: Any) -> dict[str, Any]:
+    """The price-note parts the cost of a line brings (stop-sale dates, B4 child basis, AA-1153 board and hotel
+    children); only the ones it has."""
+    parts = {"supply": supply_note, "child": lc.child, "board": lc.board, "child_room": lc.child_room}
+    return {k: v for k, v in parts.items() if v}
+
+
 def _line_plan(component_id: str) -> str | None:
     """The trip plan id of a ``tp:`` line (a plan rate card applies to it), else None."""
     try:
@@ -664,14 +671,7 @@ async def quote_in(
             log.warning(
                 "b2b_quote_line_below_floor partner=%s line=%s departure=%s", partner_id, ask.line_ref, departure_id
             )
-        if supply_note:
-            note["supply"] = supply_note
-        if lc.child:
-            note["child"] = lc.child
-        if lc.board:
-            note["board"] = lc.board
-        if lc.child_room:
-            note["child_room"] = lc.child_room
+        note.update(_cost_notes(lc, supply_note))
         priced.append(
             {
                 "line_no": no,

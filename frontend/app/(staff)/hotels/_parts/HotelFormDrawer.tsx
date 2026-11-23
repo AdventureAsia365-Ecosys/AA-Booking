@@ -90,14 +90,13 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
       amenities: splitList(form.amenities),
       links: parseLinks(form.links),
       internal_notes: clean(form.internal_notes),
-      ...(reason.trim() ? { not_duplicate_reason: reason.trim() } : {}),
+      ...reasonField(reason),
     };
     save.mutate(hotel ? body : { ...body, supplier_id: form.supplier_id });
   }
 
   const fe = save.error instanceof ApiError ? save.error.fieldErrors : [];
-  const dup = save.error instanceof ApiError && save.error.code.startsWith("hotel_") && save.error.code.endsWith("duplicate") ? save.error : null;
-  const candidates = (dup?.body.candidates as HotelCandidate[] | undefined) ?? [];
+  const dup = duplicateOf(save.error);
   return (
     <FormDrawer
       open
@@ -107,7 +106,7 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
       onSubmit={submit}
       busy={save.isPending}
       dirty={dirty}
-      error={localError ?? (fe.length || dup ? null : supplyError(save.error))}
+      error={localError ?? formError(fe.length > 0, dup, save.error)}
       fieldErrors={fe}
       width={560}
     >
@@ -123,28 +122,7 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
           <SupplierSelect value={form.supplier_id} category="hotel" onChange={set("supplier_id")} />
         </FormField>
       )}
-      {dup && (
-        <div role="alert" className="flex flex-col gap-2 rounded-md border border-warning bg-warning-soft p-3 text-[13px] text-body" data-testid="hotel-duplicates">
-          <p className="font-medium text-ink">
-            {dup.code === "hotel_duplicate"
-              ? tr("This is the same hotel as one already in Booking. Open it and link this supplier to it instead.")
-              : tr("A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.")}
-          </p>
-          <ul className="flex flex-col gap-0.5 text-xs">
-            {candidates.map((c) => (
-              <li key={c.id}>
-                {c.code} {c.name} · {tr("{0} % alike", c.similarity)}
-                {c.distance_m != null ? ` · ${c.distance_m} m` : ""}
-              </li>
-            ))}
-          </ul>
-          {dup.code === "hotel_possible_duplicate" && (
-            <FormField label={tr("Why it is a different hotel")} hint={tr("10 to 300 characters; kept in the activity log.")}>
-              <Textarea className={textareaCls} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
-            </FormField>
-          )}
-        </div>
-      )}
+      {dup && <DuplicateNotice dup={dup} reason={reason} onReason={setReason} />}
       <FormField label={tr("Hotel name")} required error={errorFor(fe, "name")}>
         <Input className={inputCls} maxLength={200} value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder={tr("e.g. Hanoi Emerald Hotel")} />
       </FormField>
@@ -215,5 +193,57 @@ export function HotelFormDrawer({ hotel, onClose, onSaved }: { hotel?: HotelDeta
         <Textarea className={textareaCls} maxLength={5000} value={form.internal_notes} onChange={(e) => set("internal_notes")(e.target.value)} />
       </FormField>
     </FormDrawer>
+  );
+}
+
+/** AA-1153: the reason a possible duplicate is a different hotel, sent only when typed. */
+function reasonField(reason: string): { not_duplicate_reason?: string } {
+  const text = reason.trim();
+  return text ? { not_duplicate_reason: text } : {};
+}
+
+/** The drawer's error line: none while field errors or the duplicate notice say it. */
+function formError(fieldErrors: boolean, dup: unknown, err: unknown): string | null {
+  return fieldErrors || dup ? null : supplyError(err);
+}
+
+/** AA-1153: the 409 of a hotel that is (``hotel_duplicate``) or may be (``hotel_possible_duplicate``) one already in
+ *  Booking, with its candidates; null for any other error. */
+function duplicateOf(err: unknown): { code: string; candidates: HotelCandidate[] } | null {
+  if (!(err instanceof ApiError) || !["hotel_duplicate", "hotel_possible_duplicate"].includes(err.code)) return null;
+  return { code: err.code, candidates: (err.body.candidates as HotelCandidate[] | undefined) ?? [] };
+}
+
+function DuplicateNotice({
+  dup,
+  reason,
+  onReason,
+}: {
+  dup: { code: string; candidates: HotelCandidate[] };
+  reason: string;
+  onReason: (v: string) => void;
+}) {
+  const tr = useT(MSG);
+  return (
+    <div role="alert" className="flex flex-col gap-2 rounded-md border border-warning bg-warning-soft p-3 text-[13px] text-body" data-testid="hotel-duplicates">
+      <p className="font-medium text-ink">
+        {dup.code === "hotel_duplicate"
+          ? tr("This is the same hotel as one already in Booking. Open it and link this supplier to it instead.")
+          : tr("A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.")}
+      </p>
+      <ul className="flex flex-col gap-0.5 text-xs">
+        {dup.candidates.map((c) => (
+          <li key={c.id}>
+            {c.code} {c.name} · {tr("{0} % alike", c.similarity)}
+            {c.distance_m != null ? ` · ${c.distance_m} m` : ""}
+          </li>
+        ))}
+      </ul>
+      {dup.code === "hotel_possible_duplicate" && (
+        <FormField label={tr("Why it is a different hotel")} hint={tr("10 to 300 characters; kept in the activity log.")}>
+          <Textarea className={textareaCls} maxLength={300} value={reason} onChange={(e) => onReason(e.target.value)} />
+        </FormField>
+      )}
+    </div>
   );
 }

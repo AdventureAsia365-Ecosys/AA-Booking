@@ -252,15 +252,22 @@ def normalize(kind: Kind, data: dict[str, Any]) -> dict[str, Any]:
             for link in out["links"] or []
             if clean_text(link.get("url"))
         ]
-    if "external_codes" in out:
-        out["external_codes"] = hotel_master.clean_codes(out["external_codes"])
-    if "country_code" in out:
-        out["country_code"] = (clean_text(out["country_code"]) or "").upper() or None
+    out.update(_codes(out))
     if out.get("destination_id") is not None:
         out["destination_id"] = str(out["destination_id"])
     for key in ("service_type", "unit"):
         if key in out and out[key] is None:
             raise Invalid(f"{key}_required", f"a service needs a {key.replace('_', ' ')}")
+    return out
+
+
+def _codes(values: dict[str, Any]) -> dict[str, Any]:
+    """The country code upper-cased and (AA-1153) the external codes of a hotel cleaned, for the keys present."""
+    out: dict[str, Any] = {}
+    if "external_codes" in values:
+        out["external_codes"] = hotel_master.clean_codes(values["external_codes"])
+    if "country_code" in values:
+        out["country_code"] = (clean_text(values["country_code"]) or "").upper() or None
     return out
 
 
@@ -310,6 +317,25 @@ def _exists(kind: Kind) -> Conflict:
 # ── Records ──────────────────────────────────────────────────────────────────
 
 
+def _kind_filters(add: Any, kind: Kind, supplier: str | None, reconfirm_days: int | None) -> None:
+    """The supplier filter (AA-1153: for hotels, every hotel the supplier sells through an active link, not only those
+    it listed first) and the hotels whose facts are due for a new confirmation."""
+    if supplier:
+        try:
+            ident, column = str(uuid.UUID(supplier)), "{p}::uuid"
+        except ValueError:
+            ident, column = supplier.strip().upper(), "(SELECT s.id FROM booking.suppliers s WHERE s.code = {p})"
+        if kind is HOTEL:  # AA-1153: every hotel the supplier sells (an active link), not only those it listed first
+            linked = "EXISTS (SELECT 1 FROM booking.hotel_supplier_links l WHERE l.hotel_id = r.id"
+            add(f"{linked} AND l.status = 'active' AND l.supplier_id = {column})", ident)  # noqa: S608 — constants
+        elif column == "{p}::uuid":
+            add("r.supplier_id = {p}::uuid", ident)
+        else:
+            add("sp.code = {p}", ident)
+    if reconfirm_days is not None and kind is HOTEL:
+        add(f"(r.facts_confirmed_on IS NULL OR r.facts_confirmed_on + {{p}}::int <= {TODAY})", reconfirm_days)
+
+
 async def list_records(
     conn: asyncpg.Connection,
     kind: Kind,
@@ -339,20 +365,7 @@ async def list_records(
         if status not in STATUSES:
             raise Invalid("unknown_status", f"status must be one of {', '.join(STATUSES)}")
         add("r.status = {p}", status)
-    if supplier:
-        try:
-            ident, column = str(uuid.UUID(supplier)), "{p}::uuid"
-        except ValueError:
-            ident, column = supplier.strip().upper(), "(SELECT s.id FROM booking.suppliers s WHERE s.code = {p})"
-        if kind is HOTEL:  # AA-1153: every hotel the supplier sells (an active link), not only those it listed first
-            linked = "EXISTS (SELECT 1 FROM booking.hotel_supplier_links l WHERE l.hotel_id = r.id"
-            add(f"{linked} AND l.status = 'active' AND l.supplier_id = {column})", ident)  # noqa: S608 — constants
-        elif column == "{p}::uuid":
-            add("r.supplier_id = {p}::uuid", ident)
-        else:
-            add("sp.code = {p}", ident)
-    if reconfirm_days is not None and kind is HOTEL:
-        add(f"(r.facts_confirmed_on IS NULL OR r.facts_confirmed_on + {{p}}::int <= {TODAY})", reconfirm_days)
+    _kind_filters(add, kind, supplier, reconfirm_days)
     if country:
         add("r.country_code = {p}", country.strip().upper())
     if destination_id:
@@ -512,11 +525,7 @@ async def update_record(
             changed.pop(key, None)
     if not changed:
         return {**current, "changed": []}
-    duplicate = None
-    if kind is HOTEL and {"name", "destination_id", "latitude", "longitude"} & set(changed):
-        duplicate = await hotel_master.check_duplicates(
-            conn, {**merged, **changed}, exclude_id=current["id"], reason=reason
-        )
+    duplicate = await _duplicate(conn, kind, current["id"], {**merged, **changed}, changed, reason)
     db = _db_values(changed)
     sets = ", ".join(f"{column} = ${i + 2}{_cast(column)}" for i, column in enumerate(db))
     try:
@@ -541,6 +550,15 @@ async def update_record(
         summary=f"Updated {', '.join(sorted(changed))}",
     )
     return {**(await get_record(conn, kind, current["id"])), "changed": sorted(changed)}
+
+
+async def _duplicate(
+    conn: asyncpg.Connection, kind: Kind, ident: str, merged: dict[str, Any], changed: dict[str, Any], reason: Any
+) -> dict[str, Any] | None:
+    """AA-1153: a hotel edit that changes its name, place or position is checked for a duplicate again."""
+    if kind is not HOTEL or not {"name", "destination_id", "latitude", "longitude"} & set(changed):
+        return None
+    return await hotel_master.check_duplicates(conn, merged, exclude_id=ident, reason=reason)
 
 
 async def set_status(

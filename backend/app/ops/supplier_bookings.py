@@ -120,20 +120,10 @@ FROM booking.v_trip_case_supply_state WHERE trip_case_id = $1::uuid
 """
 # Supply items of the approved version: what a booking would copy, with the supplier, the cost rows and, for a B2B
 # case, the hold line of the same position.
-ITEMS_SQL = """
+ITEMS_SQL = f"""
 SELECT i.id::text AS id, i.position, i.title, i.day_from, i.day_to,
        i.hotel_room_type_id::text AS hotel_room_type_id, i.service_id::text AS service_id,
-       -- AA-1153 (T8): the DMC of the rate that priced the item (a hotel may be sold by several), else the item's.
-       coalesce(
-           (SELECT k.supplier_id FROM booking.version_item_costs c
-              JOIN booking.supplier_rates x ON x.id = c.supplier_rate_id
-              JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
-             WHERE c.version_item_id = i.id ORDER BY c.created_at, c.id LIMIT 1),
-           (SELECT k.supplier_id FROM booking.b2b_quote_lines ql
-              JOIN booking.supplier_rates x ON x.id = ql.supplier_rate_ids[1]
-              JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
-             WHERE ql.quote_id = bh.quote_id AND ql.line_no = i.position AND rt.id IS NOT NULL),
-           h.supplier_id, sv.supplier_id)::text AS supplier_id,
+       {item_bookings.RATE_SUPPLIER_SQL} AS supplier_id,
        CASE WHEN rt.id IS NOT NULL THEN h.name || ' · ' || rt.name ELSE sv.title END AS supply_label,
        (SELECT array_agg(c.net_amount ORDER BY c.created_at, c.id) FROM booking.version_item_costs c
          WHERE c.version_item_id = i.id) AS net_amounts,
@@ -155,7 +145,7 @@ LEFT JOIN booking.b2b_hold_lines hl ON hl.hold_id = bh.id AND hl.line_no = i.pos
 WHERE v.trip_case_id = $1::uuid AND v.is_approved AND v.deleted_at IS NULL
   AND (i.hotel_room_type_id IS NOT NULL OR i.service_id IS NOT NULL)
 ORDER BY i.position
-"""
+"""  # noqa: S608 — constants only
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -493,25 +483,6 @@ async def generate(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[str
     return {**out, "created": len(created)}
 
 
-async def _check_supply(conn: asyncpg.Connection, supplier_id: str, room: str | None, service: str | None) -> None:
-    supplier = await conn.fetchrow("SELECT status, code FROM booking.suppliers WHERE id = $1::uuid", supplier_id)
-    if supplier is None:
-        raise NotFound("supplier_not_found", f"supplier {supplier_id} not found")
-    if supplier["status"] != "active":
-        raise Conflict("supplier_inactive", f"supplier {supplier['code']} is inactive")
-    if room and not await conn.fetchval(  # AA-1153: a hotel linked (active) to the supplier
-        "SELECT 1 FROM booking.hotel_room_types rt JOIN booking.hotel_supplier_links l ON l.hotel_id = rt.hotel_id"
-        " WHERE rt.id = $1::uuid AND l.supplier_id = $2::uuid AND l.status = 'active'",
-        room,
-        supplier_id,
-    ):
-        raise Invalid("supply_not_of_supplier", "the room type is not one of this supplier's hotels")
-    if service and not await conn.fetchval(
-        "SELECT 1 FROM booking.services WHERE id = $1::uuid AND supplier_id = $2::uuid", service, supplier_id
-    ):
-        raise Invalid("supply_not_of_supplier", "the service is not one of this supplier's services")
-
-
 async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[str, Any]) -> dict[str, Any]:
     """Add a booking by hand: an extra item (no ``version_item_id``) or the replacement of a declined one."""
     case = await lock_case(conn, ref)
@@ -522,7 +493,7 @@ async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[st
     room, service = data.get("hotel_room_type_id"), data.get("service_id")
     if room and service:
         raise Invalid("one_supply_record", "a booking books a room type or a service, not both")
-    await _check_supply(conn, supplier, room, service)
+    await item_bookings.check_supply(conn, supplier, room, service)
     row: dict[str, Any] = {k: data.get(k) for k in FACT_FIELDS}
     row["supplier_id"] = supplier
     row["notes"] = (data.get("notes") or "").strip() or None
@@ -568,7 +539,7 @@ async def create_part(conn: asyncpg.Connection, staff: Staff, ref: str, data: di
     """AA-1149: book a sold tour component by hand (``quote_part_id``; a replacement or another supplier)."""
     case = await lock_case(conn, ref)
     _ensure_open(case)
-    new_id = await component_bookings.create_for_part(conn, staff, case, data, check_supply=_check_supply)
+    new_id = await component_bookings.create_for_part(conn, staff, case, data, check_supply=item_bookings.check_supply)
     created = await _get(conn, new_id)
     summary = f"Added supplier booking {created['code']} ({created['supplier_name']}) for a tour component"
     after = {"supplier_id": created["supplier_id"], "quote_part_id": data["quote_part_id"], "status": "pending"}
@@ -666,7 +637,7 @@ async def update(conn: asyncpg.Connection, staff: Staff, booking_id: str, change
     if room and service:
         raise Invalid("one_supply_record", "a booking books a room type or a service, not both")
     if {"supplier_id", "hotel_room_type_id", "service_id"} & set(changed):
-        await _check_supply(conn, supplier, str(room) if room else None, str(service) if service else None)
+        await item_bookings.check_supply(conn, supplier, str(room) if room else None, str(service) if service else None)
     net = changed.get("net_amount", row["net_amount"])
     currency = changed.get("net_currency", row["net_currency"])
     if (net is None) != (currency is None):
@@ -751,8 +722,7 @@ async def confirm(
         )
     now = _now()
     extra: dict[str, Any] = {"confirmation_ref": ref, "confirmed_at": now, "confirmed_by": staff.cis_user_id}
-    if (hotel_ref := (hotel_confirmation_ref or "").strip()) and row["hotel_room_type_id"]:
-        extra["hotel_confirmation_ref"] = hotel_ref[:100]  # AA-1153 (T11): the hotel's own number, rooms only
+    extra.update(item_bookings.hotel_ref(row, hotel_confirmation_ref))  # AA-1153 (T11)
     # AA-1074 (bk-045, bk-10): the plain approved FX rate of the net currency on the confirm day (None without one).
     extra.update(await fx.snapshot(conn, row["net_currency"], now.date()))
     if voucher_file_id is not None:

@@ -327,6 +327,34 @@ async def default_room_costs(
     return out
 
 
+async def item_defaults(
+    conn: asyncpg.Connection,
+    room_type_id: str | None,
+    service_id: str | None,
+    *,
+    on: date,
+    day_from: int,
+    day_to: int,
+    pax: int | None,
+) -> list[DefaultCost] | None:
+    """The default cost rows of a version item (None when no rate is in force): a room night by night
+    (:func:`default_room_costs`), a service from its rate in force on the first day (:func:`default_cost`)."""
+    if room_type_id:
+        nights = quantity("room_night", day_from=day_from, day_to=day_to, pax=pax)
+        return await default_room_costs(conn, room_type_id, first_day=on, nights=nights, pax=pax)
+    rate = await rate_in_force(conn, service_id=service_id, on=on, pax=pax)
+    return [default_cost(rate, day_from=day_from, day_to=day_to, pax=pax)] if rate else None
+
+
+def default_report(position: int, on: date, runs: list[DefaultCost] | None) -> dict[str, Any]:
+    """The ``rate_defaults`` line of one item: the first rate and the total net, or ``rate_id`` None."""
+    if not runs:
+        return {"position": position, "on": on, "rate_id": None}
+    total = sum((d.net_amount for d in runs), start=Decimal("0"))
+    return {"position": position, "on": on, "rate_id": runs[0].supplier_rate_id, "net_amount": str(total),
+            "net_currency": runs[0].net_currency}  # fmt: skip
+
+
 # ── Writes (draft contracts only) ────────────────────────────────────────────
 
 

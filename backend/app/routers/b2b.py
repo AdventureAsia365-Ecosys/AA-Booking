@@ -52,7 +52,7 @@ from app.b2b import (
 )
 from app.b2b import invoices as agency_invoices
 from app.b2b.access import B2BContext, require_scope
-from app.b2b.components import LineAsk, RoomAsk
+from app.b2b.components import ask_from_request
 from app.b2b.errors import PREFIX, B2BError
 
 router = APIRouter(prefix=PREFIX, tags=["b2b"])
@@ -98,8 +98,7 @@ class QuoteLineRequest(Strict):
     nights: int | None = Field(default=None, ge=1, le=60)
     pax: Pax
     rooms: list[Room] = Field(default_factory=list, max_length=30)
-    # 1.10 (AA-1153, additive): the board of every hotel night of the line (default BB, or the tour night's board)
-    # and the children's ages on the service date (one per child, optional); hashed only when sent.
+    # 1.10 (AA-1153): the board of every hotel night, the children's ages (app.b2b.components.ask_from_request)
     meal_plan: Literal["RO", "BB", "HB", "FB", "AI"] | None = None
     child_ages: list[Annotated[int, Field(ge=0, le=17)]] | None = Field(default=None, max_length=60)
 
@@ -108,22 +107,6 @@ class QuoteLineRequest(Strict):
         if self.child_ages is not None and len(self.child_ages) != self.pax.child:
             raise ValueError("child_ages names one age per child (pax.child)")
         return self
-
-
-def line_ask(line: QuoteLineRequest) -> LineAsk:
-    """The pricing ask of one request line (the agency API and the staff desk build it the same way)."""
-    return LineAsk(
-        line_ref=line.line_ref,
-        component_id=line.component_id,
-        service_date=line.service_date,
-        nights=line.nights,
-        adult=line.pax.adult,
-        child=line.pax.child,
-        infant=line.pax.infant,
-        rooms=tuple(RoomAsk(r.occupancy, r.count, r.room_type_id) for r in line.rooms),
-        meal_plan=line.meal_plan,
-        child_ages=tuple(line.child_ages or ()),
-    )
 
 
 class QuoteRequest(Strict):
@@ -681,7 +664,7 @@ async def list_products(
 async def create_quote(body: QuoteRequest, ctx: CanQuote) -> dict:
     lines = [
         quotes.AskLine(
-            ask=line_ask(line),
+            ask=ask_from_request(line),
             rooms=[r.model_dump() for r in line.rooms],
             departure_id=line.departure_id,
         )
