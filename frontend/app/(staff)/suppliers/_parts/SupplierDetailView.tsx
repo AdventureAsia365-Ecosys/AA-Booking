@@ -4,7 +4,8 @@
 // tabs Profile (basic information, contact, location, recent activity from the audit log) and Contracts (draft →
 // published by a second person → expired; "Import rate sheet" fills a draft from the Excel template, AA-1029) and Rates
 // (net rates per contract, AA-823 bk-010) and Bookings (AA-682 S1, supplier bookings of sold trips) and Bills (AA-682
-// S4, bk-030: this supplier's bills, the bill drawer and payouts; bill.read). Reads need supply.read.
+// S4, bk-030: this supplier's bills, the bill drawer and payouts; bill.read) and Bank accounts (AA-1158 part 2, bk-067:
+// masked list, entry pending a second person's call-back approval, the payout pause). Reads need supply.read.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -19,6 +20,8 @@ import { ContractDrawer } from "./ContractDrawer";
 import { RateSheetDrawer } from "./RateSheetDrawer";
 import { RatesTab } from "./RatesTab";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
+import { SupplierBankTab } from "./SupplierBankTab";
+import { LegalTermsFacts } from "./SupplierLegalTerms";
 import { SupplierBillsList } from "@/app/(staff)/billing/_parts/SupplierBills";
 import { CATEGORY_LABEL, ContractPhaseBadge, SupplierStatusBadge, locationText, supplierError, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
@@ -38,6 +41,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
     { key: "rates", label: t("Rates") },
     { key: "bookings", label: t("Bookings") },
     { key: "bills", label: t("Bills") },
+    { key: "bank", label: t("Bank accounts") },
   ];
   const [tab, setTab] = useDetailTab(tabs);
 
@@ -114,6 +118,7 @@ export function SupplierDetailView({ refParam }: { refParam: string }) {
         {tab === "contracts" && <Contracts s={s} canWrite={actions.canWrite} />}
         {tab === "rates" && <RatesTab s={s} canWrite={actions.canWrite} />}
         {tab === "bookings" && <SupplierBookingsTab s={s} />}
+        {tab === "bank" && <SupplierBankTab supplierRef={s.code} />}
         {tab === "bills" && (
           <SupplierBillsList
             supplier={{ id: s.id, name: s.company_name }}
@@ -173,6 +178,7 @@ function Profile({ s }: { s: SupplierDetail }) {
         </Section>
       </div>
       <div className="flex min-w-0 flex-col gap-5">
+        <LegalTermsFacts s={s} />
         <Section title={t("Contact details")}>
           <FactGrid>
             <Fact label={t("Primary contact")}>{s.contact_name ?? "—"}</Fact>

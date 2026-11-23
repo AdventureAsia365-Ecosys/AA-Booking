@@ -19,6 +19,7 @@ import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { QueryError } from "@/app/(staff)/cases/_parts/QueryError";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
 import { DestinationPicker, type PickedPlace } from "./DestinationPicker";
+import { useLegalTermsFields } from "./SupplierLegalTerms";
 import { CATEGORY_LABEL, supplierError, supplierHref } from "./shared";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -85,6 +86,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
   // The place id is kept even when the catalog could not resolve its name on load (destination null, id set).
   const [placeId, setPlaceId] = useState<string | null>(supplier?.destination_id ?? null);
   const [tried, setTried] = useState(false);
+  const legalTerms = useLegalTermsFields(supplier); // AA-1158 part 2: legal entity, tax code, payment terms, contacts
   const set = (k: keyof Text) => (v: string) => setText((t) => ({ ...t, [k]: v }));
   const errors = errorsOf(text, categories);
   const invalid = Object.keys(errors).length > 0;
@@ -106,6 +108,7 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
         postal_code: clean(text.postal_code),
         destination_id: placeId,
         country_code: clean(text.country_code),
+        ...legalTerms.body(),
       };
       return editing ? suppliersApi.update(supplier.code, body) : suppliersApi.create(body);
     },
@@ -227,6 +230,8 @@ export function SupplierForm({ supplier }: { supplier?: SupplierDetail }) {
             </Field>
           </div>
         </Section>
+
+        {legalTerms.section}
 
         <Section title={tr("Location")} description={tr("The city is a CIS place, so it matches tours and hotels; the address lines are free text.")}>
           <div className="grid gap-4 sm:grid-cols-2">

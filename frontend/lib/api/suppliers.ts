@@ -65,8 +65,32 @@ export interface Supplier {
   activated_by?: string | null;
   activated_at?: IsoDateTime | null;
   owner_self_approved?: boolean;
+  /** AA-1158 part 2 (bk-067): the supplier profile. */
+  legal_entity?: string | null;
+  tax_code?: string | null;
+  role_contacts?: RoleContact[];
+  payment_terms?: PaymentTerms | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
+}
+
+export const CONTACT_ROLES = ["reservations", "accounts", "sales", "operations", "emergency", "management"] as const;
+export type ContactRole = (typeof CONTACT_ROLES)[number];
+export interface RoleContact {
+  role: ContactRole;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+}
+export const TERMS_BASES = ["prepayment", "deposit_balance", "on_arrival", "after_service", "monthly_statement"] as const;
+export const TERMS_METHODS = ["bank_transfer", "card", "cash", "other"] as const;
+/** The supplier's standard payment terms (a contract may state its own). */
+export interface PaymentTerms {
+  basis: (typeof TERMS_BASES)[number];
+  deposit_percent: string | number | null;
+  due_days: number | null;
+  method: (typeof TERMS_METHODS)[number] | null;
+  note: string | null;
 }
 
 export interface SupplierActivity {
@@ -116,6 +140,10 @@ export interface SupplierBody {
   postal_code?: string | null;
   destination_id?: string | null;
   country_code?: string | null;
+  legal_entity?: string | null;
+  tax_code?: string | null;
+  role_contacts?: RoleContact[];
+  payment_terms?: PaymentTerms | null;
 }
 
 export type ContractStatus = "draft" | "published" | "expired";
