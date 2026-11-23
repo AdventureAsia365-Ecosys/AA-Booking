@@ -49,7 +49,7 @@ from typing import Any
 import asyncpg
 
 from app.b2b.errors import B2BError
-from app.supply import child_price
+from app.supply import addon_rules, child_price
 from app.supply.rates import RateAsk, rates_in_force_many
 from app.supply.restrictions import SupplyAsk
 
@@ -324,7 +324,7 @@ async def price_lines(
                 else:
                     service_unit(no, ask, part["service_id"], on=on, days=1, part=tag)
 
-    rates, by_split, contract_pct = await _lookup(conn, asks, units)
+    rates, by_split, contract_pct, offer_pct = await _lookup(conn, asks, units)
     unit_costs: list[tuple[Decimal, str]] = []
     for unit, rate in zip(units, rates, strict=True):
         ask = asks[unit.line]
@@ -341,6 +341,7 @@ async def price_lines(
             line,
             rate,
             by_split.get(id(unit)),
+            offer_pct=offer_pct.get(unit.service_id or ""),
             contract_pct=contract_pct.get(rate["contract_id"]),
             policy_pct=policy_pct,
             child_age_max=child_age_max,
@@ -412,6 +413,7 @@ def _unit_cost(
     rate: dict[str, Any],
     split: tuple[dict[str, Any] | None, dict[str, Any] | None] | None,
     *,
+    offer_pct: Decimal | None = None,
     contract_pct: Decimal | None,
     policy_pct: Decimal | None,
     child_age_max: int | None,
@@ -426,6 +428,7 @@ def _unit_cost(
             rate,
             child_rate,
             infant_rate,
+            offer_pct=offer_pct,
             contract_pct=contract_pct,
             policy_pct=policy_pct,
             child_age_max=child_age_max,
@@ -446,9 +449,10 @@ Split = dict[int, tuple[dict[str, Any] | None, dict[str, Any] | None]]
 
 async def _lookup(
     conn: asyncpg.Connection, asks: list[LineAsk], units: list[_Unit]
-) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal]]:
+) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal], dict[str, Decimal]]:
     """One batched rate query for every unit (plus, B4, the child and infant rates of a split unit's service and day,
-    same party band), and the child % of the contracts a child still needs (only when one does)."""
+    same party band), and the child % of the contracts and of the published add-on offers (AA-1151, bk-068) a child
+    still needs (only when one does)."""
     lookups = [RateAsk(u.room_type_id, u.service_id, u.on, u.pax) for u in units]
     split_units = [u for u in units if u.split]
     for u in split_units:
@@ -467,9 +471,15 @@ async def _lookup(
         }
     )
     if not need_terms:
-        return rates, by_split, {}
+        return rates, by_split, {}, {}
     rows = await conn.fetch(CONTRACT_CHILD_SQL, need_terms)
-    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}
+    services = {
+        u.service_id
+        for u, r in zip(units, rates, strict=True)
+        if u.split and u.service_id and r is not None and asks[u.line].child and by_split[id(u)][0] is None
+    }
+    offers = await addon_rules.child_pcts(conn, services)
+    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}, offers
 
 
 def _split_cost(
@@ -479,6 +489,7 @@ def _split_cost(
     child_rate: dict[str, Any] | None,
     infant_rate: dict[str, Any] | None,
     *,
+    offer_pct: Decimal | None = None,
     contract_pct: Decimal | None,
     policy_pct: Decimal | None,
     child_age_max: int | None,
@@ -494,6 +505,7 @@ def _split_cost(
             adult_net,
             child_rate_net=Decimal(str(rate["net_amount"])) if rate else None,
             child_rate_age_max=rate.get("age_max") if rate else None,
+            offer_pct=offer_pct,
             contract_pct=contract_pct,
             policy_pct=policy_pct,
             child_age_max=child_age_max,

@@ -79,6 +79,9 @@ EXPECTED_SECONDS: dict[str, int] = {
     # each) and the allotments due for release (one UPDATE of at most 500 rows); not exempt (seconds).
     "bk_departure_watch": 300,
     "bk_allotment_release": 120,
+    # AA-1151 (bk-068): once a day, the published supplier contracts ending within the warning window (one query, a
+    # notification per contract not yet announced); not exempt (seconds).
+    "bk_contract_expiry_watch": 120,
     # AA-993 G4 proof (test-only, JOB_TEST_KINDS): sleeps up to 3600 s.
     "bk_noop_sleep": 3660,
 }

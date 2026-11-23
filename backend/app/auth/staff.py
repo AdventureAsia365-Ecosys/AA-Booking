@@ -175,6 +175,14 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     # pending stop-sale (approve / reject) and approving or rejecting its end need stop_sale.approve (also on the
     # stop-sale ranges of season calendars). Admin and contracting hold both.
     "stop_sale.approve": frozenset({"admin", "contracting"}),
+    # AA-1151 (bk-068, PR-29 B1): add-on offers, the optional activities AA sells per place and day. Every staff role
+    # reads them (no net is shown); AA content staff (content_creator) and contracting create and edit a draft (rules,
+    # places, display order); publishing is the second person's approval (admin, contracting), never one of the
+    # draft's writers (403 maker_checker + a CHECK), an approve-class name a custom role never holds. The net price and
+    # the contract stay supply.write.
+    "addon.read": frozenset({"admin", "sales", "contracting", "content_creator", "finance"}),
+    "addon.write": frozenset({"admin", "contracting", "content_creator"}),
+    "addon.approve": frozenset({"admin", "contracting"}),
     # CIS catalog reads (content is read-only in Booking, O7): every staff role, content creators included.
     "catalog.read": frozenset({"admin", "sales", "contracting", "content_creator", "finance"}),
     # Commercial row of a catalog tour (sellable, trip style, price hint, notes; bk-009): contracting + admin.
@@ -276,6 +284,7 @@ PREVIEW_PERMISSIONS: frozenset[str] = frozenset(
         "pricing.read",
         "pricing_policy.read",
         "supply.read",
+        "addon.read",
         "catalog.read",
         "b2b_desk.read",
         "ops.read",

@@ -61,6 +61,7 @@ from app.ops import lifecycle as ops_lifecycle
 from app.outbox import OutboxSequencer
 from app.retention import jobs as retention_jobs
 from app.routers import (
+    addons,
     agency_billing,
     agency_pricing,
     b2b,
@@ -94,7 +95,7 @@ from app.routers import (
 )
 from app.settings import Settings, load_settings
 from app.suppliers import bank_crypto
-from app.supply import media
+from app.supply import contract_expiry, media
 
 # On shutdown a job in flight gets this long to finish; after that the worker task is cancelled and releases the
 # job back to the queue at once (app.jobs.queue.release, AA-751), before the pool closes. ECS gives the container
@@ -156,6 +157,8 @@ def create_app(
                 finance_orders.KIND: finance_orders.build_handler(settings),
                 # AA-1073 (bk-046): departure guarantee / at risk at the minimum, agency allotment release.
                 **departure_watch.HANDLERS,
+                # AA-1151 (bk-068): the daily "contract expiring" announcement for every supplier contract.
+                **contract_expiry.HANDLERS,
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }
@@ -179,6 +182,8 @@ def create_app(
                     finance_costs.RecomputeSchedule(),
                     # AA-1073: daily, the departure watch and the allotment release.
                     departure_watch.DepartureDailySchedule(),
+                    # AA-1151: daily, the supplier contracts ending within contract_expiry_alert_days.
+                    contract_expiry.ExpiryDailySchedule(),
                     # AA-682 S2 (bk-027): daily case lifecycle + operations reminders.
                     ops_lifecycle.OpsDailySchedule(),
                     # AA-975 (bk-022): stamp the feed order of committed outbox rows.
@@ -246,6 +251,8 @@ def create_app(
     app.include_router(reference.router)
     app.include_router(pricing.router)
     app.include_router(agency_pricing.router)  # AA-1030: agency price tiers and rate cards (bk-043)
+    # AA-1151 (bk-068): add-on offers; before suppliers so /booking/contracts/expiring is not read as a contract id.
+    app.include_router(addons.router)
     app.include_router(suppliers.router)
     app.include_router(supplier_bank.router)  # AA-1158 part 2: supplier bank accounts (bk-067)
     app.include_router(supplier_profile_options.router)  # AA-1158 part 2: supplier profile choices (bk-067)

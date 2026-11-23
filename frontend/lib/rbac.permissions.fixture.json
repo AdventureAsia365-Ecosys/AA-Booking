@@ -2,6 +2,9 @@
   "_comment": "AA-1155 T7: the backend capability matrix (backend/app/auth/staff.py PERMISSIONS) per built-in role, and the seeded custom role, for the frontend page-rule tests. Generated; backend/tests/unit/test_aa1155_frontend_fixture.py fails when it drifts (rewrite: python -m tests.unit.test_aa1155_frontend_fixture from backend/).",
   "builtin": {
     "admin": [
+      "addon.approve",
+      "addon.read",
+      "addon.write",
       "agency_billing.read",
       "agency_billing.write",
       "agency_payment.approve",
@@ -61,6 +64,7 @@
       "version.write"
     ],
     "sales": [
+      "addon.read",
       "b2b_desk.book",
       "b2b_desk.read",
       "b2b_desk.write",
@@ -82,6 +86,9 @@
       "version.write"
     ],
     "contracting": [
+      "addon.approve",
+      "addon.read",
+      "addon.write",
       "b2b_desk.approve",
       "b2b_desk.read",
       "b2b_desk.write",
@@ -114,9 +121,12 @@
       "trip_plan.write"
     ],
     "content_creator": [
+      "addon.read",
+      "addon.write",
       "catalog.read"
     ],
     "finance": [
+      "addon.read",
       "agency_billing.read",
       "agency_billing.write",
       "agency_payment.approve",

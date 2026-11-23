@@ -8,6 +8,10 @@ checks"), approved by the administrator group. :mod:`app.pricing.policy_params` 
 Read by :mod:`app.jobs.metrics` (the sampler, every 5 minutes) and listed with their values in force by the check
 registry the CIS alerts catalogue reads (``GET /booking/ops/checks``, :mod:`app.routers.ops_checks`).
 
+AA-1151 (bk-068): how many days ahead the place add-on read model ``booking.v_place_addons`` lists (the view reads
+the value in force itself) and how many days before its end a published supplier contract is announced as expiring
+(:mod:`app.supply.contract_expiry`); section "operations", approved by the pricing group (product / contracting).
+
 AA-1149 (bk-065): the default and maximum length of a can-operate sale exception, in the existing section
 "operations", approved by the administrator group; read by :mod:`app.catalog.sell_exceptions`.
 """
@@ -23,6 +27,8 @@ STUCK_AFTER_S = "ops_jobs_stuck_after_s"
 OVERDUE_FACTOR = "ops_jobs_overdue_factor"
 OPERABLE_DEFAULT_DAYS = "operable_exception_default_days"
 OPERABLE_MAX_DAYS = "operable_exception_max_days"
+ADDON_DAYS_AHEAD = "addon_days_ahead"
+CONTRACT_EXPIRY_ALERT_DAYS = "contract_expiry_alert_days"
 
 SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -79,5 +85,31 @@ SPECS: tuple[dict[str, Any], ...] = (
         "minimum": Decimal("1"),
         "maximum": Decimal("90"),
         "cross_check": cross.operable_max_covers_default,
+    },
+    {
+        "key": ADDON_DAYS_AHEAD,
+        "type": "integer",
+        "unit": "days",
+        "question": "S285",
+        "group": "pricing",
+        "label": "Add-ons: days listed ahead",
+        "help": "How many days ahead the optional activities of a place are listed for travellers and agencies.",
+        "used_by": "app.supply.addons",
+        "section": "operations",
+        "minimum": Decimal("30"),
+        "maximum": Decimal("730"),
+    },
+    {
+        "key": CONTRACT_EXPIRY_ALERT_DAYS,
+        "type": "integer",
+        "unit": "days",
+        "question": "S285",
+        "group": "pricing",
+        "label": "Contract expiring warning (days)",
+        "help": "A published supplier contract is announced as expiring this many days before it ends.",
+        "used_by": "app.supply.contract_expiry",
+        "section": "operations",
+        "minimum": Decimal("7"),
+        "maximum": Decimal("365"),
     },
 )
