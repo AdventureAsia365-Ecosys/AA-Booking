@@ -22,10 +22,13 @@
 --      If the view is unreadable, a self-approval fails and a normal approval is untouched.
 --   1. suppliers: status pending, activated_by, activated_at, owner_self_approved, writers. writers (kept by trigger
 --      suppliers_writers, the client value is ignored): INSERT = [created_by]; an UPDATE that changes the supplier's
---      data while it is pending appends updated_by (also when the same statement activates it). suppliers_status_chk
---      (same name) adds pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is neither the
---      creator nor a writer of the pending data, unless flagged); suppliers_owner_self_chk (NULL-safe: the flag =
---      the activator is the creator or a writer). Existing rows keep writers '{}' (no backfill: the CHECKs name
+--      data while it is not live (pending or inactive, before or after the statement: a rejected or deactivated
+--      supplier's data is not approved either) appends updated_by (also when the same statement activates or
+--      deactivates it); only an edit of a supplier that stays active is free. suppliers_status_chk (same name) adds
+--      pending; suppliers_activation_chk; suppliers_maker_checker_chk (the activator is neither the creator nor a
+--      writer of the not-live data, unless flagged); suppliers_owner_self_chk (NULL-safe: the flag = the activator
+--      is the creator or a writer). The list only grows (a person who once wrote the not-live data never activates
+--      it alone again). Existing rows keep writers '{}' (no backfill: the CHECKs name
 --      created_by too, so no row is touched). Trigger
 --      suppliers_activation_guard (for every role except members of bk_owner, i.e. the app): an INSERT has no
 --      activation; the creator never changes; a supplier never goes back to pending; becoming
@@ -183,13 +186,13 @@ COMMENT ON COLUMN booking.suppliers.activated_by IS
     'bk-064 (AA-1158 R5): the staff key of the person who last activated the supplier (never its creator nor one of '
     'its writers unless owner_self_approved). NULL on suppliers active before bk-064 (legacy) and on pending ones.';
 COMMENT ON COLUMN booking.suppliers.owner_self_approved IS
-    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created or edited while pending (checked against '
-    'the CIS marker by booking.owner_self_approval_guard). Cleared by a later activation by someone else; the audit '
+    'bk-064 (AA-1158 Q5): the business owner activated a supplier she created or edited while not live (checked '
+    'against the CIS marker by booking.owner_self_approval_guard). Cleared by a later activation by someone else; the audit '
     'keeps the history.';
 COMMENT ON COLUMN booking.suppliers.writers IS
-    'bk-064 (AA-1158 R5): every staff key that decided the supplier''s pending data (its creator, then each updated_by '
-    'of an UPDATE that changed the data while pending; kept by trigger suppliers_writers, the client value is '
-    'ignored). The activator is never one of them unless owner_self_approved. ''{}'' on suppliers made before bk-064.';
+    'bk-064 (AA-1158 R5): every staff key that decided the supplier''s data while it was not live (its creator, then '
+    'each updated_by of an UPDATE that changed the data of a pending or inactive supplier, or in the statement that '
+    'activates or deactivates it; kept by trigger suppliers_writers, the client value is ignored). The activator is never one of them unless owner_self_approved. ''{}'' on suppliers made before bk-064.';
 
 CREATE OR REPLACE FUNCTION booking.suppliers_activation_guard() RETURNS trigger
     LANGUAGE plpgsql
@@ -268,9 +271,13 @@ BEGIN
         RETURN NEW;
     END IF;
     NEW.writers := OLD.writers;
-    -- Whoever changes the data of a pending supplier decided what goes live, so never activates it (R5, like the
-    -- contract writers of R4 and the bill facts editor of bk-045); an edit in the activating statement counts too.
-    IF OLD.status = 'pending' AND NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers))
+    -- Whoever changes the data of a supplier that is not live decided what goes live, so never activates it (R5, like
+    -- the contract writers of R4 and the bill facts editor of bk-045). Pending and inactive alike: a rejected supplier
+    -- (pending -> inactive) or a legacy one never activated holds data nobody approved, and an inactive one edited
+    -- after its approval holds new data. An edit in the statement that activates or deactivates it counts too; only
+    -- an edit of a supplier that stays active is free (it is live already, R5 governs going live).
+    IF (OLD.status <> 'active' OR NEW.status <> 'active')
+       AND NEW.updated_by IS NOT NULL AND NOT (NEW.updated_by = ANY (OLD.writers))
        AND (to_jsonb(NEW) - v_meta) IS DISTINCT FROM (to_jsonb(OLD) - v_meta) THEN
         NEW.writers := OLD.writers || NEW.updated_by;
     END IF;
@@ -279,7 +286,8 @@ END $$;
 
 COMMENT ON FUNCTION booking.suppliers_writers() IS
     'bk-064 (AA-1158 R5): writers = [created_by] on INSERT; on UPDATE the old list, plus updated_by when the update '
-    'changes the data of a pending supplier (status, activation and bookkeeping columns are not data).';
+    'changes the data of a supplier that is not active before or after it (status, activation and bookkeeping '
+    'columns are not data).';
 
 GRANT EXECUTE ON FUNCTION booking.suppliers_writers() TO booking;
 
