@@ -73,6 +73,7 @@ from app.jobs import queue
 from app.jobs.queue import Job
 from app.pricing import engine, pax_bands, policy_values, repository, seasons
 from app.pricing import service as pricing_service
+from app.supply import rates as supply_rates
 from app.supply.rates import RateAsk, rates_in_force_many
 
 log = logging.getLogger(__name__)
@@ -449,6 +450,9 @@ class Pricing:
     # AA-1175 (bk-066): the group-size bands in force (pricing policy ``price_pax_bands``); empty when the policy has
     # none, then no row is computed (reason ``no_rule``, like a plan without a rule).
     bands: tuple[pax_bands.Band, ...] = ()
+    # AA-1153 (bk-069 T9): the default board of a hotel night (pricing policy ``hotel_default_board``); None when the
+    # policy has none, then a room lookup asks the policy again and answers 503 (AA-side data missing).
+    board: str | None = None
 
     @property
     def can_price(self) -> bool:
@@ -479,8 +483,13 @@ async def load_pricing(conn: asyncpg.Connection, on: date) -> Pricing:
     except policy_values.PolicyUnavailable:
         log.warning("cost_sheet_pax_bands_unavailable on=%s", on)
         bands = ()
+    try:
+        board = await supply_rates.default_board(conn, on=on)
+    except policy_values.PolicyUnavailable:
+        log.warning("cost_sheet_default_board_unavailable on=%s", on)
+        board = None
     fx = {c: d.rate for c, d in dated_fx.items()}
-    return Pricing(on=on, rules=rules, fx=fx, rounding=rounding, bands=bands)
+    return Pricing(on=on, rules=rules, fx=fx, rounding=rounding, bands=bands, board=board)
 
 
 def _dec(value: Any) -> Decimal | None:
@@ -666,7 +675,7 @@ async def compute(
         return [], info
     info["windows"] = len(wins)
     wanted = asks(wins, parts, pricing.bands)
-    found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
+    found = dict(zip(wanted, await rates_in_force_many(conn, wanted, board=pricing.board), strict=True))
     singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
     codes = [cal.season_on(w.start).code for w in wins] if cal.configured else None
     grid = cells(wins, parts, found, pricing.bands)

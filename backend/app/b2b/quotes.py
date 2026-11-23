@@ -261,6 +261,7 @@ async def _policy(conn: asyncpg.Connection, on: date) -> policy_values.Policy:
         policy = await policy_values.load(conn, on)
         policy.quote_validity_days, policy.quote_validity_festive_days, policy.group_on_request_min_pax  # noqa: B018
         policy.child_price_pct_by_service_type  # noqa: B018 — AA-1145 (bk-060): the B4 child % of an sv: line
+        policy.hotel_default_board  # noqa: B018 — AA-1153 (bk-069 T9): the board of a hotel night that names none
     except policy_values.PolicyUnavailable as exc:
         log.warning("b2b_policy_unavailable error=%s", exc)
         raise B2BError("unavailable", "pricing policy is not available") from None
@@ -596,6 +597,7 @@ async def quote_in(
         [line.ask for line in lines],
         child_pct_by_type=pricing_policy.child_price_pct_by_service_type,
         child_age_max=_child_age_max(pricing_policy),
+        default_board=pricing_policy.hotel_default_board,
     )
     # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip.
     supply_asks = [a for lc in costs for a in lc.supply]

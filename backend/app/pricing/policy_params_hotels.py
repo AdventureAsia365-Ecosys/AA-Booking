@@ -7,7 +7,10 @@ Section "hotels" of Pricing > Policy, approved by the pricing group. :mod:`app.p
 - the four duplicate-hotel thresholds and the facts re-confirmation interval: read by :mod:`app.supply.hotel_master`
   (hotel create / edit and the hotel list);
 - the price jump a rate-sheet import flags against the supplier's previous contract: read by
-  :mod:`app.supply.rate_sheet` (the import and the review before publishing).
+  :mod:`app.supply.rate_sheet` (the import and the review before publishing);
+- the default board of a hotel night (T9): the board a room night is priced on when neither the quote line nor the
+  tour night names one, read by :mod:`app.supply.rates` (every rate lookup: B2B quotes and tariffs, version item
+  defaults, the cost sheet, the staff rate lookup).
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ MATCH_WARN_PCT = "hotel_match_warn_pct"
 MATCH_WARN_M = "hotel_match_warn_m"
 FACTS_RECONFIRM_DAYS = "hotel_facts_reconfirm_days"
 JUMP_WARN_PCT = "rate_sheet_jump_warn_pct"
+DEFAULT_BOARD = "hotel_default_board"
+BOARDS = ("RO", "BB", "HB", "FB", "AI")  # = app.supply.rates.MEAL_PLANS (a unit test keeps them equal)
 MATCH_KEYS = (MATCH_BLOCK_PCT, MATCH_BLOCK_M, MATCH_WARN_PCT, MATCH_WARN_M)
 
 _MATCH = "app.supply.hotel_master"
@@ -106,5 +111,17 @@ SPECS: tuple[dict[str, Any], ...] = (
         "section": "hotels",
         "minimum": Decimal("5"),
         "maximum": Decimal("500"),
+    },
+    {
+        "key": DEFAULT_BOARD,
+        "type": "code",
+        "unit": None,
+        "question": "S285",
+        "group": "pricing",
+        "label": "Default board of a hotel night",
+        "help": "The board a hotel night is priced on when neither the quote line nor the tour night names one.",
+        "used_by": "app.supply.rates",
+        "section": "hotels",
+        "choices": BOARDS,
     },
 )

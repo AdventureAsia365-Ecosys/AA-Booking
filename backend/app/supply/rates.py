@@ -10,14 +10,18 @@ currency.
   covers the rates: whoever adds or changes a rate cannot publish that contract.
 - **In force** on a day = contract published and both validities cover the day. Per supplier, when several rates
   match (seasons, pax bands), the newest ``valid_from`` wins, then a rate with a pax band, then the lowest net.
-- **Board basis** (AA-1153 T9, bk-069): a lookup asks a board (``meal_plan``) or none. None = the default board BB: an
-  exact BB rate first, then a rate with no board, then any other board (old data keeps pricing). An asked board takes
-  that board or a rate with no board, never another one (a cheaper BB rate never wins over an asked HB).
+- **Board basis** (AA-1153 T9, bk-069): a lookup asks a board (``meal_plan``) or none. None = the pricing policy's
+  default board (``hotel_default_board``, seeded BB; :func:`default_board`): an exact rate on that board first, then a
+  rate with no board, then any other board (old data keeps pricing). An asked board takes that board or a rate with no
+  board, never another one (a cheaper BB rate never wins over an asked HB).
 - **Several DMCs** (AA-1153 T8, bk-069): a hotel may be sold by several suppliers (``booking.hotel_supplier_links``).
   Each supplier's best rate is chosen as above; across suppliers the asked board first, then the hotel's preferred
-  DMC, then the lowest net. A room rate counts only while its hotel has an active link to the contract's supplier. A
-  lookup may be pinned to one supplier (``RateAsk.supplier_id``: the next nights of a stay stay with the first night's
-  DMC). Every found rate names its ``supplier_id``: the booking goes to the DMC of the price used.
+  DMC, then the lowest net **in USD** (each net at the approved FX rate in force on the day, ``booking.fx_rates``, the
+  rate a quote converts with; a currency without one sorts after those with one), then the lower net in its own
+  currency. A room rate counts only while its hotel has an active link to the contract's supplier. A lookup may be
+  pinned to one supplier (``RateAsk.supplier_id``: the next nights of a stay, and every unit of a B2B room line, stay
+  with the first night's DMC). Every found rate names its ``supplier_id``: the booking goes to the DMC of the price
+  used.
 - **Pax type and age band** (AA-1145, bk-060, B4): a per-person rate prices an ``adult`` (every rate before bk-060),
   a ``child`` or an ``infant``, a child / infant rate optionally for an age band (``age_min`` / ``age_max``). Every
   lookup here asks for one pax type (:class:`RateAsk`, default adult), so a child rate never becomes an adult price;
@@ -45,6 +49,9 @@ import asyncpg
 from app import audit
 from app.auth.staff import Staff
 from app.errors import Conflict, Invalid, NotFound
+from app.pricing import policy_values
+from app.pricing.engine import BASE_CURRENCY
+from app.pricing.policy_params_hotels import DEFAULT_BOARD
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
 from app.supply.records import RATE_IN_FORCE_ON, RATE_IN_FORCE_TODAY, as_uuid
@@ -150,12 +157,13 @@ async def rate_in_force(
     pax_type: str = ADULT,
     meal_plan: str | None = None,
     supplier_id: str | None = None,
+    board: str | None = None,
 ) -> dict[str, Any] | None:
     """The rate in force for a room type or service on ``on`` for ``pax`` travellers (``pax_type`` rates only), or
-    None: the batched choice (:data:`RATES_MANY_SQL`), then the full row."""
-    found = (
-        await rates_in_force_many(conn, [RateAsk(room_type_id, service_id, on, pax, pax_type, meal_plan, supplier_id)])
-    )[0]
+    None: the batched choice (:data:`RATES_MANY_SQL`), then the full row. ``board`` = the default board
+    (:func:`rates_in_force_many`)."""
+    ask = RateAsk(room_type_id, service_id, on, pax, pax_type, meal_plan, supplier_id)
+    found = (await rates_in_force_many(conn, [ask], board=board))[0]
     if found is None:
         return None
     return {**(await get_rate(conn, found["id"])), "supplier_id": found["supplier_id"]}
@@ -170,15 +178,30 @@ class RateAsk:
     on: date
     pax: int | None
     pax_type: str = ADULT
-    meal_plan: str | None = None  # bk-069 (T9): the board asked; None = the default board (BB first)
+    meal_plan: str | None = None  # bk-069 (T9): the board asked; None = the policy's default board first
     supplier_id: str | None = None  # bk-069 (T8): only this supplier's rates (a stay keeps its DMC)
 
 
-DEFAULT_BOARD = "BB"
+async def default_board(conn: asyncpg.Connection, *, on: date | None = None) -> str:
+    """bk-069 (T9): the pricing policy's default board in force on ``on`` (today, UTC, by default):
+    ``hotel_default_board``. Raises :class:`app.pricing.policy_values.PolicyUnavailable` when it has no approved
+    value (a staff caller answers 503 through :func:`staff_default_board`, a B2B caller 503 ``unavailable``)."""
+    day = on or await policy_values.today_utc(conn)
+    return str((await policy_values.require(conn, day, DEFAULT_BOARD)).get(DEFAULT_BOARD))
+
+
+async def staff_default_board(conn: asyncpg.Connection) -> str:
+    """:func:`default_board` for a staff path: a missing value is 503 ``policy_unavailable``."""
+    policy = await policy_values.require_staff(conn, await policy_values.today_utc(conn), DEFAULT_BOARD)
+    return str(policy.get(DEFAULT_BOARD))
+
+
 # The same choice for every caller (one ask or many): in force on the day, pax band, pax type; per supplier the asked
-# board, then RATE_ORDER_MANY; across suppliers the asked board, the hotel's preferred DMC, the lowest net (bk-069). A
-# room rate counts only while its hotel has an active link to the contract's supplier. One round trip for many asks
-# (AA-972 review: a B2B quote must not run one query per night or component).
+# board ($8 = the policy's default board when none is asked), then RATE_ORDER_MANY; across suppliers the asked board,
+# the hotel's preferred DMC, the lowest net in USD at the approved FX rate in force on the day (FX_SQL of
+# app.pricing.repository, per night), then the lowest net (bk-069). A room rate counts only while its hotel has an
+# active link to the contract's supplier. One round trip for many asks (AA-972 review: a B2B quote must not run one
+# query per night or component).
 RATES_MANY_SQL = f"""
 SELECT a.n, r.id, r.unit, r.net_amount, r.currency, r.season, r.contract_id, r.age_max, r.supplier_id, r.meal_plan
 FROM unnest($1::uuid[], $2::uuid[], $3::date[], $4::int[], $5::text[], $6::text[], $7::uuid[]) WITH ORDINALITY
@@ -189,7 +212,7 @@ LEFT JOIN LATERAL (
                x.id::text AS id, x.unit, x.net_amount::text AS net_amount, x.currency::text AS currency, x.season,
                x.supplier_contract_id::text AS contract_id, x.age_max, k.supplier_id::text AS supplier_id,
                x.meal_plan, x.net_amount AS net_sort, coalesce(l.is_preferred, false) AS preferred,
-               CASE WHEN x.meal_plan = coalesce(a.meal_plan, '{DEFAULT_BOARD}') THEN 0
+               CASE WHEN x.meal_plan = coalesce(a.meal_plan, $8::text) THEN 0
                     WHEN x.meal_plan IS NULL THEN 1 ELSE 2 END AS board_rank
         FROM booking.supplier_rates x
         JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id
@@ -206,15 +229,29 @@ LEFT JOIN LATERAL (
           AND (a.meal_plan IS NULL OR x.meal_plan IS NULL OR x.meal_plan = a.meal_plan)
         ORDER BY k.supplier_id, board_rank, {RATE_ORDER_MANY}
     ) s
-    ORDER BY s.board_rank, s.preferred DESC, s.net_sort, s.id
+    LEFT JOIN LATERAL (
+        SELECT f.rate_per_usd FROM booking.fx_rates f
+        JOIN booking.policy_approvals p ON p.fx_rate_id = f.id
+        WHERE f.currency = s.currency AND f.as_of <= a.on_day
+        ORDER BY f.as_of DESC, p.approved_at DESC, f.id DESC
+        LIMIT 1
+    ) fx ON s.currency <> '{BASE_CURRENCY}'
+    ORDER BY s.board_rank, s.preferred DESC,
+             CASE WHEN s.currency = '{BASE_CURRENCY}' THEN s.net_sort ELSE s.net_sort / fx.rate_per_usd END NULLS LAST,
+             s.net_sort, s.id
     LIMIT 1
 ) r ON true
 ORDER BY a.n
 """  # noqa: S608 — constants only
 
 
-async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> list[dict[str, Any] | None]:
+async def rates_in_force_many(
+    conn: asyncpg.Connection, asks: list[RateAsk], *, board: str | None = None
+) -> list[dict[str, Any] | None]:
     """The rate in force for every ask (same order; None where none), in one query. Duplicate asks are looked up once.
+
+    ``board``: the default board of a room ask that names none (bk-069 T9); when it is None and such an ask exists it
+    is read from the pricing policy (:func:`staff_default_board`, one more query; a B2B caller passes its own).
 
     Each found rate has ``id``, ``unit``, ``net_amount`` (text), ``currency`` (stripped), ``season`` (its label),
     ``contract_id``, ``age_max`` (bk-060, a child or infant band), ``supplier_id`` (the contract's) and ``meal_plan``
@@ -223,6 +260,8 @@ async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> 
     unique = list(dict.fromkeys(asks))
     if not unique:
         return []
+    if board is None and any(a.room_type_id and a.meal_plan is None for a in unique):
+        board = await staff_default_board(conn)
     rows = await conn.fetch(
         RATES_MANY_SQL,
         [a.room_type_id for a in unique],
@@ -232,6 +271,7 @@ async def rates_in_force_many(conn: asyncpg.Connection, asks: list[RateAsk]) -> 
         [a.pax_type for a in unique],
         [a.meal_plan for a in unique],
         [a.supplier_id for a in unique],
+        board,
     )
     found: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -290,11 +330,16 @@ async def default_room_costs(
     nights: int,
     pax: int | None,
     meal_plan: str | None = None,
+    board: str | None = None,
 ) -> list[DefaultCost] | None:
     """AA-1153: the default net of a room item night by night: the first night's rate picks the DMC, every next night
     asks that DMC's rate in force on its own day; one :class:`DefaultCost` per run of nights at one rate. None when a
-    night has no rate (nothing is priced at a guessed net)."""
-    first = await rate_in_force(conn, room_type_id=room_type_id, on=first_day, pax=pax, meal_plan=meal_plan)
+    night has no rate (nothing is priced at a guessed net). ``board`` = the default board (read once here if None)."""
+    if board is None and meal_plan is None:
+        board = await staff_default_board(conn)
+    first = await rate_in_force(
+        conn, room_type_id=room_type_id, on=first_day, pax=pax, meal_plan=meal_plan, board=board
+    )
     if first is None:
         return None
     asks = [
@@ -302,7 +347,7 @@ async def default_room_costs(
         for i in range(1, max(nights, 1))
     ]
     ids = [first["id"]]
-    for found in await rates_in_force_many(conn, asks) if asks else []:
+    for found in await rates_in_force_many(conn, asks, board=board) if asks else []:
         if found is None:
             return None
         ids.append(found["id"])
@@ -336,12 +381,14 @@ async def item_defaults(
     day_from: int,
     day_to: int,
     pax: int | None,
+    board: str | None = None,
 ) -> list[DefaultCost] | None:
     """The default cost rows of a version item (None when no rate is in force): a room night by night
-    (:func:`default_room_costs`), a service from its rate in force on the first day (:func:`default_cost`)."""
+    (:func:`default_room_costs`, ``board`` = the policy's default board, read there when None), a service from its
+    rate in force on the first day (:func:`default_cost`)."""
     if room_type_id:
         nights = quantity("room_night", day_from=day_from, day_to=day_to, pax=pax)
-        return await default_room_costs(conn, room_type_id, first_day=on, nights=nights, pax=pax)
+        return await default_room_costs(conn, room_type_id, first_day=on, nights=nights, pax=pax, board=board)
     rate = await rate_in_force(conn, service_id=service_id, on=on, pax=pax)
     return [default_cost(rate, day_from=day_from, day_to=day_to, pax=pax)] if rate else None
 

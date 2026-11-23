@@ -19,6 +19,8 @@ from app.pricing.policy_params_hotels import JUMP_WARN_PCT
 from app.suppliers import service as suppliers
 from app.supply import rate_checks
 
+SEASONS = "Seasons"  # the workbook sheet names (app.supply.rate_sheet reads them from here)
+CHILDREN = "Hotel children"
 PREVIOUS_SQL = """
 SELECT k.id::text AS id, k.title, k.valid_from, k.valid_to FROM booking.supplier_contracts k
 WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from < $2::date
@@ -102,22 +104,22 @@ async def write_parts(
     children: list[dict[str, Any]],
     ignored: list[str],
 ) -> None:
-    """The contract's seasons and hotel child prices (draft only, bk-069 guard; a refusal names the row)."""
-    try:
-        for s in seasons:
-            await conn.execute(
-                "INSERT INTO booking.supplier_contract_seasons (supplier_contract_id, name, date_from, date_to,"
-                " created_by) VALUES ($1::uuid, $2, $3, $4, $5)",
-                contract_id,
-                s["name"],
-                s["date_from"],
-                s["date_to"],
-                staff.cis_user_id,
-            )
-        for c in children:
-            await conn.execute(
-                "INSERT INTO booking.hotel_child_policies (supplier_contract_id, hotel_id, age_min, age_max, basis,"
-                " meal_plan, net_amount, created_by) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)",
+    """The contract's seasons and hotel child prices (draft only, bk-069 guard; a refusal names its sheet and row)."""
+    for s in seasons:
+        await _insert(
+            conn,
+            "INSERT INTO booking.supplier_contract_seasons (supplier_contract_id, name, date_from, date_to,"
+            " created_by) VALUES ($1::uuid, $2, $3, $4, $5)",
+            (contract_id, s["name"], s["date_from"], s["date_to"], staff.cis_user_id),
+            where=(SEASONS, s.get("row")),
+            ignored=ignored,
+        )
+    for c in children:
+        await _insert(
+            conn,
+            "INSERT INTO booking.hotel_child_policies (supplier_contract_id, hotel_id, age_min, age_max, basis,"
+            " meal_plan, net_amount, created_by) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)",
+            (
                 contract_id,
                 c["hotel_id"],
                 c["age_min"],
@@ -126,20 +128,30 @@ async def write_parts(
                 c["meal_plan"],
                 c["net_amount"],
                 staff.cis_user_id,
-            )
+            ),
+            where=(CHILDREN, c.get("row")),
+            ignored=ignored,
+        )
+
+
+async def _insert(
+    conn: asyncpg.Connection,
+    sql: str,
+    args: tuple[Any, ...],
+    *,
+    where: tuple[str, int | None],
+    ignored: list[str],
+) -> None:
+    """One season or child price row; a refusal of the database is 422 naming the sheet and row it came from."""
+    try:
+        await conn.execute(sql, *args)
     except (asyncpg.CheckViolationError, asyncpg.UniqueViolationError) as exc:
+        why = str(exc).splitlines()[0]
+        sheet, row = where
         raise Invalid(
             "rate_sheet_invalid",
-            f"a season or child price was refused: {str(exc).splitlines()[0]}; nothing was imported",
-            errors=[
-                {
-                    "sheet": "Seasons",
-                    "row": None,
-                    "column": None,
-                    "code": "invalid_value",
-                    "message": str(exc).splitlines()[0],
-                }
-            ],  # fmt: skip
+            f"{sheet} row {row}: refused ({why}); nothing was imported",
+            errors=[{"sheet": sheet, "row": row, "column": None, "code": "invalid_value", "message": why}],
             ignored_sheets=ignored,
         ) from None
 

@@ -8,7 +8,9 @@
   hold); the hotel's preferred DMC wins when one is set;
 - the booking goes to the DMC of the price used; its hotel confirmation number is kept next to the DMC's ref;
 - a duplicate hotel is refused (409 with the candidate), a near one asks for a reason;
-- an import whose prices jump against the DMC's previous contract is flagged and its publisher must acknowledge.
+- an import whose prices jump against the DMC's previous contract is flagged and its publisher must acknowledge;
+- (review fixes) a room line keeps one DMC for all its nights even when another DMC is cheaper on a later night, and
+  DMCs in different currencies are compared in USD at the approved FX rate.
 
 Reuses the AA-973 fixtures (``admin``, ``client``, ``plan``). All names are invented."""
 
@@ -177,7 +179,9 @@ async def test_done_when_two_dmcs_net_from_commission_hb_quote_and_booking_to_th
     )
     assert row["net_cost_usd"] == Decimal("213.0000")  # 3 x 56 + 3 x 15
     note = json.loads(row["note"])
-    assert note["board"] == {"meal_plan": "HB"} and note["child_room"] == {"children": 1, "priced": 1, "unpriced": 0}
+    # The double (max 2) is full: the child is on an extra bed; Harbour gives a sharing price only, which is taken.
+    assert note["board"] == {"meal_plan": "HB"}
+    assert note["child_room"] == {"children": 1, "priced": 1, "unpriced": 0, "extra_bed": 1}
     harbour_hb = await admin.fetchval(
         "SELECT id::text FROM booking.supplier_rates WHERE supplier_contract_id = $1::uuid AND meal_plan = 'HB'", k
     )
@@ -310,3 +314,69 @@ async def test_a_price_jump_is_flagged_and_acknowledged_by_the_publisher(
     )
     bad = await c.post(f"/suppliers/{lodge['b']}/rate-sheets", json=_upload(overlap, "bad.xlsx"), headers=maker)
     assert bad.status_code == 422 and "season_overlap" in {e["code"] for e in bad.json()["errors"]}, bad.text
+
+
+async def _second_dmc(admin: asyncpg.Connection, lodge: dict[str, str], *, currency: str, net: int, start: Any) -> str:
+    """Harbour DMC linked to the lodge with a published BB contract in ``currency`` from ``start``."""
+    await admin.execute(
+        "INSERT INTO booking.hotel_supplier_links (hotel_id, supplier_id, created_by) VALUES ($1::uuid, $2::uuid, $3)"
+        " ON CONFLICT DO NOTHING",
+        lodge["hotel"],
+        lodge["b"],
+        MAKER,
+    )
+    k = await _insert(admin, "supplier_contracts", supplier_id=lodge["b"], title=f"Harbour {currency}",
+                      valid_from=VALID_FROM, valid_to=VALID_TO, currency=currency, created_by=MAKER)  # fmt: skip
+    rate = await _insert(admin, "supplier_rates", supplier_contract_id=k, valid_from=start, valid_to=VALID_TO,
+                         hotel_room_type_id=lodge["room"], unit="room_night", meal_plan="BB", net_amount=net,
+                         currency=currency, created_by=MAKER)  # fmt: skip
+    await admin.execute(PUBLISH, k, CHECKER)
+    return rate
+
+
+async def test_a_room_line_keeps_the_dmc_of_its_first_night(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    lodge: dict[str, str],
+) -> None:
+    c, _, m2m, _ = client
+    # Harbour sells the BB double at 40 from night 2 only; Lantern sells it at 50 every night.
+    harbour = await _second_dmc(admin, lodge, currency="USD", net=40, start=DAY1_DATE + timedelta(days=1))
+    line = {"line_ref": "r", "component_id": f"rt:{lodge['room']}", "service_date": DAY1, "nights": 3,
+            "pax": {"adult": 2}}  # fmt: skip
+    body = {"proposal_ref": "LOTUS-DMC", "proposal_version": 1, "currency": "USD", "lines": [line]}
+    quote = await _ok(await c.post("/b2b/v1/quotes", json=body, headers=_m2m(m2m)), 201)
+    row = await admin.fetchrow(
+        "SELECT net_cost_usd, supplier_rate_ids::text[] AS rate_ids FROM booking.b2b_quote_lines"
+        " WHERE quote_id = $1::uuid",
+        quote["quote_id"],
+    )
+    assert row["net_cost_usd"] == Decimal("150.0000")  # 3 x 50 from Lantern, never 50 + 40 + 40 across two DMCs
+    assert harbour not in row["rate_ids"]
+    owners = await admin.fetch(
+        "SELECT DISTINCT k.supplier_id::text AS s FROM booking.supplier_rates x"
+        " JOIN booking.supplier_contracts k ON k.id = x.supplier_contract_id WHERE x.id = ANY($1::uuid[])",
+        row["rate_ids"],
+    )
+    assert [r["s"] for r in owners] == [lodge["a"]]
+
+
+async def test_dmcs_in_different_currencies_are_compared_in_usd(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    lodge: dict[str, str],
+) -> None:
+    c, _, m2m, _ = client
+    # Harbour: 1,000,000 VND = 40 USD at the approved 25,000 VND/USD of the plan fixture; Lantern: 50 USD. A raw
+    # compare of the two nets would take Lantern's 50.
+    harbour = await _second_dmc(admin, lodge, currency="VND", net=1_000_000, start=VALID_FROM)
+    line = {"line_ref": "r", "component_id": f"rt:{lodge['room']}", "service_date": DAY1, "nights": 1,
+            "pax": {"adult": 2}}  # fmt: skip
+    body = {"proposal_ref": "LOTUS-FX", "proposal_version": 1, "currency": "USD", "lines": [line]}
+    quote = await _ok(await c.post("/b2b/v1/quotes", json=body, headers=_m2m(m2m)), 201)
+    row = await admin.fetchrow(
+        "SELECT net_cost_usd, supplier_rate_ids::text[] AS rate_ids FROM booking.b2b_quote_lines"
+        " WHERE quote_id = $1::uuid",
+        quote["quote_id"],
+    )
+    assert row["rate_ids"] == [harbour] and row["net_cost_usd"] == Decimal("40.0000")

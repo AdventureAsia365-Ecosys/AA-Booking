@@ -99,25 +99,33 @@ def board_order(rates: Iterable[Mapping[str, Any]], names: Mapping[str, str]) ->
 def season_findings(
     seasons: Sequence[Mapping[str, Any]], valid_from: date | None, valid_to: date | None
 ) -> list[dict[str, Any]]:
-    """Overlaps between different seasons (errors) and contract days no season covers (warnings)."""
+    """Overlaps between different seasons (errors) and contract days no season covers (warnings).
+
+    One sweep over the ranges by start day (AA-1153 review: never a pairwise comparison of every range): each range is
+    checked against the furthest-reaching earlier range of every other season, so it gets at most one overlap error."""
     if not seasons:
         return []
     out: list[dict[str, Any]] = []
     ranges = sorted(seasons, key=lambda s: (s["date_from"], s["date_to"]))
-    for i, a in enumerate(ranges):
-        for b in ranges[i + 1 :]:
-            if b["date_from"] > a["date_to"]:
-                break
-            if a["name"].strip().lower() != b["name"].strip().lower():
-                out.append(
-                    {
-                        "code": "season_overlap",
-                        "severity": "error",
-                        "message": f"{a['name']} ({a['date_from']} to {a['date_to']}) and {b['name']} ({b['date_from']}"
-                        f" to {b['date_to']}) share {max(a['date_from'], b['date_from'])}",
-                        **_where(b),
-                    }
-                )
+    reach: dict[str, Mapping[str, Any]] = {}  # per season name, its earlier range that ends last
+    for b in ranges:
+        name = b["name"].strip().lower()
+        a = next(
+            (r for n, r in reach.items() if n != name and r["date_to"] >= b["date_from"]),
+            None,
+        )
+        if a is not None:
+            out.append(
+                {
+                    "code": "season_overlap",
+                    "severity": "error",
+                    "message": f"{a['name']} ({a['date_from']} to {a['date_to']}) and {b['name']} ({b['date_from']}"
+                    f" to {b['date_to']}) share {max(a['date_from'], b['date_from'])}",
+                    **_where(b),
+                }
+            )
+        if name not in reach or b["date_to"] > reach[name]["date_to"]:
+            reach[name] = b
     start = valid_from or ranges[0]["date_from"]
     end = valid_to or max(r["date_to"] for r in ranges)
     cursor = start

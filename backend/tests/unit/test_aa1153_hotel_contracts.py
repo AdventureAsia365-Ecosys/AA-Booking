@@ -5,7 +5,8 @@ PostgreSQL in ``tests/integration/test_aa1153_hotel_contracts.py``. All names ar
 
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, timedelta
 from decimal import Decimal as D
 from typing import Any
 
@@ -13,10 +14,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.b2b import components, quotes
+from app.b2b.errors import B2BError
 from app.errors import Invalid
 from app.pricing import policy_guides, policy_params, policy_params_hotels
 from app.routers.b2b import QuoteLineRequest
-from app.supply import hotel_master, rate_checks, rate_sheet
+from app.supply import hotel_master, rate_checks, rate_review, rate_sheet, rates
 from tests.unit.fakes import POLICY_SEED, ScriptedConn
 
 LIMITS = {
@@ -205,7 +207,9 @@ async def test_a_room_line_asks_its_board_and_charges_the_child_the_room_does_no
     ask = _ask(nights=3, child=1, child_ages=(7,), meal_plan="HB", rooms=(components.RoomAsk("double", 1),))
     [cost] = await components.price_lines(conn, [ask])
     assert sum(a for a, _ in cost.costs) == D("213.00")  # 3 x 56 + 3 x 15
-    assert cost.child_room == {"children": 1, "priced": 1, "unpriced": 0}
+    # A double with max_occupancy 2 has no free place: the child is on an extra bed (no extra-bed price here: the
+    # sharing price is taken).
+    assert cost.child_room == {"children": 1, "priced": 1, "unpriced": 0, "extra_bed": 1}
     assert cost.board == {"meal_plan": "HB"}
     [args] = conn.sql("WITH ORDINALITY")
     assert set(args[5]) == {"HB"}  # every night asks the line's board
@@ -279,13 +283,184 @@ def test_a_season_row_becomes_one_rate_per_range_and_children_are_read() -> None
 # ── Policy parameters ────────────────────────────────────────────────────────
 
 
-def test_the_six_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
+def test_the_seven_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
     keys = {s["key"] for s in policy_params_hotels.SPECS}
     assert keys == {*policy_params_hotels.MATCH_KEYS, policy_params_hotels.FACTS_RECONFIRM_DAYS,
-                    policy_params_hotels.JUMP_WARN_PCT}  # fmt: skip
-    for key in keys:
+                    policy_params_hotels.JUMP_WARN_PCT, policy_params_hotels.DEFAULT_BOARD}  # fmt: skip
+    board = policy_params.PARAMS[policy_params_hotels.DEFAULT_BOARD]
+    assert (board.section, board.group, board.type, board.used_by) == ("hotels", "pricing", "code", "app.supply.rates")
+    assert board.choices == policy_params_hotels.BOARDS == rates.MEAL_PLANS
+    assert policy_params.normalise(board.key, "HB") == "HB"
+    for bad in ("XX", ["BB"], None, "bb"):
+        with pytest.raises(policy_params.PolicyValueError):
+            policy_params.normalise(board.key, bad)
+    assert policy_guides.guide(board.key) is not None and json.loads(POLICY_SEED[board.key]) == "BB"
+    for key in keys - {board.key}:
         param = policy_params.PARAMS[key]
         assert (param.section, param.group, param.type) == ("hotels", "pricing", "integer")
         assert policy_guides.guide(key) is not None and key in POLICY_SEED
         policy_params.normalise(key, int(POLICY_SEED[key]))  # the seeded value is inside the range
     assert "hotels" in policy_params.SECTIONS
+
+
+# ── Review fixes: child basis, one DMC per room, the policy board, bounded sheets ───────────────────────────────
+
+
+def test_child_policy_takes_the_basis_first_then_the_other_basis() -> None:
+    rows = [
+        {"meal_plan": None, "basis": "sharing", "age_min": 6, "age_max": 11, "net_amount": "10"},
+        {"meal_plan": None, "basis": "extra_bed", "age_min": 6, "age_max": 11, "net_amount": "25"},
+        {"meal_plan": None, "basis": "extra_bed", "age_min": 12, "age_max": 17, "net_amount": "30"},
+    ]
+    assert components.child_policy(rows, 7, None, "sharing")["net_amount"] == "10"
+    assert components.child_policy(rows, 7, "HB", "extra_bed")["net_amount"] == "25"
+    assert components.child_policy(rows, 14, None, "sharing")["net_amount"] == "30"  # no sharing band: extra bed
+    assert components.child_policy(rows, None, None, "extra_bed")["age_max"] == 17
+
+
+def test_children_share_the_free_places_and_the_oldest_take_extra_beds() -> None:
+    assert components.child_bases(0, [(2, 1)], 3) == ()
+    assert components.child_bases(2, [(2, 1)], 3) == ("extra_bed", "sharing")
+    assert components.child_bases(2, [(2, 2)], 3) == ("sharing", "sharing")
+    assert components.child_bases(1, [(2, 1)], 2) == ("extra_bed",)
+    assert components.child_bases(2, [(2, 1)], None) == ("sharing", "sharing")  # no maximum known
+
+
+def _two_dmc_conn(*, pinned_has_rate: bool = True) -> ScriptedConn:
+    """Night 1 is cheapest at DMC A (60), night 2 at DMC B (40); A sells night 2 at 65 when asked pinned."""
+
+    def answer(*args: Any) -> list[dict[str, Any]]:
+        out = []
+        for n, (on, supplier) in enumerate(zip(args[2], args[6], strict=True), start=1):
+            if supplier == "sup-a":
+                if pinned_has_rate:
+                    out.append({"n": n, "id": "r-a2", "unit": "room_night", "net_amount": "65.00", "currency": "USD",
+                                "season": None, "contract_id": "k-a", "age_max": None, "supplier_id": "sup-a",
+                                "meal_plan": "BB"})  # fmt: skip
+                continue
+            first = on == DAY
+            out.append({"n": n, "id": "r-a1" if first else "r-b2", "unit": "room_night",
+                        "net_amount": "60.00" if first else "40.00", "currency": "USD", "season": None,
+                        "contract_id": "k-a" if first else "k-b", "age_max": None,
+                        "supplier_id": "sup-a" if first else "sup-b", "meal_plan": "BB"})  # fmt: skip
+        return out
+
+    conn = _room_conn("BB", policy=[])
+    conn.on("WITH ORDINALITY", answer)
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_a_room_line_keeps_the_dmc_of_its_first_night() -> None:
+    conn = _two_dmc_conn()
+    [cost] = await components.price_lines(conn, [_ask(nights=2)], default_board="BB")
+    assert cost.rate_ids == ["r-a1", "r-a2"]  # never DMC B's 40 on night 2
+    assert sum(a for a, _ in cost.costs) == D("125.00")
+    first, again = conn.sql("WITH ORDINALITY")
+    assert list(again[6]) == ["sup-a"] and list(again[2]) == [DAY + timedelta(days=1)]
+    with pytest.raises(B2BError, match="from the DMC that prices the first night"):
+        await components.price_lines(_two_dmc_conn(pinned_has_rate=False), [_ask(nights=2)], default_board="BB")
+
+
+@pytest.mark.asyncio
+async def test_the_default_board_comes_from_the_policy_unless_the_quote_passes_it() -> None:
+    conn = _room_conn("BB", policy=[])
+    await components.price_lines(conn, [_ask()])
+    [args] = conn.sql("WITH ORDINALITY")
+    assert args[7] == "BB"  # the seeded hotel_default_board
+    conn = _room_conn("HB", policy=[])
+    await components.price_lines(conn, [_ask()], default_board="HB")
+    [args] = conn.sql("WITH ORDINALITY")
+    assert args[7] == "HB" and set(args[5]) == {None}  # the line asks nothing; the default board ranks first
+
+
+def test_rate_choice_sorts_across_dmcs_in_usd() -> None:
+    sql = " ".join(rates.RATES_MANY_SQL.split())
+    assert "FROM booking.fx_rates f JOIN booking.policy_approvals p" in sql
+    assert "s.net_sort / fx.rate_per_usd END NULLS LAST" in sql
+    assert "'BB'" not in sql and "coalesce(a.meal_plan, $8::text)" in sql
+
+
+def test_seasons_and_child_rows_count_against_the_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 4)
+    contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
+    rate = [("HB-LOTUS", "Deluxe", None, "2027-01-01", "2027-12-31", "BB", None, None, "50", None)]
+    seasons = [(f"S{i}", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 6)]
+    with pytest.raises(Invalid) as err:
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, season_rows=seasons))
+    assert err.value.code == "rate_sheet_too_many_rows"
+    children = [("HB-LOTUS", i, i, "sharing", None, "5") for i in range(5)]
+    with pytest.raises(Invalid) as err:
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children))
+    assert err.value.code == "rate_sheet_too_many_rows"
+
+
+def test_a_season_label_expanded_past_the_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 6)
+    contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
+    rows = [("HB-LOTUS", "Deluxe", "High", None, None, "BB", None, None, "50", None)] * 2
+    seasons = [("High", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 4)]  # 2 rows x 3 ranges = 6: fine
+    assert len(rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons)).rows) == 6
+    seasons.append(("High", "2027-05-01", "2027-05-02"))  # 2 x 4 = 8 > 6 (and 2 + 4 rows read is within 6)
+    with pytest.raises(Invalid) as err:
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons))
+    assert err.value.code == "rate_sheet_too_many_rows"
+
+
+def test_a_child_price_twice_for_one_basis_is_a_row_problem_both_bases_are_fine() -> None:
+    contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
+    rate = [("HB-LOTUS", "Deluxe", None, "2027-01-01", "2027-12-31", "BB", None, None, "50", None)]
+    children = [
+        ("HB-LOTUS", 6, 11, "sharing", None, "10"),
+        ("HB-LOTUS", 6, 11, "extra bed", None, "25"),
+        ("HB-LOTUS", 6, 11, "extra bed", None, "30"),
+    ]
+    sheet = rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children))
+    assert [(c["basis"], c["net_amount"]) for c in sheet.children] == [("sharing", D("10")), ("extra_bed", D("25"))]
+    assert [(p.sheet, p.row, p.code) for p in sheet.problems] == [("Hotel children", 4, "duplicate_child_price")]
+
+
+def test_overlapping_seasons_are_found_in_one_sweep() -> None:
+    def season(name: str, start: date, days: int, row: int) -> dict[str, Any]:
+        return {
+            "name": name,
+            "date_from": start,
+            "date_to": start + timedelta(days=days),
+            "sheet": "Seasons",
+            "row": row,
+        }
+
+    found = rate_checks.season_findings(
+        [
+            season("Low", date(2027, 1, 1), 30, 2),
+            season("High", date(2027, 1, 20), 30, 3),
+            season("Low", date(2027, 1, 25), 3, 4),
+        ],  # fmt: skip
+        date(2027, 1, 1),
+        date(2027, 2, 19),
+    )
+    assert [(f["code"], f.get("row")) for f in found] == [("season_overlap", 3), ("season_overlap", 4)]
+    many = [season(f"S{i}", date(2027, 1, 1), 300, i) for i in range(1500)]  # all overlap: one error each, fast
+    assert sum(f["code"] == "season_overlap" for f in rate_checks.season_findings(many, None, None)) == 1499
+
+
+@pytest.mark.asyncio
+async def test_a_refused_child_price_names_its_sheet_and_row() -> None:
+    import asyncpg
+
+    conn = ScriptedConn().on("INSERT INTO booking.hotel_child_policies", asyncpg.UniqueViolationError("duplicate"))
+    staff = type("S", (), {"cis_user_id": "it-1153"})()
+    child = {"hotel_id": "h-1", "age_min": 6, "age_max": 11, "basis": "sharing", "meal_plan": None,
+             "net_amount": D("10"), "row": 7}  # fmt: skip
+    with pytest.raises(Invalid) as err:
+        await rate_review.write_parts(conn, staff, "k-1", [], [child], [])  # type: ignore[arg-type]
+    assert err.value.extra["errors"][0] | {"message": ""} == {
+        "sheet": "Hotel children", "row": 7, "column": None, "code": "invalid_value", "message": ""}  # fmt: skip
+
+
+def test_a_workbook_too_large_once_unpacked_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = rate_sheet.build_workbook()
+    monkeypatch.setattr(rate_sheet, "MAX_UNPACKED_BYTES", 1024)
+    with pytest.raises(Invalid) as err:
+        rate_sheet.parse(data)
+    assert err.value.code == "rate_sheet_too_large"

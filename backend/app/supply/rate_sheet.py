@@ -40,9 +40,11 @@ a rate sheet only prices them. Every problem is reported per sheet, row and colu
 written** while one is left; ``dry_run`` validates and previews without writing, and adds the sheet's ``impact``
 (``app.catalog.price_readiness.impact``: the trip plans whose components use the sheet's items, whether each would
 have a rate for every component once the draft is published, and how many would move to priced; a read only).
-Bounded: at most :data:`MAX_BYTES` and :data:`MAX_ROWS` rows. The workbook is read with openpyxl in read-only,
-values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content type and openpyxl never
-executes VBA).
+Bounded: at most :data:`MAX_BYTES` (and :data:`MAX_UNPACKED_BYTES` once unzipped) and :data:`MAX_ROWS` rows, counted
+over the rate sheets, ``Seasons`` and ``Hotel children`` together and again after a season label is expanded into its
+ranges (422 ``rate_sheet_too_many_rows``; AA-1153 review: one upload must not hold the API worker). The workbook is read
+with openpyxl in read-only, values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content
+type and openpyxl never executes VBA).
 """
 
 from __future__ import annotations
@@ -68,10 +70,11 @@ from app.supply import rate_checks, rate_review, rate_sheet_match, rates
 
 MAX_BYTES = 2 * 1024 * 1024
 MAX_ROWS = 2000
+MAX_UNPACKED_BYTES = 40 * 1024 * 1024  # technical-constant: zip bomb guard (a 2 MB sheet of 2000 rows unzips far below)
 CONTRACT_SHEET = "Contract"
 HOTEL_SHEET = "Hotel"
-SEASONS_SHEET = "Seasons"
-CHILDREN_SHEET = "Hotel children"
+SEASONS_SHEET = rate_review.SEASONS
+CHILDREN_SHEET = rate_review.CHILDREN
 SEASON_COLUMNS = ("Season", "From", "To")
 CHILDREN_COLUMNS = ("Hotel code", "Age min", "Age max", "Basis", "Meal plan", "Net")
 BASES = {"sharing": "sharing", "extra bed": "extra_bed", "extra_bed": "extra_bed"}
@@ -256,6 +259,13 @@ def _open(data: bytes) -> Any:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise Invalid("rate_sheet_not_xlsx", "the file is not an .xlsx workbook")
     try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            unpacked = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile:
+        raise Invalid("rate_sheet_not_xlsx", "the file is not an .xlsx workbook") from None
+    if unpacked > MAX_UNPACKED_BYTES:
+        raise Invalid("rate_sheet_too_large", "the rate sheet is too large once unpacked; split it into several sheets")
+    try:
         return load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception:  # noqa: BLE001 — any parse error of an untrusted file is a 422, never a 500
         raise Invalid("rate_sheet_not_xlsx", "the file could not be read as an .xlsx workbook") from None
@@ -295,6 +305,13 @@ def _applies(label: str, sheet: str) -> bool:
     return sheet != HOTEL_SHEET or label not in ("Pax type", "Age min", "Age max")
 
 
+def _take(budget: list[int], n: int = 1) -> None:
+    """Count ``n`` rows against the workbook's :data:`MAX_ROWS` (rate rows, seasons, child prices, expanded rates)."""
+    budget[0] += n
+    if budget[0] > MAX_ROWS:
+        raise Invalid("rate_sheet_too_many_rows", f"a rate sheet has at most {MAX_ROWS} rows")
+
+
 def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> list[RateRow]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
@@ -317,9 +334,7 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
     for n, row in enumerate(rows, start=2):
         if row is None or all(v is None or str(v).strip() == "" for v in row):
             continue
-        budget[0] += 1
-        if budget[0] > MAX_ROWS:
-            raise Invalid("rate_sheet_too_many_rows", f"a rate sheet has at most {MAX_ROWS} rate rows")
+        _take(budget)
         rate = RateRow(sheet=sheet, row=n)
         if sheet == HOTEL_SHEET:
             rate.hotel_code = (_text(cell(row, "Hotel code")) or "").upper() or None
@@ -419,9 +434,9 @@ def parse(data: bytes) -> Sheet:
             elif key == _key(HOTEL_SHEET):
                 rows += _rows(ws, HOTEL_SHEET, problems, budget)
             elif key == _key(SEASONS_SHEET):
-                seasons = _seasons(ws, problems)
+                seasons = _seasons(ws, problems, budget)
             elif key == _key(CHILDREN_SHEET):
-                children = _children(ws, problems)
+                children = _children(ws, problems, budget)
             elif sheet := next((s for s in SERVICE_SHEETS if _key(s) == key), None):
                 rows += _rows(ws, sheet, problems, budget)
             else:
@@ -434,8 +449,11 @@ def parse(data: bytes) -> Sheet:
     return Sheet(contract, rows, problems, ignored, seasons, children)
 
 
-def _table(ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem]) -> list[tuple[int, dict[str, Any]]]:
-    """The rows of a small sheet as ``(row number, {column: raw value})``; every column is required."""
+def _table(
+    ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem], budget: list[int]
+) -> list[tuple[int, dict[str, Any]]]:
+    """The rows of a small sheet as ``(row number, {column: raw value})``; every column is required. Each row counts
+    against the workbook's :data:`MAX_ROWS`."""
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
     if header is None:
@@ -451,13 +469,15 @@ def _table(ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem
     for n, row in enumerate(rows, start=2):
         if row is None or all(v is None or str(v).strip() == "" for v in row):
             continue
+        _take(budget)
         out.append((n, {c: row[index[_key(c)]] if index[_key(c)] < len(row) else None for c in columns}))
     return out
 
 
-def _seasons(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
+def _seasons(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
     out = []
-    for n, cells in _table(ws, SEASONS_SHEET, SEASON_COLUMNS, problems):
+    seen: set[tuple[str, date]] = set()
+    for n, cells in _table(ws, SEASONS_SHEET, SEASON_COLUMNS, problems, budget):
         try:
             name, start, end = _text(cells["Season"]), _date(cells["From"]), _date(cells["To"])
         except ValueError as exc:
@@ -468,13 +488,18 @@ def _seasons(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
                 Problem(SEASONS_SHEET, n, None, "invalid_season", "a season has a name (1-80) and From <= To")
             )
             continue
+        if (_key(name), start) in seen:  # the bk-069 key (contract, name, start): one row per range
+            problems.append(Problem(SEASONS_SHEET, n, None, "duplicate_season", f"{name} from {start} is listed twice"))
+            continue
+        seen.add((_key(name), start))
         out.append({"name": name, "date_from": start, "date_to": end, "sheet": SEASONS_SHEET, "row": n})
     return out
 
 
-def _children(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
+def _children(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
     out = []
-    for n, cells in _table(ws, CHILDREN_SHEET, CHILDREN_COLUMNS, problems):
+    seen: set[tuple[str, str | None, str, int]] = set()
+    for n, cells in _table(ws, CHILDREN_SHEET, CHILDREN_COLUMNS, problems, budget):
         try:
             age_min, age_max = _age(cells["Age min"]), _age(cells["Age max"])
             net = _amount(cells["Net"])
@@ -498,6 +523,12 @@ def _children(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
         if board is not None and board not in rates.MEAL_PLANS:
             problems.append(Problem(CHILDREN_SHEET, n, "Meal plan", "unknown_meal_plan", "RO, BB, HB, FB or AI"))
             continue
+        key = (code, board, basis, age_min)  # the bk-069 key: one price per hotel, board, basis and band start
+        if key in seen:
+            why = "this hotel, meal plan, basis and age min already have a child price"
+            problems.append(Problem(CHILDREN_SHEET, n, None, "duplicate_child_price", why))
+            continue
+        seen.add(key)
         out.append(
             {
                 "hotel_code": code,
@@ -513,7 +544,8 @@ def _children(ws: Any, problems: list[Problem]) -> list[dict[str, Any]]:
 
 
 def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems: list[Problem]) -> list[RateRow]:
-    """A rate row naming a season of the Seasons sheet, with no dates, becomes one rate per range of that season."""
+    """A rate row naming a season of the Seasons sheet, with no dates, becomes one rate per range of that season (at
+    most :data:`MAX_ROWS` rates once expanded: 422 ``rate_sheet_too_many_rows`` as soon as the list passes it)."""
     if not seasons:
         return rows
     by_name: dict[str, list[dict[str, Any]]] = {}
@@ -531,6 +563,11 @@ def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems
                 Problem(rate.sheet, rate.row, "Season", "unknown_season", f"'{name}' is not on the Seasons sheet")
             )
             continue
+        if len(out) + len(ranges) > MAX_ROWS:
+            raise Invalid(
+                "rate_sheet_too_many_rows",
+                f"a rate sheet has at most {MAX_ROWS} rates once its seasons are expanded into their date ranges",
+            )
         for r in ranges:
             values = {**rate.values, "season": r["name"], "valid_from": r["date_from"], "valid_to": r["date_to"]}
             out.append(RateRow(rate.sheet, rate.row, rate.hotel_code, rate.room_type, rate.service_code, values))

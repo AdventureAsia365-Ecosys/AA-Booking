@@ -278,14 +278,24 @@ async def _supply_defaults(
     start, pax = case.get("start_date"), case.get("pax")
     out: list[tuple[int, Item]] = []
     report: list[dict[str, Any]] = []
+    board: str | None = None  # bk-069 (T9): the policy's default board, read once for the first room item
     for pos, it in positioned:
         old = stored.get(it.id or "")
         old_ref = (old.get("hotel_room_type_id"), old.get("service_id")) if old else (None, None)
         books = it.hotel_room_type_id or it.service_id
         if books and it.costs is None and (it.supply != old_ref or not (old and old["costs"])):
             day = start + timedelta(days=it.day_from - 1) if start else datetime.now(UTC).date()
+            if it.hotel_room_type_id and board is None:
+                board = await supply_rates.staff_default_board(conn)
             runs = await supply_rates.item_defaults(  # AA-1153: a room night by night, with the first night's DMC
-                conn, it.hotel_room_type_id, it.service_id, on=day, day_from=it.day_from, day_to=it.day_to, pax=pax
+                conn,
+                it.hotel_room_type_id,
+                it.service_id,
+                on=day,
+                day_from=it.day_from,
+                day_to=it.day_to,
+                pax=pax,
+                board=board,
             )
             if runs:
                 it = replace(it, costs=tuple(Cost(d.net_amount, d.net_currency, d.supplier_note, d.supplier_rate_id)

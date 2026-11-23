@@ -1557,23 +1557,32 @@ two-way round trip (facts and room-type sheets, export).
 - **Rates**: a room rate is written (and counted) under a contract whose supplier has an **active link** to the hotel
   (the bk-069 guards `supplier_rate_guard` / `supply_restriction_guard`, `rates.create_rate`, `restrictions`). One rate
   choice for every caller (`rates.RATES_MANY_SQL`): per supplier as before (newest validity, pax band, lowest net)
-  with the asked board first; across suppliers the asked board, the preferred DMC, then the lowest net. Each found rate
-  names its `supplier_id`.
-- **Board basis** (T9): a lookup asks a board or none (= BB first, then a rate without a board, then any other board).
-  The board comes from the quote line (`booking.b2b.v1` 1.10 `meal_plan`), else the tour night
-  (`trip_plan_components.meal_plan`, set with the components), else BB; the cost sheet reads the tour night's board.
+  with the asked board first; across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
+  net at the approved FX rate in force on the night, `booking.fx_rates`; a currency without one sorts last). Each found
+  rate names its `supplier_id`. **One DMC per room**: every night and occupancy of one room type on one B2B line (and
+  every night of a version item) is priced by the DMC of the first night; a unit another DMC was cheaper for is asked
+  again pinned to it, and a unit that DMC cannot price refuses the line (never two DMCs' nets on one booking).
+- **Board basis** (T9): a lookup asks a board or none (= the pricing policy's default board `hotel_default_board`,
+  seeded BB, first; then a rate without a board, then any other board). The board comes from the quote line
+  (`booking.b2b.v1` 1.10 `meal_plan`), else the tour night (`trip_plan_components.meal_plan`, set with the components),
+  else the policy default (Pricing > Policy, section hotels; the quote reads it on its day, staff paths today); the cost
+  sheet reads the tour night's board.
   A night on HB / FB / AI whose day also holds a `meal` service (a tour component of that day, or another `sv:` meal
   line of the quote) gets `price_note.board.warnings` `double_dinner` (a warning; the price is the rates').
 - **Hotel child prices** (`booking.hotel_child_policies`, per contract and hotel: age band, sharing / extra bed,
-  optional board, net per night): a room line charges them for the children its room mix does not hold (rooms given
-  explicitly; the oldest children first by `child_ages`, an unknown age by the band reaching the oldest age; exact board
-  first). None found = no extra, `price_note.child_room` says so.
+  optional board, net per night; one row per contract, hotel, board, basis and band start): a room line charges them for
+  the children its room mix does not hold (rooms given explicitly; the oldest children first by `child_ages`, an
+  unknown age by the band reaching the oldest age; exact board first). Basis: `sharing` while the rooms' free places
+  (`max_occupancy` less the occupancy) hold the child, `extra_bed` beyond them (the oldest first), the other basis
+  only when the DMC gives none on it. None found = no extra, `price_note.child_room` says so (with `extra_bed`, the
+  children counted on an extra bed).
 - **The booking goes to the DMC of the price used**: a quote part stores its rate's supplier; Generate takes a version
   item's supplier from its first cost row's rate, else the B2B quote line's first rate, else the hotel's / service's.
   `supplier_bookings.hotel_confirmation_ref`: the hotel's own number the DMC passes on (confirm body or PATCH, while
   live; rooms only on confirm).
 - **DMC rate sheets** (`app/supply/rate_sheet.py`, `rate_sheet_match.py`, `rate_checks.py`, `rate_review.py`): hotels
-  matched by the DMC's code first, room types by name then alias; optional `Seasons` (a season row with no dates becomes one rate per range,
+  matched by the DMC's code first, room types by name then alias; at most 2000 rows over the rate, `Seasons` and
+  `Hotel children` sheets and again after the season expansion, 40 MB unpacked; optional `Seasons` (a season row with no dates becomes one rate per range,
   `booking.supplier_contract_seasons`) and `Hotel children` sheets; B7 `Published` + `Commission %` give the net. Checks:
   `season_overlap` (error: nothing imported), `season_gap`, `board_order` (HB below BB), `price_jump` (>=
   `rate_sheet_jump_warn_pct` against the supplier's previous contract) as warnings; the dry run shows them with the

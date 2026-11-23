@@ -125,4 +125,27 @@ HOTELS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu 60 %.",
         ),
     ),
+    "hotel_default_board": _g(
+        (
+            "The board (room only, breakfast, half board, full board or all inclusive) a hotel night is priced on "
+            "when neither the quote line nor the tour night names one. A DMC rate on exactly this board is taken "
+            "first, then a rate with no board, then a rate on another board.",
+            "A richer board (HB, FB, AI) by default: quotes include more meals and cost more unless a line asks less.",
+            "A lighter board (RO) by default: quotes are cheaper and travellers buy their breakfast unless a line asks "
+            "more.",
+            "Change it when a market or product line is sold on another board by default; a line or a tour night "
+            "that names its board is never changed by it.",
+            "Starting value BB (bed and breakfast).",
+        ),
+        (
+            "Chế độ ăn (chỉ phòng, ăn sáng, nửa trọn gói, trọn gói hay bao gồm tất cả) dùng để tính giá một đêm khách "
+            "sạn khi cả dòng báo giá lẫn đêm của tour đều không ghi. Giá của nhà cung cấp đúng chế độ này được lấy "
+            "trước, rồi giá không ghi chế độ ăn, rồi giá chế độ khác.",
+            "Chế độ nhiều bữa hơn (HB, FB, AI) mặc định: báo giá gồm nhiều bữa và đắt hơn, trừ khi dòng hỏi ít hơn.",
+            "Chế độ ít bữa hơn (RO) mặc định: báo giá rẻ hơn và khách tự mua bữa sáng, trừ khi dòng hỏi nhiều hơn.",
+            "Đổi khi một thị trường hay dòng sản phẩm bán mặc định theo chế độ khác; dòng hay đêm tour đã ghi "
+            "chế độ ăn thì không bị ảnh hưởng.",
+            "Giá trị ban đầu BB (phòng kèm ăn sáng).",
+        ),
+    ),
 }

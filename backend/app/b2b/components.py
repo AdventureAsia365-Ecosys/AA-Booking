@@ -21,15 +21,21 @@ Net cost = the supplier rate in force (bk-010: published contract, both validiti
   ``day`` service = one day.
 
 **Board basis and several DMCs** (AA-1153, bk-069, :mod:`app.supply.rates`): a room night asks the line's board
-(``LineAsk.meal_plan``), else the tour night's (``trip_plan_components.meal_plan``), else the default BB; when several
-DMCs sell the hotel the rate choice takes the asked board, the preferred DMC, then the lowest net, and a tour part
+(``LineAsk.meal_plan``), else the tour night's (``trip_plan_components.meal_plan``), else the pricing policy's default
+board (``hotel_default_board``, seeded BB; the quote passes the value in force on its day); when several DMCs sell the
+hotel the rate choice takes the asked board, the preferred DMC, then the lowest net in USD. **One DMC per room**: every
+night and occupancy of one room type on one line (an ``rt:`` line, or the nights of one room type of a ``tp:`` line)
+is priced by the DMC of its first night's first room; a unit another DMC was cheaper for is asked again pinned to that
+DMC, and a unit that DMC has no rate for refuses the line (never a mix of two DMCs' nets on one booking). A tour part
 names the supplier of the rate that priced it (the booking goes to that DMC). A night on HB / FB / AI whose day also
 holds a ``meal`` service (a tour component of that day, or another ``sv:`` meal line of the quote on one of the line's
 nights) is flagged ``LineCost.board`` ``double_dinner`` (a warning; the price is the rates'). **Children beyond the
 room mix** (bk-069 ``hotel_child_policies``): when the rooms asked hold fewer travellers than the party, each extra
 child (the oldest first, by ``LineAsk.child_ages``; no age = the band reaching the oldest age) pays the DMC's hotel
-child price per night for its age band and board (exact board first, then any board); none found = no extra, said in
-``LineCost.child_room``.
+child price per night for its age band, board (exact board first, then any board) and **basis**: ``sharing`` while
+the rooms' free places (``max_occupancy`` less the room's occupancy, over the mix; all of them when the room type
+has no maximum) hold the child, ``extra_bed`` for the children beyond them (the oldest first); the other basis only
+when the DMC gives no price on that one. None found = no extra, said in ``LineCost.child_room``.
 
 **Children on a service line** (AA-1145, bk-060, B4, :mod:`app.supply.child_price`): on an ``sv:`` line whose rate is
 per person, adults pay the adult rate and each child the supplier's child rate, else the contract's child %, else the
@@ -60,7 +66,9 @@ from typing import Any
 import asyncpg
 
 from app.b2b.errors import B2BError
+from app.pricing import policy_values
 from app.supply import addon_rules, child_price
+from app.supply import rates as supply_rates
 from app.supply.rates import RateAsk, rates_in_force_many
 from app.supply.restrictions import SupplyAsk
 
@@ -251,6 +259,7 @@ class _Unit:
     day_no: int = 0  # the component's day (tp: only)
     meal_plan: str | None = None  # AA-1153: the board asked (rooms only)
     children: tuple[int | None, ...] = ()  # AA-1153: ages of the children beyond the room mix (first unit of a night)
+    bases: tuple[str, ...] = ()  # AA-1153: the basis of each of those children (sharing / extra_bed)
 
 
 class _Budget:
@@ -279,13 +288,17 @@ async def price_lines(
     *,
     child_pct_by_type: Mapping[str, Decimal] | None = None,
     child_age_max: int | None = None,
+    default_board: str | None = None,
 ) -> list[LineCost]:
     """The kind and net cost lines of every quote line (same order), or B2BError 422.
 
     A fixed number of queries whatever the request: plans, plan components, room types, services, then one batched
-    rate query (and, only when an sv: line has children whose contract may set a child %, one terms query). The
-    lookup budget is checked while the lookups are planned, before the rate query runs. ``child_pct_by_type`` (the
-    policy's child % per service type) and ``child_age_max`` feed the B4 rule of an sv: line with children.
+    rate query (plus one pinned rate query when a room line's units were cheapest at different DMCs, and, only when an
+    sv: line has children whose contract may set a child %, one terms query). The lookup budget is checked while the
+    lookups are planned, before the rate query runs. ``child_pct_by_type`` (the policy's child % per service type) and
+    ``child_age_max`` feed the B4 rule of an sv: line with children. ``default_board`` (bk-069 T9): the policy's
+    default board in force on the quote day; read from the policy here when None and a room night needs it (503
+    ``unavailable`` without one).
     """
     parsed: list[tuple[str, str]] = []
     for ask in asks:
@@ -326,6 +339,7 @@ async def price_lines(
             raise _no_price(ask.line_ref, "unknown or inactive room type")
         mix = room_mix(ask, row["max_occupancy"])
         extra = extra_children(ask, mix)
+        bases = child_bases(len(extra), mix, row["max_occupancy"])
         budget.take(nights * len(mix))
         for i in range(nights):
             for n, (pax, count) in enumerate(mix):
@@ -342,6 +356,7 @@ async def price_lines(
                         *part,
                         meal_plan=meal_plan,
                         children=extra if n == 0 else (),
+                        bases=bases if n == 0 else (),
                     )
                 )
 
@@ -382,13 +397,16 @@ async def price_lines(
                 else:
                     service_unit(no, ask, part["service_id"], on=on, days=1, part=tag)
 
-    rates, by_split, contract_pct, offer_pct = await _lookup(conn, asks, units)
+    if default_board is None and any(u.room_type_id and u.meal_plan is None for u in units):
+        default_board = await default_board_b2b(conn)
+    rates, by_split, contract_pct, offer_pct, pinned = await _lookup(conn, asks, units, default_board)
     unit_costs: list[tuple[Decimal, str]] = []
-    for unit, rate in zip(units, rates, strict=True):
+    for i, (unit, rate) in enumerate(zip(units, rates, strict=True)):
         ask = asks[unit.line]
         if rate is None:
             who = f" for {unit.pax} per room" if unit.room_type_id else ""
-            raise _no_price(ask.line_ref, f"no rate in force on {unit.on.isoformat()}{who}")
+            dmc = " from the DMC that prices the first night of this room" if i in pinned else ""
+            raise _no_price(ask.line_ref, f"no rate in force on {unit.on.isoformat()}{who}{dmc}")
         line = out[unit.line]
         line.rate_ids.append(rate["id"])
         line.supply.append(_supply_ask(unit, ask))
@@ -412,6 +430,26 @@ async def price_lines(
     return out
 
 
+async def default_board_b2b(conn: asyncpg.Connection, on: date | None = None) -> str:
+    """bk-069 (T9): the policy's default board in force on ``on`` (today); missing = AA-side data missing (503
+    ``unavailable``)."""
+    try:
+        return await supply_rates.default_board(conn, on=on)
+    except policy_values.PolicyUnavailable:
+        raise B2BError("unavailable", "pricing policy is not available") from None
+
+
+def child_bases(extra: int, mix: list[tuple[int, int]], max_occupancy: int | None) -> tuple[str, ...]:
+    """AA-1153: the basis of each child beyond the room mix (same order as :func:`extra_children`, the oldest first):
+    ``sharing`` for as many as the rooms' free places hold (``max_occupancy`` less each room's occupancy; every child
+    when the room type has no maximum), ``extra_bed`` for the oldest beyond them."""
+    if not extra:
+        return ()
+    free = extra if max_occupancy is None else sum(max(max_occupancy - pax, 0) * n for pax, n in mix)
+    beds = max(extra - free, 0)
+    return (*(EXTRA_BED,) * beds, *(SHARING,) * (extra - beds))
+
+
 def extra_children(ask: LineAsk, mix: list[tuple[int, int]]) -> tuple[int | None, ...]:
     """AA-1153: the ages of the children the room mix does not hold (the oldest first; None = age unknown). The
     rooms always hold the adults, so the travellers left over are children."""
@@ -423,25 +461,32 @@ def extra_children(ask: LineAsk, mix: list[tuple[int, int]]) -> tuple[int | None
 
 
 CHILD_POLICIES_SQL = """
-SELECT supplier_contract_id::text AS contract_id, hotel_id::text AS hotel_id, age_min, age_max, meal_plan,
+SELECT supplier_contract_id::text AS contract_id, hotel_id::text AS hotel_id, age_min, age_max, meal_plan, basis,
        net_amount::text AS net_amount
 FROM booking.hotel_child_policies
 WHERE (supplier_contract_id, hotel_id) IN (SELECT * FROM unnest($1::uuid[], $2::uuid[]))
 """
 
 
-def child_policy(policies: list[dict[str, Any]], age: int | None, meal_plan: str | None) -> dict[str, Any] | None:
-    """The hotel child price of one child: its board exactly, else a row for any board; by its age band, or (age
-    unknown) the band reaching the oldest age."""
+SHARING = "sharing"
+EXTRA_BED = "extra_bed"
+
+
+def child_policy(
+    policies: list[dict[str, Any]], age: int | None, meal_plan: str | None, basis: str = SHARING
+) -> dict[str, Any] | None:
+    """The hotel child price of one child: its basis first (``sharing`` / ``extra_bed``, the other one only when the
+    DMC gives none on it), within it its board exactly, else a row for any board; by its age band, or (age unknown)
+    the band reaching the oldest age. Deterministic: ties go to the band starting oldest."""
     boards = (meal_plan, None) if meal_plan is not None else (None,)
-    for board in boards:
-        rows = [p for p in policies if p["meal_plan"] == board]
-        if age is None:
-            rows.sort(key=lambda p: -int(p["age_max"]))
-        else:
-            rows = [p for p in rows if int(p["age_min"]) <= age <= int(p["age_max"])]
-        if rows:
-            return rows[0]
+    for wanted in (basis, EXTRA_BED if basis == SHARING else SHARING):
+        for board in boards:
+            rows = [p for p in policies if p["meal_plan"] == board and p.get("basis", SHARING) == wanted]
+            if age is not None:
+                rows = [p for p in rows if int(p["age_min"]) <= age <= int(p["age_max"])]
+            rows.sort(key=lambda p: (-int(p["age_max"]), -int(p["age_min"])))
+            if rows:
+                return rows[0]
     return None
 
 
@@ -472,11 +517,20 @@ async def _child_room_costs(
     for i in wanted:
         unit, rate = units[i], rates[i] or {}
         policies = by_pair.get((rate["contract_id"], rooms[unit.room_type_id or ""]["hotel_id"]), [])
-        found = [child_policy(policies, age, rate.get("meal_plan")) for age in unit.children]
+        bases = unit.bases or (SHARING,) * len(unit.children)
+        found = [
+            child_policy(policies, age, rate.get("meal_plan"), basis)
+            for age, basis in zip(unit.children, bases, strict=True)
+        ]
         extra = sum((Decimal(str(f["net_amount"])) for f in found if f is not None), start=Decimal("0"))
         if out[unit.line].child_room is None:  # the first night says how the children were priced
             priced = sum(1 for f in found if f is not None)
-            out[unit.line].child_room = {"children": len(found), "priced": priced, "unpriced": len(found) - priced}
+            out[unit.line].child_room = {
+                "children": len(found),
+                "priced": priced,
+                "unpriced": len(found) - priced,
+                "extra_bed": sum(1 for b in bases if b == EXTRA_BED),
+            }
         if extra:
             amount, currency = costs[i]
             costs[i] = (amount + extra, currency)
@@ -627,11 +681,12 @@ Split = dict[int, tuple[dict[str, Any] | None, dict[str, Any] | None]]
 
 
 async def _lookup(
-    conn: asyncpg.Connection, asks: list[LineAsk], units: list[_Unit]
-) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal], dict[str, Decimal]]:
+    conn: asyncpg.Connection, asks: list[LineAsk], units: list[_Unit], board: str | None
+) -> tuple[list[dict[str, Any] | None], Split, dict[str, Decimal], dict[str, Decimal], set[int]]:
     """One batched rate query for every unit (plus, B4, the child and infant rates of a split unit's service and day,
-    same party band), and the child % of the contracts and of the published add-on offers (AA-1151, bk-068) a child
-    still needs (only when one does)."""
+    same party band), the room units pinned to their room's DMC (:func:`_one_dmc_per_room`), and the child % of the
+    contracts and of the published add-on offers (AA-1151, bk-068) a child still needs (only when one does). The last
+    item: the indexes of the units asked again pinned."""
     lookups = [RateAsk(u.room_type_id, u.service_id, u.on, u.pax, "adult", u.meal_plan) for u in units]
     split_units = [u for u in units if u.split]
     for u in split_units:
@@ -639,8 +694,9 @@ async def _lookup(
             RateAsk(None, u.service_id, u.on, u.pax, "child"),
             RateAsk(None, u.service_id, u.on, u.pax, "infant"),
         ]
-    found = await rates_in_force_many(conn, lookups)
+    found = await rates_in_force_many(conn, lookups, board=board)
     rates, extra = found[: len(units)], iter(found[len(units) :])
+    pinned = await _one_dmc_per_room(conn, units, rates, board)
     by_split: Split = {id(u): (next(extra), next(extra)) for u in split_units}
     need_terms = sorted(
         {
@@ -650,7 +706,7 @@ async def _lookup(
         }
     )
     if not need_terms:
-        return rates, by_split, {}, {}
+        return rates, by_split, {}, {}, pinned
     rows = await conn.fetch(CONTRACT_CHILD_SQL, need_terms)
     services = {
         u.service_id
@@ -658,7 +714,33 @@ async def _lookup(
         if u.split and u.service_id and r is not None and asks[u.line].child and by_split[id(u)][0] is None
     }
     offers = await addon_rules.child_pcts(conn, services)
-    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}, offers
+    return rates, by_split, {r["contract_id"]: Decimal(str(r["child_pct"])) for r in rows}, offers, pinned
+
+
+async def _one_dmc_per_room(
+    conn: asyncpg.Connection, units: list[_Unit], rates: list[dict[str, Any] | None], board: str | None
+) -> set[int]:
+    """AA-1153 review: one DMC per room of a line. The units of one room type on one line take the DMC of the first
+    of them (the first night's first room); a unit whose best rate came from another DMC is asked again pinned to it
+    (one more batched query, only when needed) and keeps no rate when that DMC has none (the line is then refused).
+    ``rates`` is updated in place; returns the indexes of the units asked again."""
+    dmc: dict[tuple[int, str], str] = {}
+    redo: list[int] = []
+    for i, (unit, rate) in enumerate(zip(units, rates, strict=True)):
+        if not unit.room_type_id or rate is None:
+            continue
+        chosen = dmc.setdefault((unit.line, unit.room_type_id), str(rate["supplier_id"]))
+        if str(rate["supplier_id"]) != chosen:
+            redo.append(i)
+    if not redo:
+        return set()
+    again = [
+        RateAsk(u.room_type_id, None, u.on, u.pax, "adult", u.meal_plan, dmc[(u.line, u.room_type_id or "")])
+        for u in (units[i] for i in redo)
+    ]
+    for i, rate in zip(redo, await rates_in_force_many(conn, again, board=board), strict=True):
+        rates[i] = rate
+    return set(redo)
 
 
 def _split_cost(

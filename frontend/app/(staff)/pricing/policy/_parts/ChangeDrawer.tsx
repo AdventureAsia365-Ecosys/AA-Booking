@@ -130,6 +130,13 @@ export function ChangeDrawer({ param, items, onClose }: { param: PolicyParam; it
                 { value: "false", label: t("no") },
               ]}
             />
+          ) : param.type === "code" ? (
+            <Select
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              options={param.choices.map((c) => ({ value: c, label: c }))}
+              data-testid="policy-value"
+            />
           ) : (
             <Input value={text} onChange={(e) => setText(e.target.value)} data-testid="policy-value" />
           )}
