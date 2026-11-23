@@ -31,9 +31,6 @@ export function SuppliersListView() {
   const paging = useOffsetPage();
   const actions = useSupplierActions();
   const countries = useCountries();
-  // AA-1158 part 2 (review S289): contact roles and payment terms choices are an administrator's data.
-  const canEditChoices = useCan("staff.admin");
-  const [choicesOpen, setChoicesOpen] = useState(false);
 
   const filters = {
     q: get("q") || undefined,
@@ -84,23 +81,7 @@ export function SuppliersListView() {
     <PageFrame
       title={t("Suppliers")}
       description={t("Hotels, transport, guides and other partners Booking buys from, with their contracts.")}
-      actions={
-        <>
-          {canEditChoices && (
-            <Button variant="secondary" onClick={() => setChoicesOpen(true)}>
-              <ListChecks size={15} /> {t("Profile choices")}
-            </Button>
-          )}
-          {actions.canWrite && (
-          <Link
-            href="/suppliers/new"
-            className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
-          >
-            <Plus size={15} /> {t("Add supplier")}
-          </Link>
-          )}
-        </>
-      }
+      actions={<ListActions canWrite={actions.canWrite} />}
     >
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? t("country") : t("countries")) : undefined} />
@@ -182,7 +163,6 @@ export function SuppliersListView() {
         </div>
       </Section>
       {actions.dialogs}
-      {canEditChoices && <SupplierProfileChoices open={choicesOpen} onClose={() => setChoicesOpen(false)} />}
     </PageFrame>
   );
 }
@@ -248,4 +228,30 @@ function approvableParam(value: string): "me" | undefined {
 /** AA-1158 part 2 My work: `bank=pending` (with `approvable=me`) lists the suppliers whose bank account change waits. */
 function bankParam(value: string): "pending" | undefined {
   return value === "pending" ? "pending" : undefined;
+}
+
+/** The page actions: Add supplier (supply.write) and, for administrators, the supplier profile choices (AA-1158 part 2,
+ * review S289: contact roles and payment terms choices are an administrator's data). */
+function ListActions({ canWrite }: { canWrite: boolean }) {
+  const t = useT(MSG);
+  const canEditChoices = useCan("staff.admin");
+  const [choicesOpen, setChoicesOpen] = useState(false);
+  return (
+    <>
+      {canEditChoices && (
+        <Button variant="secondary" onClick={() => setChoicesOpen(true)}>
+          <ListChecks size={15} /> {t("Profile choices")}
+        </Button>
+      )}
+      {canWrite && (
+        <Link
+          href="/suppliers/new"
+          className="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent px-4 py-2 text-[13px] font-semibold uppercase tracking-[0.04em] text-on-accent hover:bg-accent-deep"
+        >
+          <Plus size={15} /> {t("Add supplier")}
+        </Link>
+      )}
+      {canEditChoices && <SupplierProfileChoices open={choicesOpen} onClose={() => setChoicesOpen(false)} />}
+    </>
+  );
 }
