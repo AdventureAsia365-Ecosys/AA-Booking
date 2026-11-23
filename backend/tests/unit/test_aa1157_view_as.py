@@ -14,8 +14,10 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -93,7 +95,7 @@ def test_me_in_a_view_is_the_target_role_narrowed_and_read_only() -> None:
     assert body["role"] == "sales" and body["read_only"] is True
     assert set(body["permissions"]) == role_permissions("sales") & role_permissions("admin")
     assert body["view_as"]["viewer_role"] == "admin" and body["view_as"]["target_label"] == "Sales"
-    assert "session_id" not in body["view_as"] and SESSION not in r.text   # only the BFF holds the session id
+    assert "session_id" not in body["view_as"] and SESSION not in r.text  # only the BFF holds the session id
     assert "staff.admin" not in body["permissions"]
 
 
@@ -294,6 +296,16 @@ async def test_sign_out_ends_open_views_and_an_expired_one_as_expired() -> None:
     assert await view_as.end_all(conn, Viewer()) == [old, live]
     reasons = [json.loads(a[7])["end_reason"] for a in conn.sql(AUDIT) if a[3] == view_as.ENDED]
     assert reasons == ["expired", "signed_out"]
+
+
+def test_builtin_labels_match_the_staff_admin_names() -> None:
+    """The start row's target_label and the banner use BUILTIN_LABELS: the same names as the staff admin's ROLE_LABEL
+    (frontend lib/rbac.ts), so a rename in one place cannot drift silently."""
+    rbac = (Path(__file__).resolve().parents[3] / "frontend" / "lib" / "rbac.ts").read_text(encoding="utf-8")
+    block = re.search(r"export const ROLE_LABEL: Record<StaffRole, string> = \{(.*?)\};", rbac, re.S)
+    assert block is not None
+    frontend = dict(re.findall(r"^\s*(\w+): \"([^\"]+)\",", block.group(1), re.M))
+    assert frontend == view_as.BUILTIN_LABELS
 
 
 def test_a_custom_role_start() -> None:

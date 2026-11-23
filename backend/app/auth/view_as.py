@@ -68,8 +68,9 @@ OWNER_ONLY = "owner_only"
 UNAVAILABLE = "view_as_unavailable"
 
 # Built-in role names as the staff admin shows them (frontend ROLE_LABEL; the CIS roles catalogue BOOKING_ROLE_LABELS).
+# The built-in role names, as the staff admin shows them (frontend lib/rbac.ts ROLE_LABEL; a unit test pins the two).
 BUILTIN_LABELS = {
-    "admin": "Administrator",
+    "admin": "Admin",
     "sales": "Sales",
     "contracting": "Product & operations",
     "content_creator": "Content creator",
