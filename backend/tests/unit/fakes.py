@@ -66,6 +66,8 @@ POLICY_SEED: dict[str, str] = {
     ' "transfer": "100"}',
     # AA-1111 S2 (bk-061)
     "staff_admin_mfa_required": "false",
+    "owner_self_approval_allowed": "true",  # AA-1158 (bk-064)
+    "owner_payout_after_approval_allowed": "true",  # AA-1158 (bk-064)
     # AA-1171 (bk-063)
     "ops_jobs_stuck_after_s": "900",
     "ops_jobs_overdue_factor": '"2"',

@@ -20,6 +20,8 @@ import asyncpg
 
 from app import audit
 from app.agency_billing import invoices
+from app.auth import self_approval
+from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.ops.money import idempotency_key, looks_like_card_number
 
@@ -58,14 +60,15 @@ PAYMENT_FROM = "FROM booking.agency_payment p JOIN booking.agency_invoice i ON i
 
 
 def payment_filter(
-    *, state: str | None = None, invoice: str | None = None, actionable_by: str | None = None
+    *, state: str | None = None, invoice: str | None = None, actionable_by: str | None = None, owner: bool = False
 ) -> tuple[str, list[Any]]:
     """The WHERE text and arguments of the payment list (over :data:`PAYMENT_FROM`). The Payments to approve tab and
     the My work tile (AA-1159, :mod:`app.my_work`) both use it: the tile equals the list total for the same filter.
     ``actionable_by``: a staff id; only the payments that person did not record (the recorder never approves or
-    rejects their own, 403 ``maker_checker``)."""
+    rejects their own, 403 ``maker_checker``). ``owner`` (AA-1158): the caller may self-approve (business owner, switch
+    on), so their own recorded payments count too (approve only; a rejection stays two-person)."""
     where, args = ["true"], []
-    if actionable_by:
+    if actionable_by and not owner:
         args.append(actionable_by)
         where.append(f"p.recorded_by <> ${len(args)}")
     if state and state != "all":
@@ -95,8 +98,9 @@ async def list_payments(
     actionable_by: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    owner: bool = False,
 ) -> dict[str, Any]:
-    cond, args = payment_filter(state=state, invoice=invoice, actionable_by=actionable_by)
+    cond, args = payment_filter(state=state, invoice=invoice, actionable_by=actionable_by, owner=owner)
     total = await conn.fetchval(f"SELECT count(*) {PAYMENT_FROM} WHERE {cond}", *args)  # noqa: S608
     args += [limit, offset]
     rows = await conn.fetch(
@@ -157,8 +161,17 @@ async def record(
     return {**out, "replayed": False}
 
 
-async def _decide(conn: asyncpg.Connection, payment_id: str, actor: str, *, approve: bool,
+def _actor_id(actor: Staff | str) -> str:
+    return actor if isinstance(actor, str) else actor.cis_user_id
+
+
+async def _decide(conn: asyncpg.Connection, payment_id: str, staff: Staff | str, *, approve: bool,
                   reason: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """Approve or reject a recorded payment. ``staff`` is the caller (a bare staff id never self-approves). AA-1158
+    Q5: the business owner may approve a payment she recorded, flagged ``owner_self_approved``; a rejection is never
+    by the recorder."""
+    actor = _actor_id(staff)
+    flagged = False
     async with conn.transaction():
         row = await conn.fetchrow(
             f"SELECT {COLUMNS} FROM booking.agency_payment WHERE id = $1::uuid FOR UPDATE",  # noqa: S608
@@ -169,16 +182,21 @@ async def _decide(conn: asyncpg.Connection, payment_id: str, actor: str, *, appr
         if row["status"] != "recorded":
             raise Conflict("payment_decided", f"the payment is already {row['status']}")
         if row["recorded_by"] == actor:
-            raise Forbidden("maker_checker", "the person who recorded a payment cannot approve or reject it")
+            if not approve or isinstance(staff, str):
+                raise Forbidden("maker_checker", "the person who recorded a payment cannot approve or reject it")
+            flagged = await self_approval.check(
+                conn, staff, [row["recorded_by"]], message="the person who recorded a payment cannot approve it"
+            )
         inv = await invoices._row(conn, row["invoice_id"], lock=True)
         if approve:
             if inv["status"] != "issued":
                 raise Conflict("invoice_not_issued", f"the invoice is {inv['status']}")
             new = await conn.fetchrow(
-                "UPDATE booking.agency_payment SET status = 'approved', approved_by = $2, approved_at = now()"  # noqa: S608
-                f" WHERE id = $1::uuid RETURNING {COLUMNS}",
+                "UPDATE booking.agency_payment SET status = 'approved', approved_by = $2, approved_at = now(),"  # noqa: S608
+                f" owner_self_approved = $3 WHERE id = $1::uuid RETURNING {COLUMNS}",
                 payment_id,
                 actor,
+                flagged,
             )
         else:
             new = await conn.fetchrow(
@@ -192,15 +210,16 @@ async def _decide(conn: asyncpg.Connection, payment_id: str, actor: str, *, appr
         status = await conn.fetchval("SELECT status FROM booking.agency_invoice WHERE id = $1::uuid", inv["id"])
         await _audit(conn, actor, "agency_payment.approved" if approve else "agency_payment.rejected", out,
                      f"{inv['number']} · {inv['agency_name']}",
-                     {"amount": out["amount"], "invoice_status": status, "reason": out["reject_reason"]})  # fmt: skip
+                     {"amount": out["amount"], "invoice_status": status, "reason": out["reject_reason"],
+                      **({"owner_self_approved": True} if flagged else {})})  # fmt: skip
     return {**out, "invoice_status": status, "invoice_number": inv["number"]}
 
 
-async def approve(conn: asyncpg.Connection, payment_id: str, actor: str) -> dict[str, Any]:
+async def approve(conn: asyncpg.Connection, payment_id: str, actor: Staff | str) -> dict[str, Any]:
     return await _decide(conn, payment_id, actor, approve=True)
 
 
-async def reject(conn: asyncpg.Connection, payment_id: str, reason: str, actor: str) -> dict[str, Any]:
+async def reject(conn: asyncpg.Connection, payment_id: str, reason: str, actor: Staff | str) -> dict[str, Any]:
     if looks_like_card_number(reason):
         raise Invalid("card_number_not_allowed", "a payment card number never goes into Booking")
     return await _decide(conn, payment_id, actor, approve=False, reason=reason)

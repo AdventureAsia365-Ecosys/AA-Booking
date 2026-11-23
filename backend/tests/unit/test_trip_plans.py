@@ -402,7 +402,25 @@ async def test_list_default_sort_is_sellable_first() -> None:
 async def test_save_commercial_check_violation_is_422() -> None:
     conn = plan_conn().on("INSERT INTO booking.trip_plans", asyncpg.CheckViolationError("trip_plans_price_hint_chk"))
     with pytest.raises(Invalid):
-        await trip_plans.save_commercial(conn, CONTRACTING, SOURCE_ID, {"sellable": True})
+        await trip_plans.save_commercial(conn, CONTRACTING, SOURCE_ID, {"sellable": False, "trip_style": "Private"})
+
+
+@pytest.mark.asyncio
+async def test_sellable_needs_an_approved_price() -> None:
+    """AA-1158 Q9: false -> true needs a matrix row still valid (computed, or from a published price version)."""
+    unpriced = {**STORED, "sellable": False}
+    with pytest.raises(Conflict) as err:
+        await trip_plans.save_commercial(plan_conn(stored=unpriced), CONTRACTING, SOURCE_ID, {"sellable": True})
+    assert err.value.code == "no_approved_price"
+    with pytest.raises(Conflict):  # a plan with no row yet has no price either
+        await trip_plans.save_commercial(plan_conn(), CONTRACTING, SOURCE_ID, {"sellable": True})
+    priced = plan_conn(stored=unpriced).on("SELECT DISTINCT r.trip_plan_id", [{"plan_id": "p-1"}])
+    out = await trip_plans.save_commercial(priced, CONTRACTING, SOURCE_ID, {"sellable": True})
+    assert "sellable" in out["changed"]
+    # Already sellable: an edit of another field never asks again.
+    kept = plan_conn(stored=STORED)
+    await trip_plans.save_commercial(kept, CONTRACTING, SOURCE_ID, {"sellable": True, "commercial_notes": "x"})
+    assert kept.sql("SELECT DISTINCT r.trip_plan_id") == []
 
 
 @pytest.mark.asyncio

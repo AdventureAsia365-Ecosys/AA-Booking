@@ -4,7 +4,8 @@
 // the tax rules (rate + wording per kind and recipient country, with an effective window) and the payment terms (the
 // default set and per-agency terms: deposit %, balance days before departure, due days, warn / suspend days; S280:
 // TermsSection.tsx, where an agency's terms are added and changed too).
-// Every change is audited in Booking. billing_config.write = admin, finance.
+// Every change is audited in Booking. billing_config.write = admin, finance. AA-1158: the payment details and the
+// default flag are pending changes a second person approves (EntityChanges.tsx; billing_config.approve).
 // AA-1037 extras G6: the terms clauses agencies see (e.g. price errors), as data: finance edits a clause (a draft
 // again), the business owner (terms_clause.approve = admin) approves it; agencies only see approved clauses.
 
@@ -36,6 +37,7 @@ import {
   useToast,
 } from "@/ui";
 import { errorText } from "./shared";
+import { ChangeDetailsDrawer, PendingEntityChanges } from "./EntityChanges";
 import { TermsSection } from "./TermsSection";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
@@ -68,6 +70,7 @@ function EntitiesSection() {
   const invalidate = useInvalidate();
   const list = useQuery({ queryKey: ["agency-billing", "entities"], queryFn: agencyBillingApi.entities });
   const [form, setForm] = useState<typeof EMPTY_ENTITY | null>(null);
+  const [changing, setChanging] = useState<BillingEntity | null>(null);
   const create = useMutation({
     mutationFn: (f: typeof EMPTY_ENTITY) =>
       agencyBillingApi.createEntity({
@@ -80,16 +83,17 @@ function EntitiesSection() {
         payment_instructions: f.payment_instructions.trim() || null,
         is_default: f.is_default,
       }),
-    onSuccess: () => {
-      toast.success(t("Billing entity saved"));
+    onSuccess: (e) => {
+      toast.success(e.pending_change ? t("Billing entity saved; its payment details and default flag wait for approval") : t("Billing entity saved"));
       setForm(null);
       invalidate();
     },
   });
   const setDefault = useMutation({
-    mutationFn: (e: BillingEntity) => agencyBillingApi.updateEntity(e.id, { is_default: true }),
+    mutationFn: (e: BillingEntity) =>
+      agencyBillingApi.requestEntityChange(e.id, { set_payment_instructions: false, make_default: true, reason: t("Make it the default issuing entity") }),
     onSuccess: () => {
-      toast.success(t("Default billing entity changed"));
+      toast.success(t("Change sent for approval"));
       invalidate();
     },
     onError: (e) => toast.error(errorText(e)),
@@ -103,12 +107,22 @@ function EntitiesSection() {
       id: "state",
       header: "",
       cell: ({ row }) =>
-        row.original.is_default ? (
+        row.original.pending_change ? (
+          <Pill tone="warning">{t("Change pending")}</Pill>
+        ) : row.original.is_default ? (
           <Pill tone="success">{t("Default")}</Pill>
         ) : canEdit && row.original.active ? (
           <Button size="sm" variant="ghost" onClick={() => setDefault.mutate(row.original)}>{t("Make default")}</Button>
         ) : !row.original.active ? (
           <Pill>{t("Inactive")}</Pill>
+        ) : null,
+    },
+    {
+      id: "details",
+      header: "",
+      cell: ({ row }) =>
+        canEdit && !row.original.pending_change ? (
+          <Button size="sm" variant="ghost" onClick={() => setChanging(row.original)}>{t("Change payment details")}</Button>
         ) : null,
     },
   ];
@@ -130,6 +144,8 @@ function EntitiesSection() {
         emptyTitle={t("No billing entity yet")}
         emptyDescription={t("Add the AA legal entity that issues invoices before issuing the first one.")}
       />
+      <PendingEntityChanges entities={list.data?.items ?? []} onChanged={invalidate} />
+      <ChangeDetailsDrawer entity={changing} onClose={() => setChanging(null)} onChanged={invalidate} />
       <FormDrawer
         open={f !== null}
         onClose={() => setForm(null)}
@@ -158,7 +174,7 @@ function EntitiesSection() {
             <Field label={t("Invoice inbox")}>
               <Input type="email" value={f.invoice_inbox} onChange={(e) => setForm({ ...f, invoice_inbox: e.target.value })} />
             </Field>
-            <Field label={t("Payment instructions")} hint={t("Printed on the invoice: where and how the agency pays")}>
+            <Field label={t("Payment instructions")} hint={t("Printed on the invoice; applies after a second person approves it")}>
               <Textarea value={f.payment_instructions} onChange={(e) => setForm({ ...f, payment_instructions: e.target.value })} />
             </Field>
             <Checkbox label={t("Default issuing entity")} checked={f.is_default} onChange={(e) => setForm({ ...f, is_default: e.target.checked })} />

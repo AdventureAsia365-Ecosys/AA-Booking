@@ -46,7 +46,10 @@ APPROVE_TILES = (
     "supplier_bills_to_pay",
     "agency_payments_to_approve",
     "stop_sales_to_review",
+    "suppliers_to_activate",  # AA-1158
+    "billing_changes_to_approve",
 )
+OVERSIGHT_TILES = ("owner_self_approvals",)  # AA-1158: every audit.read holder (group work, listed last)
 
 
 async def _purge_stop_sales(conn: asyncpg.Connection) -> None:
@@ -222,6 +225,19 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
         params = {"kind": "stop_sale", "review": "me", "limit": 1}
         body = await _ok(await c.get("/supply/restrictions", params=params, headers=headers))
         return body["total"]
+    if key == "suppliers_to_activate":
+        assert f == {"status": "pending", "approvable": "me"}
+        body = await _ok(await c.get("/suppliers", params={**f, "limit": 1}, headers=headers))
+        return body["total"]
+    if key == "billing_changes_to_approve":
+        assert f == {"tab": "settings", "approvable": "me"}
+        me = (await _ok(await c.get("/staff/me", headers=headers)))["cis_user_id"]
+        entities = (await _ok(await c.get("/billing-entities", headers=headers)))["items"]
+        return sum(1 for e in entities if e.get("pending_change") and e["pending_change"]["requested_by"] != me)
+    if key == "owner_self_approvals":
+        assert f["owner_self_approved"] == "true" and f["from"].endswith("-01")
+        body = await _ok(await c.get("/audit-logs", params={**f, "limit": 200}, headers=headers))
+        return len(body["items"])
     raise AssertionError(f"no list for tile {key}")
 
 
@@ -233,7 +249,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
     # The administrator holds every tile capability.
     body = await _ok(await c.get("/my-work/summary", headers=_as(cis, ADMIN)))
     tiles = _tiles(body)
-    assert list(tiles) == [*WORK_TILES, *APPROVE_TILES]
+    assert list(tiles) == [*WORK_TILES, *APPROVE_TILES, *OVERSIGHT_TILES]
     assert all(t["available"] for t in tiles.values()), tiles
     assert {t["group"] for k, t in tiles.items() if k in APPROVE_TILES} == {"approve"}
 
@@ -247,6 +263,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
         "supplier_bills_due_soon",
         "supplier_bills_to_approve",
         "stop_sales_to_review",
+        "suppliers_to_activate",
     ]
 
     # Finance: reads cases, operations and bills; agency billing and its payment approvals; no bill approval.
@@ -258,6 +275,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
         "supplier_bills_due_soon",
         "agency_invoices_overdue",
         "agency_payments_to_approve",
+        "billing_changes_to_approve",
     ]
 
     # A content creator has no queue here.

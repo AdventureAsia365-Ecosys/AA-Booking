@@ -634,15 +634,6 @@ def _norm(field: str, value: Any) -> Any:
     return value
 
 
-async def _check_supplier(conn: asyncpg.Connection, supplier_id: str) -> None:
-    """A supplier set or changed on a plan must exist and be active (an unchanged one may have been deactivated)."""
-    status = await conn.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", supplier_id)
-    if status is None:
-        raise Invalid("supplier_not_found", "the supplier does not exist")
-    if status != "active":
-        raise Invalid("supplier_inactive", "pick an active supplier")
-
-
 async def save_commercial(
     conn: asyncpg.Connection, staff: Staff, source_id: str, data: dict[str, Any]
 ) -> dict[str, Any]:
@@ -676,8 +667,7 @@ async def save_commercial(
     changed = sorted(k for k in COMMERCIAL_FIELDS if before is None or before[k] != new[k])
     if before is not None and not changed:
         return {**await get_plan(conn, staff, source_id), "changed": []}
-    if new["supplier_id"] is not None and (before is None or before["supplier_id"] != new["supplier_id"]):
-        await _check_supplier(conn, new["supplier_id"])
+    await prices.check_commercial(conn, new, before, before_row["id"] if before_row else None)
     try:
         saved = await conn.fetchrow(
             """

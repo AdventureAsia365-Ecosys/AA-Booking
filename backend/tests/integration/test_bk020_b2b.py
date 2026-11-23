@@ -31,7 +31,7 @@ from app.b2b import expiry
 from app.db import Database
 from app.main import create_app
 from app.settings import Settings
-from tests.integration.conftest import MIGRATIONS
+from tests.integration.conftest import MIGRATIONS, make_sellable
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import CRM_CLIENT, M2M_ISSUER, LocalCis, LocalM2M
 
@@ -199,10 +199,11 @@ async def plan(
         SOURCE_ID,
     )
     maker = _staff(cis, MAKER)
-    commercial = {"sellable": True}
+    commercial = {"sellable": False}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {"items": [{"day_no": 1, "hotel_room_type_id": room}, {"day_no": 1, "service_id": service}]}
     saved = await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker))
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     partner = await _insert(admin, "b2b_partners", tenant_id=TENANT, agency_name="Agency 973", m2m_client_id=CRM_CLIENT)
     return {"plan": saved["trip_plan_id"], "room": room, "service": service, "partner": partner}
 

@@ -630,8 +630,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   **Lean staff roles step 1 (AA-1150, S286)**: `finance` also reads trip cases, prices, supply, operations, supplier
   bills and the catalog (`trip_case.read`, `pricing.read`, `supply.read`, `ops.read`, `bill.read`, `catalog.read`; it
   writes none of them and `payout.write` stays admin). Three approval capabilities are split out of the write rights
-  so a maker role can exist without them: `supplier.activate` (`POST /suppliers/{ref}/activate`; a supplier created
-  by a role without it starts `inactive`, a holder's starts `active`), `contract.publish`
+  so a maker role can exist without them: `supplier.activate` (`POST /suppliers/{ref}/activate`; since AA-1158 every
+  new supplier starts `pending` and its creator never activates it, see "Approval rules"), `contract.publish`
   (a contract's `status=published`) and `stop_sale.approve` (approve / reject a pending stop-sale, approve the end of
   one, and the same decisions on a season calendar's stop-sale range); all three = admin, contracting (the built-in
   `contracting` is shown as "Product & operations"), none in the preview cap. **Approve split (AA-1155 T4.1, root spec
@@ -648,7 +648,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   admin, sales, contracting, finance; new pricing rule / FX rows (`pricing.write`) and their approval (`pricing.approve`) = admin, contracting
   (maker-checker: the creator of a row cannot approve it, 403 `own_row`); suppliers and supplier contracts read
   (`supply.read`) = admin, sales, contracting, finance, write (`supply.write`) = admin, contracting (contract publish
-  also needs `contract.publish`, and maker-checker: not the draft's last writer, 403 `maker_checker`; hotels, room types, services, supplier rates and supplier
+  also needs `contract.publish`, and maker-checker: no writer of the draft (AA-1158 `writers`), 403 `maker_checker`; hotels, room types, services, supplier rates and supplier
   photos (AA-835) use the same pair, and writing a rate makes you the contract's maker); catalog reads (`catalog.read`) = every role,
   content_creator and finance included (without the price hint, channel and commercial notes, which need `pricing.read`); the
   trip plan commercial row (`trip_plan.write`) = admin, contracting; "Use for trip case" = `trip_case.write` +
@@ -737,6 +737,51 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `event_name` in `push`/`workflow_dispatch`, `job_workflow_ref` =
   `AdventureAsia365-Ecosys/AA-Booking/.github/workflows/deploy-dev.yml@refs/heads/main`. Any other token is 401;
   GitHub's JWKS unreachable (no cached keys) is 503. All values are code constants: no secret, no variable.
+
+## Approval rules for a three-person team (AA-1158 part 1, bk-064; tech lead S285 Q4 / Q5 / Q9)
+
+With three staff, strict maker != checker blocked the business owner's own work. The rules (root ADR 0006a A14 for the
+marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `docs/implementation-notes/AA-1158.md`):
+
+- **Suppliers (R5)**: every new supplier starts `pending`, whoever creates it; a second person with
+  `supplier.activate` activates it (`activated_by`, `activated_at`), never one of its makers: its creator or anyone who
+  changed its data while it was not live, pending or inactive (`suppliers.writers`, kept by trigger
+  `suppliers_writers`; 403 `maker_checker`; DB `suppliers_maker_checker_chk`, and `suppliers_activation_guard` takes
+  the activator from `updated_by` when a statement names none). Deactivating a pending supplier rejects it (`supplier.rejected`; its creator: `withdrawn`).
+  The detail answers `actions.activate` (`allowed`, `self_approval`, `blockers`); `GET /suppliers?approvable=me`.
+- **Contracts (R4)**: `supplier_contracts.writers` lists every staff key that wrote the draft (kept by a trigger: the
+  creator, then each `updated_by` while a draft, a rate write included); none of them publishes it
+  (`supplier_contracts_maker_checker_chk`). Each draft answers `actions.publish`.
+- **Bills and payouts (R3 / Q4)**: the bill's creator and facts editor never approve it nor pay it; its approver never
+  records its payout, except the business owner, whose payout is flagged `same_approver_payer` (DB
+  `supplier_payouts_guard`). The tech lead is the fallback payer; `payout.write` stays admin only.
+- **Business-owner self-approval (Q5)**: the identity whose CIS record carries `is_business_owner`
+  (`shared.v_staff_booking_grant`, read uncached by `custom_roles.is_business_owner`, fail closed) may approve her own
+  supplier activation, contract publish, price version, season range (kind `season`) and holiday event, calendar
+  default and plan calendar, supplier bill, agency payment, departure price adjustment and billing entity change. The
+  row's `owner_self_approved` is decided server-side (`app/auth/self_approval.py`), never from a request field, and
+  `booking.owner_self_approval_guard()` checks the marker again in the DB for any flagged row. Never self-approved:
+  Pricing > Policy changes, stop-sales and their lifting, every removal (`end`), rejections and withdrawals. Preview,
+  Dev-only E2E and the E2E test user never self-approve. Switches (Pricing > Policy, section security, approved by
+  the administrator group): `owner_self_approval_allowed`, `owner_payout_after_approval_allowed` (both on). The page
+  flag: `GET /staff/me/self-approval` (display only).
+- **Billing entity**: a new `payment_instructions` or making an entity the default is a `booking.billing_entity_change`
+  (`pending`; `POST /billing-entities/{id}/changes`, or a create / PATCH that sends those fields), decided by a second
+  person with `billing_config.approve` (admin, finance; `POST /billing-entity-changes/{id}/decision`, `approve` /
+  `reject` / `withdraw` by the requester). The approval applies it in the same transaction; invoices keep the old
+  details until then. The default issuer moves only by approving another entity as the default.
+- **Sellable needs an approved price (Q9)**: `sellable` false -> true (commercial save, workbench `make_sellable`,
+  workbook import) needs a matrix row still valid today, computed by the cost sheet or from a published price version
+  (409 / skipped `no_approved_price`). The workbook import recomputes the tours going sellable first (within its 50
+  plan budget); the dry run accepts a tour its own recompute prices only within that budget.
+- **Oversight**: every self-approval writes `owner_self_approved: true` in its audit row (a payout also
+  `same_approver_payer`); `GET /audit-logs?owner_self_approved=true` and the audit log tab list them, and the My work
+  tile `owner_self_approvals` (this calendar month) shows them to every `audit.read` holder, not only to the marker
+  holder. Residual risk: a CIS owner can move the marker (CIS Staff page); the tile and the filter make that visible.
+- **Deferred to part 2 (S289)**: the DB refusing a supplier INSERT other than `pending` with a creator (the column
+  default is still `active`) and the DB guard on `billing_entity` itself: both would have broken the running code on
+  the migration-only PR (MIG-4). Part 2 also adds supplier bank accounts with a payout lock after a change (a pricing
+  policy parameter).
 
 ## B2B API (AA-972; root ADR 0005a, ADR 0006b decision 7; contract `booking.b2b.v1`)
 
@@ -2332,13 +2377,29 @@ A **contract** file (MIG-4; the code PR raises readiness to bk-061). Version 1 o
 `staff_admin_mfa_required` = false (made, submitted and approved by the migration, `seed:bk-061`, in force from
 2026-01-01): administrators may still sign in with an e-mail code, today's behaviour. No table, no personal data.
 
+### `bk-064` (AA-1158 part 1, approval rules — needs `bk-041`, `bk-048`, `bk-054`, `bk-055`, `bk-062`)
+
+A **contract** file (MIG-4; the code PR raises readiness to bk-064). `suppliers` gains `pending`, `activated_by`,
+`activated_at`, `owner_self_approved`, `writers` (trigger `suppliers_writers`: whoever changed the data while not live) and
+`suppliers_activation_guard`; `supplier_contracts` gains `writers` (trigger
+`supplier_contracts_writers`, backfilled on drafts) and `owner_self_approved`; `supplier_payouts` gains
+`same_approver_payer` (`supplier_payouts_guard` replaced); `supplier_bills`, `price_list_versions`, `season_ranges`,
+`holiday_events`, `agency_payment`, `departure_price_adjustments` gain `owner_self_approved` with their maker-checker
+CHECKs relaxed only for a flagged approval (same constraint names) and `supplier_bills_guard` replaced; new
+`booking.billing_entity_change` (pending -> approved / rejected / withdrawn, decided once, dated now; its reasons
+may be set to `[redacted]` alone on erasure, DM-6.7); one generic
+trigger function `booking.owner_self_approval_guard()` reads `shared.v_staff_booking_grant` (the migration guard
+allows that read only); two pricing policy switches (`seed:bk-064`, on); the partial index
+`audit_logs_owner_self_idx`. DM-7.1 row for `billing_entity_change` in the root data standards.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
 (proforma only, D7; agency invoices carry a tax rule and the manually recorded e-invoice number, AA-1037), the
 e-invoice provider API (later; phase 1 = manual `e_invoice_no`), invoice PDF and e-mail of agency invoices (only the
 overdue reminders are e-mailed, AA-1037 G4; documents are printable HTML, no PDF renderer),
-maker-checker on billing settings (audited only; the R4 "editable Settings" slice), a customer notifications feed (the customer rows
+maker-checker on the other billing settings (tax rules, terms: audited only; the payment details and the default
+issuer are pending changes since AA-1158), a customer notifications feed (the customer rows
 of AA-682 are written but `booking.customer.v1` serves payments only; critic note 11),
 **customer e-mail** (proposal send, invoice send and reminders write customer notification rows only and say so; the
 only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bounce/complaint suppression, a catalog

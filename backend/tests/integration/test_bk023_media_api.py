@@ -28,6 +28,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from tests.integration import ops
+from tests.integration.conftest import activate_supplier
 from tests.integration.supply import purge_supply
 from tests.staff_tokens import LocalCis
 
@@ -154,9 +155,12 @@ async def _ok(response: httpx.Response, status: int = 200) -> Any:
     return response.json() if response.content else None
 
 
-async def _hotel_and_service(c: httpx.AsyncClient, maker: dict[str, str]) -> tuple[dict, dict, dict]:
+async def _hotel_and_service(
+    c: httpx.AsyncClient, maker: dict[str, str], admin: asyncpg.Connection
+) -> tuple[dict, dict, dict]:
     sup_body = {"company_name": "Red River DMC", "categories": ["hotel", "activity"], "country_code": "VN"}
     sup = await _ok(await c.post("/suppliers", json=sup_body, headers=maker), 201)
+    await activate_supplier(admin, sup["id"])  # AA-1158: a new supplier starts pending
     hotel_body = {"supplier_id": sup["code"], "name": "Emerald", "destination_id": HANOI}
     hotel = await _ok(await c.post("/hotels", json=hotel_body, headers=maker), 201)
     room = await _ok(await c.post(f"/hotels/{hotel['code']}/room-types", json={"name": "Deluxe"}, headers=maker), 201)
@@ -174,7 +178,7 @@ async def test_photo_upload_rights_and_removal(
 ) -> None:
     c, cis, store = client
     maker, sales = _auth(cis, MAKER), _auth(cis, SALES)
-    hotel, _, _ = await _hotel_and_service(c, maker)
+    hotel, _, _ = await _hotel_and_service(c, maker, admin)
     before = await _version(admin, hotel["id"])
     data = png()
     upload = {"content_type": "image/png", "data_base64": b64(data), "filename": "front.png"}
@@ -248,7 +252,7 @@ async def test_read_back_and_published_text_on_proposal_items(
 ) -> None:
     c, cis, _ = client
     maker, sales = _auth(cis, MAKER), _auth(cis, SALES)
-    hotel, room, svc = await _hotel_and_service(c, maker)
+    hotel, room, svc = await _hotel_and_service(c, maker, admin)
     case = await ops.insert_b2c_case(
         admin, tag="it-835-media-1", status="new_inquiry", start=date(2027, 3, 10), end=None, notes=NOTE
     )
@@ -345,7 +349,7 @@ async def test_hotel_list_photo_summary(
     (upload order), presigned; a hotel without photos has 0 / null; a removed photo no longer counts."""
     c, cis, _ = client
     maker, sales = _auth(cis, MAKER), _auth(cis, SALES)
-    hotel, _, _ = await _hotel_and_service(c, maker)
+    hotel, _, _ = await _hotel_and_service(c, maker, admin)
     bare = await _ok(
         await c.post(
             "/hotels",

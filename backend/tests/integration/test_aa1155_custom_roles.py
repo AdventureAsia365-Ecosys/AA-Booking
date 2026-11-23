@@ -132,16 +132,16 @@ async def test_a_custom_holder_works_with_exactly_its_role(
         r = await client.get(path, headers=holder(cis))
         assert r.status_code == 200, (path, r.text)
 
-    # A maker: its supplier starts inactive, and activating it is an approval it does not hold.
+    # A maker: its supplier starts pending (AA-1158), and activating it is an approval it does not hold.
     made = await client.post(
         "/booking/suppliers", json={"company_name": "zz1155 Lagoon Boats", "categories": ["transport"]},
         headers=holder(cis),
     )  # fmt: skip
     assert made.status_code == 201, made.text
-    assert made.json()["status"] == "inactive"
+    assert made.json()["status"] == "pending"
     refused(await client.post(f"/booking/suppliers/{made.json()['id']}/activate", headers=holder(cis)), "forbidden")
     assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", made.json()["id"]) == (
-        "inactive"
+        "pending"
     )
 
     # Approvals (R4.3), every one refused before the record is read (no such row exists).

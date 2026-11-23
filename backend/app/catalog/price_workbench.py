@@ -50,7 +50,7 @@ import asyncpg
 
 from app import audit
 from app.auth.staff import Staff
-from app.catalog import cost_sheet, price_readiness
+from app.catalog import cost_sheet, price_readiness, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
 from app.errors import Invalid
 
@@ -435,8 +435,10 @@ async def apply_action(
     plans = {r["source_id"]: dict(r) for r in await conn.fetch(PLANS_SQL, keys)}
     results: list[dict[str, Any]] = []
     served: set[str] | None = set()
+    ready: set[str] = set()
     if action == "make_sellable":
         served = await _in_catalog(conn, list(plans))
+        ready = await trip_plan_prices.price_ready(conn, [p["id"] for p in plans.values()], on)
     more = await extras(conn, on, [p["id"] for p in plans.values()]) if "provisional" in action else {}
     pricing = await cost_sheet.load_pricing(conn, on) if action == "recompute" else None
     for key in keys:
@@ -454,6 +456,8 @@ async def apply_action(
                 results.append(
                     _result(key, "skipped", "not_in_catalog" if served is not None else "catalog_unreadable")
                 )
+            elif value and plan["id"] not in ready:
+                results.append(_result(key, "skipped", trip_plan_prices.NO_APPROVED_PRICE))  # AA-1158 Q9
             else:
                 await set_sellable(conn, staff, plan, value)
                 results.append(_result(key, "done"))

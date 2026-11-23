@@ -220,6 +220,8 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "agency_billing.write": frozenset({"admin", "finance"}),
     "agency_payment.approve": frozenset({"admin", "finance"}),
     "billing_config.write": frozenset({"admin", "finance"}),
+    # AA-1158 (bk-064): approving a change of a billing entity's payment details or default flag (a second person).
+    "billing_config.approve": frozenset({"admin", "finance"}),
     # AA-1037 extras G6 (bk-044): a partner terms clause (e.g. price errors) reaches agencies only once approved; the
     # business owner approves (admin), never the clause's last editor (403 maker_checker + a CHECK).
     "terms_clause.approve": frozenset({"admin"}),
@@ -627,6 +629,22 @@ async def get_pool(request: Request) -> asyncpg.Pool:
     return await db.pool()
 
 
+def _refuse_read_only_writes(request: Request, principal: Any, *, preview: bool, view_ref: str | None) -> None:
+    """Refuse a write of a read-only workforce session before any DB access: a Preview-host session (AA-911 D-1), the
+    E2E admin (AA-910: its codes are readable by CI roles) and a view-as session (AA-1157: the staff BFF refuses and
+    logs such a write first; this is the API's own check for a write sent straight here)."""
+    if request.method.upper() in PREVIEW_METHODS:
+        return
+    for refused, event, detail in (
+        (preview, "booking_preview_write_refused", "preview_read_only"),
+        (is_e2e_test_principal(principal), "booking_e2e_write_refused", "e2e_read_only"),
+        (view_ref is not None, "booking_view_as_write_refused", view_as.READ_ONLY),
+    ):
+        if refused:
+            log.info("%s method=%s path=%s", event, request.method, request.url.path)
+            raise HTTPException(status_code=403, detail=detail)
+
+
 async def current_staff(
     request: Request, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
 ) -> Staff:
@@ -643,20 +661,8 @@ async def current_staff(
     kind = identity_config.issuer_kind(verifier, principal.iss)
     if kind == identity_config.WORKFORCE:
         preview = identity_config.is_preview_client(request.app.state.settings, principal.client_id)
-        if preview and request.method.upper() not in PREVIEW_METHODS:
-            # AA-911 D-1: a Preview-host session never writes, whatever its groups. Refused before any DB access.
-            log.info("booking_preview_write_refused method=%s path=%s", request.method, request.url.path)
-            raise HTTPException(status_code=403, detail="preview_read_only")
-        if is_e2e_test_principal(principal) and request.method.upper() not in PREVIEW_METHODS:
-            # AA-910: the E2E admin's codes are readable by CI roles; it may read every page but never write.
-            log.info("booking_e2e_write_refused method=%s path=%s", request.method, request.url.path)
-            raise HTTPException(status_code=403, detail="e2e_read_only")
         view_ref = request.headers.get(view_as.HEADER)
-        if view_ref is not None and request.method.upper() not in PREVIEW_METHODS:
-            # AA-1157: a view-as session never writes, whatever the route. Refused before any DB access. The staff BFF
-            # refuses (and logs) such a write itself first; this is the API's own check for a write sent straight here.
-            log.info("booking_view_as_write_refused method=%s path=%s", request.method, request.url.path)
-            raise HTTPException(status_code=403, detail=view_as.READ_ONLY)
+        _refuse_read_only_writes(request, principal, preview=preview, view_ref=view_ref)
         writer = e2e_staff.writer_for(principal.email)
         route_obj = request.scope.get("route")
         route = getattr(route_obj, "path", None)

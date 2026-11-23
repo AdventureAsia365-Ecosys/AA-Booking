@@ -95,7 +95,9 @@ async def test_supplier_crud_rbac_and_place_check(
     assert sup["contact_email"] == "sales@emerald.example"
     assert sup["country_code"] == "VN" and sup["country_name"] == "Vietnam"  # derived from the CIS place
     assert sup["destination"] == {"id": HANOI, "name": "Hanoi", "country": "Vietnam"}
-    assert sup["status"] == "active" and sup["contract_counts"]["total"] == 0
+    # AA-1158 (R5): a new supplier starts pending whoever creates it; a second person activates it.
+    assert sup["status"] == "pending" and sup["contract_counts"]["total"] == 0
+    assert sup["actions"]["activate"]["blockers"] == ["maker_checker"]
 
     dup = await c.post("/suppliers", json={**body, "company_name": "hanoi emerald hotel"}, headers=checker)
     assert dup.status_code == 409 and dup.json()["detail"] == "supplier_exists"
@@ -156,7 +158,8 @@ async def test_supplier_crud_rbac_and_place_check(
     assert [s["company_name"] for s in page["items"]] == ["Lost Guides"] and page["total"] == 3
     assert (await c.get("/suppliers?sort=bogus", headers=sales)).status_code == 422
     summary = (await c.get("/suppliers/summary", headers=sales)).json()
-    assert summary["total"] == 3 and summary["active"] == 3 and summary["countries"] == 2
+    assert summary["total"] == 3 and summary["pending"] == 3 and summary["active"] == 0 and summary["countries"] == 2
+    assert (await c.get("/suppliers?status=pending&approvable=me", headers=maker)).json()["total"] == 1  # not its own
 
     places = await c.get("/catalog/destinations?q=han", headers=sales)
     assert places.status_code == 200
@@ -184,6 +187,9 @@ async def test_contract_lifecycle_and_deactivate_rule(
     sup = (
         await c.post("/suppliers", json={"company_name": "Paro Lodge", "categories": ["hotel"]}, headers=maker)
     ).json()
+    own = await c.post(f"/suppliers/{sup['id']}/activate", headers=maker)  # AA-1158: never by its creator
+    assert own.status_code == 403 and own.json()["detail"] == "maker_checker"
+    assert (await c.post(f"/suppliers/{sup['id']}/activate", headers=checker)).json()["activated_by"] == CHECKER
     contract = {
         "title": "2026-27 rates",
         "valid_from": str(today - timedelta(days=10)),
@@ -251,6 +257,7 @@ async def test_contract_lifecycle_and_deactivate_rule(
     ]
     assert actions == [
         "supplier.created",
+        "supplier.activated",
         "supplier_contract.created",
         "supplier_contract.updated",
         "supplier_contract.published",
@@ -273,6 +280,7 @@ async def test_no_writer_publishes_after_a_checker_edit(client: tuple[httpx.Asyn
     sup = (
         await c.post("/suppliers", json={"company_name": "Gobi Jeeps", "categories": ["transport"]}, headers=checker)
     ).json()
+    await c.post(f"/suppliers/{sup['id']}/activate", headers=maker)  # AA-1158: the second person
     body = {"title": "Next season", "valid_from": str(datetime.now(UTC).date() + timedelta(days=60)), "currency": "MNT"}
     k = (await c.post(f"/suppliers/{sup['id']}/contracts", json=body, headers=maker)).json()
     fixed = await c.patch(f"/contracts/{k['id']}", json={"payment_terms": "50% on booking"}, headers=checker)

@@ -14,7 +14,10 @@ import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./useSupplierActions.messages";
 
-type Pending = { kind: "deactivate" | "activate"; supplier: Pick<Supplier, "code" | "company_name"> } | null;
+// AA-1158: every new supplier starts pending; its creator never activates it, except the business owner, whose
+// activation is flagged (`selfApproval`: the dialog says so). Deactivating a pending supplier rejects it.
+type Target = Pick<Supplier, "code" | "company_name"> & { selfApproval?: boolean };
+type Pending = { kind: "deactivate" | "activate"; supplier: Target } | null;
 
 export function useSupplierActions() {
   const t = useT(MSG);
@@ -61,6 +64,7 @@ export function useSupplierActions() {
         ) : (
           <>
             {t("Activate")} <strong className="text-ink">{name}</strong>{t("? Contracting can add and publish contracts for it again.")}
+            <SelfApprovalNote target={pending} />
           </>
         )
       }
@@ -74,4 +78,15 @@ export function useSupplierActions() {
     activate: (s: NonNullable<Pending>["supplier"]) => ask("activate", s),
     dialogs,
   };
+}
+
+/** AA-1158: the business owner activating a supplier she created (flagged and listed in the audit log). */
+function SelfApprovalNote({ target }: { target: Pending }) {
+  const t = useT(MSG);
+  if (!target?.supplier.selfApproval) return null;
+  return (
+    <span className="mt-2 block">
+      {t("You created this supplier. Activating it yourself is recorded as a business-owner self-approval.")}
+    </span>
+  );
 }

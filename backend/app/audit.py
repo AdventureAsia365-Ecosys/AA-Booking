@@ -62,6 +62,22 @@ async def record(
     )
 
 
+# AA-1158: the audit filter of business-owner self-approvals (the partial index audit_logs_owner_self_idx, bk-064).
+OWNER_SELF = "(l.after->>'owner_self_approved') = 'true'"
+
+
+async def owner_self_approvals_month(conn: asyncpg.Connection) -> dict[str, Any]:
+    """AA-1158 My work: the business-owner self-approvals of the current UTC calendar month, the oldest one, and the
+    list filter that shows exactly them."""
+    start = datetime.now(UTC).date().replace(day=1)
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(l.created_at) AS oldest_at FROM booking.audit_logs l"  # noqa: S608
+        f" WHERE {OWNER_SELF} AND l.created_at >= $1",
+        _day_start(start),
+    )
+    return {**dict(row), "filter": {"owner_self_approved": "true", "from": start.isoformat()}}
+
+
 def _day_start(value: date | None) -> datetime | None:
     return None if value is None else datetime.combine(value, time.min, tzinfo=UTC)
 
@@ -81,11 +97,13 @@ async def list_logs(
     q: str | None = None,
     before: str | None = None,
     limit: int = 50,
+    owner_self_approved: bool | None = None,
 ) -> dict[str, Any]:
     """Newest first, keyset-paged (``before`` = the ``next_before`` of the previous page, ``app.paging``).
 
     ``date_to`` is inclusive (the whole day). ``q`` (AA-996) matches the summary, the action, the record label or the
-    actor's name anywhere, case-insensitive, with ``%`` / ``_`` taken literally."""
+    actor's name anywhere, case-insensitive, with ``%`` / ``_`` taken literally. ``owner_self_approved=True``
+    (AA-1158): only the business-owner self-approvals (``after.owner_self_approved``; index bk-064)."""
     where: list[str] = []
     args: list[Any] = []
 
@@ -103,6 +121,8 @@ async def list_logs(
         add("l.created_at >= {p}", _day_start(date_from))
     if date_to:
         add("l.created_at < {p}", _day_start(date_to + timedelta(days=1)))
+    if owner_self_approved:
+        where.append(OWNER_SELF)
     if q and q.strip():
         add(
             "(l.summary ILIKE {p} OR l.action ILIKE {p} OR l.entity_label ILIKE {p} OR s.name ILIKE {p})",

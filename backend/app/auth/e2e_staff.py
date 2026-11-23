@@ -43,16 +43,18 @@ agency payment recorded by one finance user and approved by another (maker-check
   pricing maker also loads a SYNTHETIC supplier through the real supply paths: it creates the supplier (body checked:
   the name starts with :data:`SYNTHETIC_SUPPLY_MARK`, no contact or note field), its hotels, room types and services
   (names marked the same way), imports the rate sheet (a draft contract: the maker is its maker), and deactivates them
-  at cleanup. The checker publishes the draft (the service refuses the maker: 403 ``maker_checker``) and may expire
-  it. A supply record is synthetic only when its supplier was created by the E2E pricing maker and still carries the
-  mark (:data:`SUPPLIER_SYNTHETIC_SQL` and its hotel / service / contract forms); hotels and services being created are
+  at cleanup. AA-1158 (R5): the synthetic supplier starts ``pending``; the checker activates it (the second person:
+  the service refuses the maker, 403 ``maker_checker``) before the maker adds hotels, services and rates. The checker
+  publishes the draft (the service refuses the maker: 403 ``maker_checker``) and may expire it. A supply record is
+  synthetic only when its supplier was created by the E2E pricing maker and still carries the mark
+  (:data:`SUPPLIER_SYNTHETIC_SQL` and its hotel / service / contract forms); hotels and services being created are
   checked by the supplier their body names (:data:`BODY_SUPPLIER`). Paths take a UUID or a code (``SUP-`` / ``HTL-`` /
   ``SVC-`` + digits).
 
 - **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
   (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
   so it proves the custom role with a real session: it reads what the role reads, makes a SYNTHETIC supplier (body
-  checked as A10e-3; it starts ``inactive``, the maker holds no ``supplier.activate``) and deactivates it at cleanup,
+  checked as A10e-3; it starts ``pending``, the maker holds no ``supplier.activate``) and deactivates it at cleanup,
   its own supplier only (:attr:`E2EWriter.record_owner`). Its other writes are **approve probes**
   (:attr:`E2EWriter.approve_probes`): any write whose route gate needs an approve-class capability
   (:func:`route_permissions`), and the approvals a service checks (:data:`SERVICE_PROBES`: supplier / hotel / service
@@ -312,11 +314,20 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
         ),
         # A10e-2 pricing checker: approves, rejects or withdraws (published: restores the superseded one) a version
         # the pricing maker made on a synthetic plan. A10e-3: publishes or expires a contract of the maker's synthetic
-        # supplier (the second person of the contract maker-checker).
+        # supplier (the second person of the contract maker-checker); AA-1158: activates that synthetic supplier (it
+        # starts pending; the second person of the activation).
         E2E_PRICING_CHECKER_EMAIL: E2EWriter(
             "pricing_checker",
             frozenset({"booking-contracting"}),
-            frozenset({PRICE_VERSION_APPROVE, PRICE_VERSION_REJECT, PRICE_VERSION_WITHDRAW, CONTRACT_STATUS}),
+            frozenset(
+                {
+                    PRICE_VERSION_APPROVE,
+                    PRICE_VERSION_REJECT,
+                    PRICE_VERSION_WITHDRAW,
+                    CONTRACT_STATUS,
+                    SUPPLIER_ACTIVATE,
+                }
+            ),
         ),
         # A10g (AA-1155 T5): the custom-role maker. It makes and cleans up its own synthetic supplier; every approve
         # probe (route gates and SERVICE_PROBES) is answered 403 from its capabilities before any read.
@@ -454,6 +465,7 @@ SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
         PRICE_VERSION_REJECT[1]: ("version_id", VERSION_SYNTHETIC_SQL),
         PRICE_VERSION_WITHDRAW[1]: ("version_id", VERSION_SYNTHETIC_SQL),
         SUPPLIER_DEACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
+        SUPPLIER_ACTIVATE[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),  # AA-1158: the pricing checker
         RATE_SHEET_IMPORT[1]: ("supplier_ref", SUPPLIER_SYNTHETIC_SQL),
         CONTRACT_STATUS[1]: ("contract_id", CONTRACT_SYNTHETIC_SQL),
         HOTEL_DEACTIVATE[1]: ("hotel_ref", HOTEL_SYNTHETIC_SQL),

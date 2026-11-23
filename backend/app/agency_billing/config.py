@@ -3,7 +3,10 @@ data rows that finance (or an admin) edits in the staff admin (``billing_config.
 (root ADR 0019 b16 / b17; BO-15..17 "adjustable later"). Every change writes one ``booking.audit_logs`` row.
 
 - **Billing entity**: AA's legal entity on the invoice (b10). At most one default (a partial unique index); making a
-  row the default clears the old one in the same transaction. Rows are deactivated, never deleted.
+  row the default clears the old one in the same transaction. Rows are deactivated, never deleted. AA-1158: the
+  payment details (``payment_instructions``) and making a row the default are pending changes a second person
+  approves (:mod:`app.agency_billing.entity_changes`); every other field applies at once. The default issuer moves
+  only by approving another row as the default.
 - **Tax rule**: rate + wording per invoice kind and recipient country with an effective window; the draft jobs pick
   the active rule in force on a day, the most specific first (:func:`pick_tax_rule`).
 - **Terms**: one default row (``party_tenant_id`` NULL) and optional per-agency overrides, each a whole set
@@ -20,6 +23,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
+from app.agency_billing import entity_changes
 from app.errors import Conflict, Invalid, NotFound
 
 ENTITY_COLUMNS = (
@@ -102,7 +106,9 @@ def _jsonable(d: dict[str, Any] | None) -> dict[str, Any] | None:
 
 async def list_entities(conn: asyncpg.Connection) -> list[dict[str, Any]]:
     rows = await conn.fetch(f"SELECT {ENTITY_COLUMNS} FROM booking.billing_entity ORDER BY is_default DESC, code")  # noqa: S608
-    return [_plain(r) for r in rows]
+    items = [_plain(r) for r in rows]
+    pending = await entity_changes.pending_for(conn, [i["id"] for i in items])
+    return [{**i, "pending_change": pending.get(i["id"])} for i in items]
 
 
 async def default_entity(conn: asyncpg.Connection) -> dict[str, Any] | None:
@@ -113,11 +119,10 @@ async def default_entity(conn: asyncpg.Connection) -> dict[str, Any] | None:
 
 
 async def create_entity(conn: asyncpg.Connection, body: dict[str, Any], actor: str) -> dict[str, Any]:
+    """A new entity starts without payment details and not the default; those two become one pending change."""
     async with conn.transaction():
         if await conn.fetchval("SELECT 1 FROM booking.billing_entity WHERE code = $1", body["code"]):
             raise Conflict("code_taken", f"a billing entity with code {body['code']} exists")
-        if body.get("is_default"):
-            await conn.execute("UPDATE booking.billing_entity SET is_default = false WHERE is_default")
         row = await conn.fetchrow(
             "INSERT INTO booking.billing_entity (code, legal_entity, tax_code, registered_office, country_iso2,"  # noqa: S608
             " invoice_inbox, payment_instructions, is_default, active, updated_by)"
@@ -128,14 +133,25 @@ async def create_entity(conn: asyncpg.Connection, body: dict[str, Any], actor: s
             body.get("registered_office"),
             body.get("country_iso2"),
             body.get("invoice_inbox"),
-            body.get("payment_instructions"),
-            bool(body.get("is_default")),
+            None,
+            False,
             actor,
         )
         out = _plain(row)
         await _audit(conn, actor, "billing_entity.created", "billing_entity", out["id"], out["code"], None,
                      _jsonable(out))  # fmt: skip
-    return out
+        pending = None
+        if body.get("payment_instructions") or body.get("is_default"):
+            pending = await entity_changes.request(
+                conn,
+                actor,
+                out["id"],
+                set_payment_instructions=bool(body.get("payment_instructions")),
+                payment_instructions=body.get("payment_instructions"),
+                make_default=bool(body.get("is_default")),
+                reason=body.get("change_reason"),
+            )
+    return {**out, "pending_change": pending}
 
 
 async def update_entity(
@@ -148,11 +164,21 @@ async def update_entity(
         )
         if before is None:
             raise NotFound("billing_entity_not_found", "no billing entity with this id")
-        merged = {**dict(before), **{k: v for k, v in changes.items() if k in ENTITY_FIELDS}}
+        asked = {k: v for k, v in changes.items() if k in ENTITY_FIELDS}
+        # AA-1158: the payment details and the default flag are pending changes (entity_changes), never direct.
+        new_text = "payment_instructions" in asked and asked["payment_instructions"] != before["payment_instructions"]
+        make_default = bool(asked.get("is_default")) and not before["is_default"]
+        if asked.get("is_default") is False and before["is_default"]:
+            raise Invalid(
+                "default_moves_by_change",
+                "the default issuer changes by approving another billing entity as the default",
+            )
+        merged = {**dict(before), **asked, "payment_instructions": before["payment_instructions"],
+                  "is_default": before["is_default"]}  # fmt: skip
         if merged["is_default"] and not merged["active"]:
             raise Invalid("default_must_be_active", "the default billing entity must be active")
-        if merged["is_default"] and not before["is_default"]:
-            await conn.execute("UPDATE booking.billing_entity SET is_default = false WHERE is_default")
+        if make_default and not merged["active"]:
+            raise Invalid("default_must_be_active", "the default billing entity must be active")
         row = await conn.fetchrow(
             "UPDATE booking.billing_entity SET legal_entity = $2, tax_code = $3, registered_office = $4,"  # noqa: S608
             " country_iso2 = $5, invoice_inbox = $6, payment_instructions = $7, is_default = $8, active = $9,"
@@ -164,7 +190,20 @@ async def update_entity(
         out = _plain(row)
         await _audit(conn, actor, "billing_entity.updated", "billing_entity", entity_id, out["code"],
                      _jsonable(_plain(before)), _jsonable(out))  # fmt: skip
-    return out
+        pending = None
+        if new_text or make_default:
+            pending = await entity_changes.request(
+                conn,
+                actor,
+                entity_id,
+                set_payment_instructions=new_text,
+                payment_instructions=asked.get("payment_instructions"),
+                make_default=make_default,
+                reason=changes.get("change_reason"),
+            )
+        else:
+            pending = (await entity_changes.pending_for(conn, [entity_id])).get(entity_id)
+    return {**out, "pending_change": pending}
 
 
 # ── Tax rules ────────────────────────────────────────────────────────────────

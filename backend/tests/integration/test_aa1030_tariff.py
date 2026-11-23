@@ -23,6 +23,7 @@ import pytest
 import pytest_asyncio
 
 from app.b2b import quotes
+from tests.integration.conftest import make_sellable
 from tests.integration.test_aa1030_tiers import TENANT_GOLD, TENANT_SILVER, _m2m, tiers_clean  # noqa: F401
 from tests.integration.test_bk019_b2b import (  # noqa: F401 — fixtures used by name
     ADMIN,
@@ -98,7 +99,7 @@ async def test_the_tariff_is_what_a_quote_charges(
         ids[tenant] = (await _ok(await c.post("/b2b-partners", json=body, headers=boss), 201))["id"]
         await _ok(await c.patch(f"/pricing/partner-terms/{ids[tenant]}", json={"tier_code": tier}, headers=boss))
 
-    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    commercial = {"sellable": False, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {
         "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
@@ -106,6 +107,7 @@ async def test_the_tariff_is_what_a_quote_charges(
     plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
         "trip_plan_id"
     ]
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     await _ok(await c.post(f"/catalog/trip-plans/{SOURCE_ID}/prices/recompute", headers=maker))
 
     # Contract rate cards: the silver agency 8 % on the whole catalogue, the gold agency 10 % on this tour.
@@ -220,7 +222,7 @@ async def test_a_hand_row_over_a_rate_change_is_cut_there(
     boss, sales, maker = _staff(cis, ADMIN), _staff(cis, SALES), _staff(cis, MAKER)
     body = {"tenant_id": TENANT_STANDARD, "agency_name": "Invented Kestrel Tours", "m2m_client_id": CRM_CLIENT}
     partner = (await _ok(await c.post("/b2b-partners", json=body, headers=boss), 201))["id"]
-    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    commercial = {"sellable": False, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {
         "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
@@ -228,6 +230,7 @@ async def test_a_hand_row_over_a_rate_change_is_cut_there(
     plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
         "trip_plan_id"
     ]
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     # A second published contract: the room at 1,500,000 VND a night from 1 June 2027 (the newest rate wins).
     supplier = await admin.fetchval("SELECT supplier_id::text FROM booking.hotels WHERE id = (SELECT hotel_id FROM"
                                     " booking.hotel_room_types WHERE id = $1::uuid)", supply["room"])  # fmt: skip
@@ -287,7 +290,7 @@ async def test_a_tariff_currency_without_an_approved_fx_rate_is_the_callers_choi
     boss, sales, maker = _staff(cis, ADMIN), _staff(cis, SALES), _staff(cis, MAKER)
     body = {"tenant_id": TENANT_STANDARD, "agency_name": "Invented Kestrel Tours", "m2m_client_id": CRM_CLIENT}
     partner = (await _ok(await c.post("/b2b-partners", json=body, headers=boss), 201))["id"]
-    commercial = {"sellable": True, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
+    commercial = {"sellable": False, "price_hint": {"amount": "150.00", "currency": "USD", "basis": "per_person"}}
     await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/commercial", json=commercial, headers=maker))
     items = {
         "items": [{"day_no": 1, "hotel_room_type_id": supply["room"]}, {"day_no": 1, "service_id": supply["service"]}]
@@ -295,6 +298,7 @@ async def test_a_tariff_currency_without_an_approved_fx_rate_is_the_callers_choi
     plan_id = (await _ok(await c.put(f"/catalog/trip-plans/{SOURCE_ID}/components", json=items, headers=maker)))[
         "trip_plan_id"
     ]
+    await make_sellable(admin, SOURCE_ID)  # AA-1158 Q9: the price gate is tested in test_aa1158_approval_rules_api
     await _ok(await c.post(f"/catalog/trip-plans/{SOURCE_ID}/prices/recompute", headers=maker))
     eur = await _insert(
         admin, "fx_rates", currency="EUR", rate_per_usd=D("0.92"), buffer_pct=0, as_of=date(2026, 1, 1),

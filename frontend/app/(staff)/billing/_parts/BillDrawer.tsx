@@ -48,6 +48,7 @@ import { errorText, fieldCls, prepareEvidence, today } from "./evidence";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
+import { OwnerPathNotice } from "./OwnerPathNotice";
 import { MSG } from "./BillDrawer.messages";
 import { Fact, Field } from "./BillFields";
 
@@ -306,8 +307,9 @@ export function BillDrawer({ billRef, onClose }: { billRef: string | null; onClo
             </ul>
           )}
           {b.status === "approved" && !b.actions.pay && (
-            <p className="text-xs text-muted">{t("An admin who did not enter this bill or change its amounts records the payout.")}</p>
+            <p className="text-xs text-muted">{t("An admin who did not enter, change or approve this bill records the payout.")}</p>
           )}
+          <OwnerPathNotice actions={b.actions} />
 
           <section className="flex flex-col gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{t("Lines (confirmed supplier bookings)")}</h3>

@@ -115,25 +115,25 @@ async def test_a_maker_without_the_approval_capabilities_is_refused_and_a_holder
     c, cis = client
     maker, other, checker = _as(cis, MAKER), _as(cis, OTHER_MAKER), _as(cis, CHECKER)
 
-    # Creating: a holder's new supplier is active at once; the maker's starts inactive (no way around the approval).
+    # Creating: every new supplier starts pending (AA-1158 R5), a holder's too; the maker's waits for a holder.
     held = await _ok(
         await c.post("/suppliers", json={"company_name": "Invented Lagoon Kayaks", "categories": ["activity"]},
                      headers=checker),
         201,
     )  # fmt: skip
-    assert held["status"] == "active"
+    assert held["status"] == "pending"
     sup = await _ok(
         await c.post("/suppliers", json={"company_name": "Invented Reef Boats", "categories": ["activity"]},
                      headers=maker),
         201,
     )  # fmt: skip
-    assert sup["status"] == "inactive"
-    assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "inactive"
+    assert sup["status"] == "pending"
+    assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "pending"
 
     # Supplier activation: the maker (supply.write, no supplier.activate) is 403, and so is another maker.
     _refused(await c.post(f"/suppliers/{sup['id']}/activate", headers=maker))
     _refused(await c.post(f"/suppliers/{sup['code']}/activate", headers=other))
-    assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "inactive"
+    assert await admin.fetchval("SELECT status FROM booking.suppliers WHERE id = $1::uuid", sup["id"]) == "pending"
     on = await _ok(await c.post(f"/suppliers/{sup['id']}/activate", headers=checker))
     assert on["status"] == "active"
 

@@ -537,14 +537,17 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
         ],
         [{"source_id": KEY, "start_date": start, "capacity": 8}],
     )
-    conn = (
+    plans = [{"id": "p-1", "source_id": KEY, "sellable": False}]
+    unpriced = (
         _match_conn()
         .on("FROM booking.trip_plan_prices pr", [])
-        .on(
-            "SELECT p.id::text AS id, p.source_id, p.sellable FROM booking.trip_plans p",
-            [{"id": "p-1", "source_id": KEY, "sellable": False}],
-        )
+        .on("SELECT p.id::text AS id, p.source_id, p.sellable FROM booking.trip_plans p", plans)
     )
+    # AA-1158 Q9: a tour made sellable needs an approved price after the import (its draft version does not count).
+    with pytest.raises(Invalid) as err:
+        await pi.import_workbook(unpriced, STAFF, data, dry_run=True)  # type: ignore[arg-type]
+    assert [e["code"] for e in err.value.extra["errors"]] == ["no_approved_price"]
+    conn = unpriced.on("SELECT DISTINCT r.trip_plan_id", [{"plan_id": "p-1"}])
     preview = await pi.import_workbook(conn, STAFF, data, dry_run=True)  # type: ignore[arg-type]
     assert calls == [] and preview["dry_run"] is True
     (tour,) = preview["tours"]
@@ -557,8 +560,8 @@ async def test_import_dry_run_and_apply(monkeypatch: pytest.MonkeyPatch) -> None
         f"components {KEY} 1",
         f"price draft {KEY} 1",
         f"departure {KEY} {start} True None",
-        f"sellable {KEY} True",
         "recompute p-1",
+        f"sellable {KEY} True",  # after the recompute, re-checked against the matrix it left
     ]
     assert done["recomputed"] == 1
     assert done["price_drafts"] == [{"tour_key": KEY, "version_id": "v-1", "rows": 1}]

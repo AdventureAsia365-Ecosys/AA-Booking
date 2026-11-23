@@ -66,7 +66,7 @@ async def bk048(migrated_admin_dsn: str, admin: asyncpg.Connection) -> AsyncIter
     delete the outbox rows of its event types and the agency invoices the settlement run made."""
     conn = await asyncpg.connect(migrated_admin_dsn)
     try:
-        await apply_migrations(conn, only=[48])
+        await apply_migrations(conn, only=[48, 64])  # bk-064 re-grants owner_self_approved (AA-1158)
         await conn.execute(
             "INSERT INTO booking.staff_users (cis_user_id, role, active, name) VALUES ($1, 'content_creator', true, $1)"
             " ON CONFLICT (cis_user_id) DO NOTHING",

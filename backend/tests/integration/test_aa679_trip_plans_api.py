@@ -17,6 +17,7 @@ from app.db import Database
 from app.main import create_app
 from app.settings import Settings
 from tests.integration import ops
+from tests.integration.conftest import make_sellable
 from tests.staff_tokens import LocalCis
 
 # AA-1046: the services run on the sold b2c case of tests.integration.ops (conftest `b2c_guard_off`).
@@ -123,8 +124,13 @@ async def test_list_facets_and_detail(client: tuple[httpx.AsyncClient, LocalCis]
     ]
     assert all(i["sellable"] is False and i["has_commercial_row"] is False for i in everything["items"])
 
-    put = await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
+    put = await c.put(
+        f"/catalog/trip-plans/{BHUTAN_A}/commercial", json={**COMMERCIAL, "sellable": False}, headers=contracting
+    )
     assert put.status_code == 200, put.text
+    await make_sellable(
+        admin, BHUTAN_A
+    )  # AA-1158 Q9: the price gate is tested in test_commercial_upsert_is_one_row_and_audited
 
     bhutan = (await c.get("/catalog/trip-plans", params={"country": "bhutan"}, headers=contracting)).json()
     assert bhutan["total"] == 2
@@ -184,10 +190,14 @@ async def test_commercial_upsert_is_one_row_and_audited(
     url = f"/catalog/trip-plans/{BHUTAN_A}/commercial"
 
     assert (await c.put(url, json=COMMERCIAL, headers=sales)).status_code == 403
-    first = (await c.put(url, json=COMMERCIAL, headers=contracting)).json()
-    assert first["sellable"] is True and "sellable" in first["changed"]
+    # AA-1158 Q9: a plan without an approved price is never made sellable (a new plan has none yet).
+    unpriced = await c.put(url, json=COMMERCIAL, headers=contracting)
+    assert unpriced.status_code == 409 and unpriced.json()["detail"] == "no_approved_price"
+    first = (await c.put(url, json={**COMMERCIAL, "sellable": False}, headers=contracting)).json()
+    assert first["sellable"] is False and "trip_style" in first["changed"]
+    await make_sellable(admin, BHUTAN_A)  # as if a price version were approved
     again = (await c.put(url, json=COMMERCIAL, headers=contracting)).json()
-    assert again["changed"] == []
+    assert again["changed"] == [] and again["sellable"] is True
     off = (await c.put(url, json={**COMMERCIAL, "sellable": False, "price_hint": None}, headers=contracting)).json()
     assert off["changed"] == ["price_hint_amount", "price_hint_basis", "price_hint_currency", "sellable"]
     assert off["price_hint"] is None
@@ -197,7 +207,7 @@ async def test_commercial_upsert_is_one_row_and_audited(
         "SELECT action, summary FROM booking.audit_logs WHERE entity_type = 'trip_plan' ORDER BY created_at, id"
     )
     assert [(r["action"], r["summary"]) for r in logs] == [
-        ("trip_plan.created", "Marked sellable"),
+        ("trip_plan.created", "Commercial details saved (not for sale)"),
         ("trip_plan.updated", "Marked not for sale; updated price_hint_amount, price_hint_basis, price_hint_currency"),
     ]
     missing = await c.put(f"/catalog/trip-plans/{MISSING}/commercial", json=COMMERCIAL, headers=contracting)
@@ -215,7 +225,12 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
 
     not_sellable = await c.post(use, json=body, headers=sales)
     assert not_sellable.status_code == 409 and not_sellable.json()["detail"] == "trip_plan_not_sellable"
-    await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
+    await c.put(
+        f"/catalog/trip-plans/{BHUTAN_A}/commercial", json={**COMMERCIAL, "sellable": False}, headers=contracting
+    )
+    await make_sellable(
+        admin, BHUTAN_A
+    )  # AA-1158 Q9: the price gate is tested above and in test_aa1158_approval_rules_api
     assert (await c.post(use, json=body, headers=contracting)).status_code == 403
     # AA-1046: a new case from a plan was a staff-made traveller (B2C) case: retired, 410 before any read.
     new_case = await c.post(use, json={}, headers=sales)
@@ -243,7 +258,10 @@ async def test_use_for_trip_case(client: tuple[httpx.AsyncClient, LocalCis], adm
     assert retired.status_code == 422  # the customer fields are gone
 
     # A sellable plan without canonical days gives one item over its duration.
-    await c.put(f"/catalog/trip-plans/{BHUTAN_B}/commercial", json={"sellable": True}, headers=contracting)
+    await c.put(f"/catalog/trip-plans/{BHUTAN_B}/commercial", json={"sellable": False}, headers=contracting)
+    await make_sellable(
+        admin, BHUTAN_B
+    )  # AA-1158 Q9: the price gate is tested above and in test_aa1158_approval_rules_api
     plain = (await c.post(f"/catalog/trip-plans/{BHUTAN_B}/trip-cases", json=body, headers=sales)).json()
     assert [(i["title"], i["day_from"], i["day_to"]) for i in plain["version"]["items"]] == [("Bhutan Valleys", 1, 5)]
     assert plain["version"]["channel"] is None
@@ -263,7 +281,12 @@ async def test_items_read_back_a_cis_rewrite_and_staff_refresh_them(
     staff save of the CIS titles clears the flags. Nothing changes by itself; the trail does not store the read-back."""
     c, cis = client
     contracting, sales = _auth(cis, CONTRACTING), _auth(cis, SALES)
-    await c.put(f"/catalog/trip-plans/{BHUTAN_A}/commercial", json=COMMERCIAL, headers=contracting)
+    await c.put(
+        f"/catalog/trip-plans/{BHUTAN_A}/commercial", json={**COMMERCIAL, "sellable": False}, headers=contracting
+    )
+    await make_sellable(
+        admin, BHUTAN_A
+    )  # AA-1158 Q9: the price gate is tested above and in test_aa1158_approval_rules_api
     target = await ops.b2c_case(admin, tag="aa679-cis", status="building")
     made = (
         await c.post(f"/catalog/trip-plans/{BHUTAN_A}/trip-cases", json={"trip_case": target["code"]}, headers=sales)
@@ -356,7 +379,10 @@ async def test_tour_leaving_the_catalog_drops_out(
 ) -> None:
     c, cis = client
     contracting = _auth(cis, CONTRACTING)
-    await c.put(f"/catalog/trip-plans/{LAOS}/commercial", json=COMMERCIAL, headers=contracting)
+    await c.put(f"/catalog/trip-plans/{LAOS}/commercial", json={**COMMERCIAL, "sellable": False}, headers=contracting)
+    await make_sellable(
+        admin, LAOS
+    )  # AA-1158 Q9: the price gate is tested in test_commercial_upsert_is_one_row_and_audited
     await admin.execute("DELETE FROM catalog.v_tour WHERE source_id = $1", LAOS)  # trashed / unpublished in CIS
 
     listed = (await c.get("/catalog/trip-plans", headers=contracting)).json()
