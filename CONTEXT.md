@@ -2311,6 +2311,26 @@ A **contract** file (MIG-4; the code PR raises readiness to bk-061). Version 1 o
 `staff_admin_mfa_required` = false (made, submitted and approved by the migration, `seed:bk-061`, in force from
 2026-01-01): administrators may still sign in with an e-mail code, today's behaviour. No table, no personal data.
 
+### `bk-065` (AA-1149 tour split and can operate — needs `bk-019`, `bk-027`, `bk-045`, `bk-064`)
+
+A **contract** file (MIG-4; the code PR raises readiness to bk-065). New `b2b_quote_line_parts` (append-only, `booking`
+INSERT / SELECT): one row per component of a `tp:` quote line, written by the quote calculation with the quote (day and
+date, room type XOR service, supplier, quantity, pax, the room mix of a room part, the net in the rates' currency or a
+NULL pair when they differ, the rate ids); the parts of a confirmed hold's quote are the sold snapshot.
+`supplier_bookings` gains `quote_part_id` (FK; never with `version_item_id`; never changes) and `quantity` (a fact),
+with the partial unique index `supplier_bookings_part_live_uq` (one live booking per part). The old
+`supplier_bookings_item_live_uq` stays as it is (the running code's `ON CONFLICT` infers it). `supplier_bookings_guard`
+= the bk-045 body plus: a part of the case's own confirmed hold quote, on a line without a departure, never linked to a
+hold line. `v_trip_case_supply_state` (same columns) also counts the parts of confirmed hold lines without a departure
+that no waiver closed (behaviour change for a new `tp:` case: `pre_departure` needs every part confirmed or waived).
+New `trip_case_part_waivers` (append-only; reason 20..500, `pii:free_text`), `trip_plans.no_hotel_nights`
+(`smallint[]`), `trip_plan_operable_overrides` (the admin sale exception: N1 / N3-supplier findings only, reason
+20..500, at most 90 days as a backstop, one unrevoked per tour, revoked once; guard; `booking` updates the revoke
+columns only), `b2b_quote_lines.operable_override_id`, and the trigger `b2b_holds_sale_exception_checks` (a hold
+confirmed with a covered line adds one open custom trip check per exception). Version 1 of the pricing policy
+parameters `operable_exception_default_days` = 14 and `operable_exception_max_days` = 30 (section operations, approver
+admin). DM-7.1 rows for the three tables in the root data standards. `cis_app` reads none of it.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
