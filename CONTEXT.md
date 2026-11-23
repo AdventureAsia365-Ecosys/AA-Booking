@@ -1572,8 +1572,8 @@ two-way round trip (facts and room-type sheets, export).
   item's supplier from its first cost row's rate, else the B2B quote line's first rate, else the hotel's / service's.
   `supplier_bookings.hotel_confirmation_ref`: the hotel's own number the DMC passes on (confirm body or PATCH, while
   live; rooms only on confirm).
-- **DMC rate sheets** (`app/supply/rate_sheet.py`, `app/supply/rate_checks.py`): hotels matched by the DMC's code first,
-  room types by name then alias; optional `Seasons` (a season row with no dates becomes one rate per range,
+- **DMC rate sheets** (`app/supply/rate_sheet.py`, `rate_sheet_match.py`, `rate_checks.py`, `rate_review.py`): hotels
+  matched by the DMC's code first, room types by name then alias; optional `Seasons` (a season row with no dates becomes one rate per range,
   `booking.supplier_contract_seasons`) and `Hotel children` sheets; B7 `Published` + `Commission %` give the net. Checks:
   `season_overlap` (error: nothing imported), `season_gap`, `board_order` (HB below BB), `price_jump` (>=
   `rate_sheet_jump_warn_pct` against the supplier's previous contract) as warnings; the dry run shows them with the
