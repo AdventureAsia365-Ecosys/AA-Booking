@@ -150,6 +150,8 @@ SUPPLIER_ACTIVATE = ("POST", "/booking/suppliers/{supplier_ref}/activate")
 HOTEL_ACTIVATE = ("POST", "/booking/hotels/{hotel_ref}/activate")
 SERVICE_ACTIVATE = ("POST", "/booking/services/{service_ref}/activate")
 STOP_SALE_DECISION = ("POST", "/booking/supply/stop-sales/{restriction_id}/decision")
+# AA-1158 part 2: approve / reject of a supplier bank account (route gate supply.read, the service checks the approval).
+SUPPLIER_BANK_DECISION = ("POST", "/booking/supplier-bank-accounts/{account_id}/decision")
 # Every supplier, hotel and service name the maker creates starts with this (checked on the create body, and the
 # supplier keeps it: a renamed supplier is no longer synthetic).
 SYNTHETIC_SUPPLY_MARK = "SYNTHETIC"
@@ -521,6 +523,7 @@ SERVICE_PROBES: Mapping[tuple[str, str], tuple[str, Callable[[Any], bool] | None
         SERVICE_ACTIVATE: ("supplier.activate", None),
         CONTRACT_STATUS: ("contract.publish", _status_published),
         STOP_SALE_DECISION: ("stop_sale.approve", _review_action),
+        SUPPLIER_BANK_DECISION: ("supplier_bank.approve", _review_action),
     }
 )
 # The approve class (root spec D4; the same rule as app.auth.custom_roles.is_approve_class, kept here so this TEMPORARY
@@ -535,6 +538,7 @@ _APPROVE_NAMED = frozenset(
         "payment.verify",
         "billing_config.write",
         "staff.admin",
+        "supplier_bank.read",  # bk-067 (AA-1158 part 2): it decrypts full account numbers
     }
 )
 

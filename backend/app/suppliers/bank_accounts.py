@@ -22,8 +22,9 @@ Where AA sends a supplier's money is the main payout fraud path, so a bank accou
   ``bank_account_pending`` / ``bank_payout_locked`` (:func:`check_payout`, called by the payout checks); the database
   refuses the same (``booking.supplier_payouts_bank_lock``). A supplier with no account on file is not locked.
 - **Read**: every reader of the supplier sees the masked list (bank, ``•••• 1234``, who and when); the full details
-  only with ``supplier_bank.read`` (admin, finance), one KMS Decrypt per request, every read audited
-  (``supplier_bank_account.revealed``, never the details themselves).
+  only with ``supplier_bank.read`` (admin, finance; approve class, so never a custom role), only of a pending or
+  approved row (409 ``bank_account_closed`` for a withdrawn, rejected or superseded one), one KMS Decrypt per request,
+  every read audited (``supplier_bank_account.revealed``, never the details themselves).
 
 Every step writes one audit row on the supplier (it shows in the supplier's activity); the audit never holds a detail
 beyond the last 4. Lock order: the supplier row, then the account (a payout share-locks the supplier).
@@ -47,6 +48,9 @@ from app.pricing.policy_params_security import BANK_LOCK_HOURS, CONTACT_CHANGE_D
 from app.suppliers import bank_crypto
 
 ACTIONS = ("approve", "reject", "withdraw")
+# The full details are read only while they may still be paid to (review S289): a withdrawn, rejected or superseded
+# row is evidence, its masked line is enough. row_out()'s ``actions.reveal`` and reveal() read this one tuple.
+REVEALABLE = ("pending", "approved")
 MASK = "••••"
 CALLBACK_MIN = 10  # technical-constant: a call-back note says who confirmed on which number, never a word or two
 ACCOUNT_RE = re.compile(r"^[A-Z0-9]{4,34}$")
@@ -156,8 +160,12 @@ def masked(last4: str) -> str:
     return f"{MASK} {last4}"
 
 
-def row_out(row: Any, staff: Staff, contacts_changed_by: frozenset[str] = frozenset()) -> dict[str, Any]:
-    """``contacts_changed_by``: who changed the supplier's contacts within the call-back window (pending rows only)."""
+def row_out(
+    row: Any, staff: Staff, contacts_changed_by: frozenset[str] = frozenset(), *, self_ok: bool = False
+) -> dict[str, Any]:
+    """``contacts_changed_by``: who changed the supplier's contacts within the call-back window (pending rows only).
+    ``self_ok``: the caller may approve their own work now (the business owner, :func:`_self_ok`); without it the
+    person who entered a row gets no Approve (the write would answer 403 ``maker_checker``)."""
     out = dict(row)
     entered_by = out["entered_by"]
     for who in ("entered_by", "approved_by", "closed_by"):
@@ -166,14 +174,25 @@ def row_out(row: Any, staff: Staff, contacts_changed_by: frozenset[str] = frozen
     pending, mine = out["status"] == "pending", staff.cis_user_id == entered_by
     blocked = pending and bool({entered_by, staff.cis_user_id} & contacts_changed_by)
     out["approve_blocked"] = "contacts_recently_changed" if blocked else None
+    may_approve = pending and staff.can("supplier_bank.approve") and (not mine or self_ok)
     out["actions"] = {
-        "reveal": staff.can("supplier_bank.read") and out["status"] != "withdrawn",
-        "approve": pending and staff.can("supplier_bank.approve") and not blocked,  # the write re-checks every rule
-        "approve_self": pending and mine and staff.can("supplier_bank.approve"),
+        "reveal": staff.can("supplier_bank.read") and out["status"] in REVEALABLE,
+        "approve": may_approve and not blocked,  # the write re-checks every rule
+        "approve_self": may_approve and mine,
         "reject": pending and staff.can("supplier_bank.approve") and not mine,
         "withdraw": pending and mine and staff.can("supplier_bank.write"),
     }
     return out
+
+
+async def _self_ok(conn: asyncpg.Connection, staff: Staff, rows: Any) -> bool:
+    """The caller may approve a pending row they entered (business owner, switch on). Read only when it matters: a
+    pending row of theirs and ``supplier_bank.approve``."""
+    if not staff.can("supplier_bank.approve"):
+        return False
+    if not any(r["status"] == "pending" and r["entered_by"] == staff.cis_user_id for r in rows):
+        return False
+    return await self_approval.may_self_approve(conn, staff)
 
 
 async def _supplier(conn: asyncpg.Connection, ref: str, *, lock: bool = False) -> dict[str, Any]:
@@ -357,9 +376,10 @@ async def list_for(conn: asyncpg.Connection, staff: Staff, supplier_ref: str) ->
     lock = await payout_lock(conn, supplier["id"])
     pending = next((r for r in rows if r["status"] == "pending"), None)
     changes, changed_by = await _contact_window(conn, supplier["id"], pending, staff)
+    self_ok = await _self_ok(conn, staff, rows)
     return {
         "supplier": supplier,
-        "items": [row_out(r, staff, changed_by) for r in rows],
+        "items": [row_out(r, staff, changed_by, self_ok=self_ok) for r in rows],
         "payout_lock": {**lock, "until": lock["until"].isoformat() if lock["until"] else None},
         "contact_changes": changes,
         "actions": {"enter": staff.can("supplier_bank.write") and pending is None},
@@ -374,10 +394,16 @@ async def reveal(
     if not staff.can("supplier_bank.read"):
         raise Forbidden("forbidden", "reading a supplier's bank details needs supplier_bank.read")
     key_provider = bank_crypto.require(provider)
+    account = await _account(conn, account_id)
+    if account["status"] not in REVEALABLE:
+        raise Conflict(
+            "bank_account_closed",
+            f"this bank account is {account['status']}: its details are kept as evidence and no longer shown",
+        )
     row = await conn.fetchrow(
         "SELECT id::text AS id, supplier_id::text AS supplier_id, account_last4, ciphertext, wrapped_key"
         " FROM booking.supplier_bank_account WHERE id = $1::uuid",
-        (await _account(conn, account_id))["id"],
+        account["id"],
     )
     try:
         details = await bank_crypto.open_sealed(
@@ -450,7 +476,7 @@ async def enter(
 
 async def _one(conn: asyncpg.Connection, staff: Staff, account_id: str) -> dict[str, Any]:
     row = await conn.fetchrow(f"SELECT {COLUMNS} FROM {FROM} WHERE a.id = $1::uuid", account_id)  # noqa: S608
-    return row_out(row, staff)
+    return row_out(row, staff, self_ok=await _self_ok(conn, staff, [row]))
 
 
 def _note(text: str | None, code: str, minimum: int = 1, limit: int = 300) -> str:

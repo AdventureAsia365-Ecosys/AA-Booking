@@ -9,6 +9,9 @@
 - ``POST /booking/supplier-bank-accounts/{id}/reveal`` (``supplier_bank.read``): the full details, audited. A POST: a
   read that writes an audit row, refused to read-only sessions.
 
+A 422 on the entry or the decision body names the fields and error types only, never a submitted value
+(:func:`app.errors.redact_validation`); no route logs a body.
+
 Entry and reveal need the KMS key (``SUPPLIER_BANK_KMS_KEY_ID``): 503 ``bank_crypto_unavailable`` without it.
 """
 
@@ -22,6 +25,7 @@ from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, get_pool, require
+from app.errors import redact_validation
 from app.suppliers import bank_accounts, bank_crypto
 
 router = APIRouter(prefix="/booking", tags=["supplier bank accounts"])
@@ -75,6 +79,7 @@ async def list_bank_accounts(supplier_ref: SupplierRef, staff: CanRead, pool: Po
 
 
 @router.post("/suppliers/{supplier_ref}/bank-accounts", status_code=201)
+@redact_validation  # a 422 never echoes a submitted account number
 async def enter_bank_account(
     body: NewBankAccount, supplier_ref: SupplierRef, staff: CanEnter, pool: Pool, provider: Provider
 ) -> dict[str, Any]:
@@ -83,6 +88,7 @@ async def enter_bank_account(
 
 
 @router.post("/supplier-bank-accounts/{account_id}/decision")
+@redact_validation  # the call-back note names a person and a number
 async def decide_bank_account(body: Decision, account_id: AccountId, staff: CanDecide, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
         return await bank_accounts.decide(conn, staff, str(account_id), body.action, body.note)

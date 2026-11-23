@@ -10,7 +10,9 @@
 - reject / withdraw rules, one pending change per supplier, the profile fields;
 - review S289: a contact change of the supplier by the person who entered the account (or by the approver) within
   ``supplier_bank_contact_change_days`` blocks the approval (409 ``contacts_recently_changed``); anyone else's change
-  is listed on the approval card; the profile choices are admin-edited data (a retired code stays valid where held).
+  is listed on the approval card; the profile choices are admin-edited data (a retired code stays valid where held);
+- fix pass 2: a 422 on the entry never echoes the submitted number; no Approve action on one's own entry (unless the
+  business owner); the details of a rejected, withdrawn or superseded row are not shown (409 ``bank_account_closed``).
 
 KMS is a fake key provider (AES-GCM with a fixed test master key): the database and the API are real. All names,
 numbers and codes are invented."""
@@ -75,6 +77,12 @@ class FakeKms:
 
 
 async def _purge(admin: asyncpg.Connection) -> None:
+    async with admin.transaction():  # ON DELETE RESTRICT (bk-067, accounting evidence): bank rows go first
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute(
+            "DELETE FROM booking.supplier_bank_account WHERE supplier_id IN (SELECT id FROM booking.suppliers"
+            " WHERE company_name LIKE 'it-1158p2 %' OR company_name LIKE 'it-682 it-1158p2 %')"
+        )
     await ops.purge_ops(admin)
     async with admin.transaction():
         await admin.execute("SET LOCAL ROLE bk_owner")
@@ -261,8 +269,17 @@ async def test_own_entries_reject_withdraw_and_supersede(
     sid = (await ops.supply(admin, "it-1158p2 Ridgeway"))["supplier"]
     decision = {"action": "approve", "note": CALLBACK}
 
-    # The tech lead never approves (nor rejects) his own entry.
+    # A 422 never echoes the submitted number (field names and error types only).
+    r = await c.post(f"/suppliers/{sid}/bank-accounts", json={**ACCOUNT, "account_number": "VN55" * 20}, headers=lead)
+    assert r.status_code == 422 and "VN55VN55" not in r.text and HOLDER not in r.text, r.text
+    assert r.json()["detail"] == [{"loc": ["body", "account_number"], "type": "string_too_long",
+                                   "msg": "string_too_long"}]  # fmt: skip
+
+    # The tech lead never approves (nor rejects) his own entry, and is not offered the button.
     mine = await _ok(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=lead), 201)
+    assert mine["actions"]["approve"] is False and mine["actions"]["approve_self"] is False
+    listed = (await _ok(await c.get(f"/suppliers/{sid}/bank-accounts", headers=lead)))["items"]
+    assert listed[0]["actions"]["approve"] is False
     _refused(await c.post(f"/supplier-bank-accounts/{mine['id']}/decision", json=decision, headers=lead),
              403, "maker_checker")  # fmt: skip
     reject = {"action": "reject", "note": "The number does not match the call-back"}
@@ -275,6 +292,7 @@ async def test_own_entries_reject_withdraw_and_supersede(
 
     # The business owner approves her own entry, flagged; a later approved one supersedes it.
     own = await _ok(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=owner), 201)
+    assert own["actions"]["approve"] is True and own["actions"]["approve_self"] is True
     flagged = await _ok(await c.post(f"/supplier-bank-accounts/{own['id']}/decision", json=decision, headers=owner))
     assert flagged["status"] == "approved" and flagged["owner_self_approved"] is True
     second = await _ok(
@@ -294,6 +312,14 @@ async def test_own_entries_reject_withdraw_and_supersede(
         ("•••• 5678", "withdrawn"),
         ("•••• 9012", "approved"),
     ]
+    # Only a pending or approved row shows its details; the API and the row's actions agree.
+    for row in items:
+        r = await c.post(f"/supplier-bank-accounts/{row['id']}/reveal", headers=lead)
+        if row["status"] == "approved":
+            assert r.status_code == 200 and row["actions"]["reveal"] is True, r.text
+        else:
+            _refused(r, 409, "bank_account_closed")
+            assert row["actions"]["reveal"] is False
     assert (
         await admin.fetchval(
             "SELECT count(*) AS n FROM booking.audit_logs WHERE entity_id = $1::uuid"

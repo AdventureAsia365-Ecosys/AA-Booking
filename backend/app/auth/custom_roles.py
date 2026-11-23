@@ -62,6 +62,7 @@ APPROVE_NAMED = frozenset(
         "payment.verify",
         "billing_config.write",
         "staff.admin",
+        "supplier_bank.read",  # bk-067 (AA-1158 part 2): it decrypts full account numbers
     }
 )
 

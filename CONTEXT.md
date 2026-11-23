@@ -594,7 +594,7 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   role its CIS Staff page grant names: the view row of its `sub` (`booking_role_code` a `custom_*` code), the role
   (not archived) and its capabilities, narrowed to the ones the code knows and never the approve class (`*.approve`,
   `*.approve_<x>`, `supplier.activate`, `contract.publish`, `stop_sale.approve`, `payout.write`, `payment.verify`,
-  `billing_config.write`, `staff.admin`). Each read is reused at most 60 s per process (`CACHE_S`, the spec's
+  `billing_config.write`, `staff.admin`, `supplier_bank.read`). Each read is reused at most 60 s per process (`CACHE_S`, the spec's
   revocation bound, a technical constant). The staff row's `role` is synced to the code (audited); `Staff.can` answers
   from the role's capabilities; `/booking/staff/me` adds `role_label`. No grant, a built-in code, an unknown or archived
   role: 403 `no_booking_role`; the view or the tables unreadable: 403 `custom_role_unavailable` (custom holders only).
@@ -722,8 +722,10 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   contracting (never approving a bill they entered or whose amounts / lines they last changed, `facts_edited_by`: 403
   `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
   Supplier bank accounts (AA-1158 part 2, bk-067): `supplier_bank.write` = admin, contracting, finance (entry, pending);
-  `supplier_bank.read` = admin, finance (the full details, audited); `supplier_bank.approve` = admin (never the enterer,
-  except the business owner flagged). None is in the preview cap.
+  `supplier_bank.read` = admin, finance (the full details of a pending or approved row, audited; approve class, so never
+  a custom role); `supplier_bank.approve` = admin (never the enterer, except the business owner flagged; the row's
+  `actions.approve` is false for the enterer otherwise). None is in the preview cap. A 422 on the entry or decision
+  body names the fields and error types only, never a submitted value (`app.errors.redact_validation`).
   Agency billing (AA-1037, bk-041 / bk-042): `agency_billing.read` / `agency_billing.write` / `agency_payment.approve` /
   `billing_config.write` = admin, finance; approving or rejecting a payment is never its recorder's (403 `maker_checker`,
   CHECK in the database). None of them is in the preview cap. `terms_clause.approve` = admin (AA-1037 G6, bk-044): a
@@ -808,7 +810,7 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   (`SUPPLIER_BANK_KMS_KEY_ID`, AA-CIS-Infra `booking_supplier_bank.tf`; context `{purpose: supplier_bank_account,
   supplier_id}`; associated data supplier id + row id); only the Booking task role can unwrap it. Every reader sees the
   masked list (`•••• 1234`); `supplier_bank.read` (admin, finance) opens the details one at a time, audited
-  (`supplier_bank_account.revealed`, the last 4 only). No key configured: entry and reveal answer 503
+  (`supplier_bank_account.revealed`, the last 4 only), only of a pending or approved row (409 `bank_account_closed`). No key configured: entry and reveal answer 503
   `bank_crypto_unavailable`. **Payout lock**: no payout to the supplier while a change is pending (409
   `bank_account_pending`) or within `supplier_bank_payout_lock_hours` (Pricing > Policy, security, admin; 24) of the
   newest approval (409 `bank_payout_locked` with `until`); the database refuses the same (`supplier_payouts_bank_lock`);
@@ -2538,14 +2540,16 @@ another actor: v1, from 2026-01-01, the bands the code used (`[[1,1],[2,2],[3,4]
 A **contract** file (MIG-4; the code PR raises readiness to bk-067). `suppliers` gains `legal_entity`, `tax_code`,
 `role_contacts` (jsonb array, `pii:contact`) and `payment_terms` (jsonb object) with `suppliers_profile_chk` (shapes
 only; the API checks the fields). New `booking.supplier_bank_account` (ciphertext + wrapped data key + KMS key id,
-`account_last4`, bank name / country / currency in clear; pending -> approved (callback note required) / rejected /
+`account_last4`, bank name / country / currency in clear; FK to `suppliers` ON DELETE RESTRICT, accounting evidence kept
+10 years; pending -> approved (callback note required) / rejected /
 withdrawn, approved -> superseded; one pending and one approved per supplier; approver != enterer unless
 `owner_self_approved`, checked by `owner_self_approval_guard`; guard `supplier_bank_account_guard`: what was entered
 never changes, decisions dated now, free texts redactable alone). New BEFORE INSERT trigger `supplier_payouts_bank_lock`
 (no payout while a bank account is pending or within `supplier_bank_payout_lock_hours` of the newest approval; none in
 force refuses). New trigger `billing_entity_guard` (the part 1 backstop: `payment_instructions` / `is_default` change
 only in the transaction that approved a matching `billing_entity_change`). Version 1 of `supplier_bank_payout_lock_hours`
-= 24 and of `supplier_bank_contact_change_days` = 30 (section security, approver admin). New
+= 24 and of `supplier_bank_contact_change_days` = 30 (section security, approver admin). The bk-062 approve CHECK
+`staff_role_capability_not_approve_chk` is re-added with `supplier_bank.read`. New
 `booking.supplier_profile_option` (kind `contact_role` / `terms_basis` / `terms_method`, code fixed, labels EN / VI,
 order, active; role `booking` may INSERT and UPDATE the labels, order and active only, never DELETE), seeded with 15
 choices. `supplier_bank.write` added to `custom_product_ops_accounting` (the test

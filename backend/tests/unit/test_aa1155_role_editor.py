@@ -85,8 +85,15 @@ def test_the_seed_is_known_to_the_code_and_holds_no_approval() -> None:
     assert len(custom_roles.SEED_CAPABILITIES) == 25
 
 
+def _approve_check_sql() -> str:
+    """The newest migration that (re)defines the approve CHECK (bk-062, re-added by bk-067 with supplier_bank.read)."""
+    marker = "staff_role_capability_not_approve_chk CHECK ("
+    found = [p for p in sorted(MIGRATION.parent.glob("*.sql")) if marker in p.read_text(encoding="utf-8")]
+    return found[-1].read_text(encoding="utf-8").split(marker)[-1].split(");")[0]
+
+
 def test_the_migration_check_is_the_code_approve_class() -> None:
-    check = _sql().split("staff_role_capability_not_approve_chk CHECK (")[1].split(");")[0]
+    check = _approve_check_sql()
     named = set(re.findall(r"'([a-z0-9_.]+)'", check.split("NOT IN")[1]))
     assert named == set(custom_roles.APPROVE_NAMED)
     assert r"\.approve(_[a-z0-9_]+)?$" in check

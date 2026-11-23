@@ -9,22 +9,28 @@ tests/integration/test_bk067_schema.py, the HTTP flows tests/integration/test_aa
 - the decisions' permission and maker rules before any write;
 - the profile fields (contacts by role, payment terms): shapes here, the codes against the admin-edited choices in
   tests/unit/test_aa1158_profile_options.py;
-- a contact change by the person who entered the account or by the approver blocks the approval (review S289).
+- a contact change by the person who entered the account or by the approver blocks the approval (review S289);
+- fix pass 2 (review S289): a 422 on the entry / decision body never echoes a submitted value (nor logs it); the full
+  details only of a pending or approved row; no Approve for the person who entered a row unless business owner.
 
 KMS is a fake key provider; all names and numbers are invented."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from fastapi.testclient import TestClient
 
-from app.auth.staff import Staff
+from app.auth import self_approval
+from app.auth.staff import Staff, current_staff, get_pool
 from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
+from app.main import create_app
 from app.settings import Settings
 from app.suppliers import bank_accounts, bank_crypto, profile
 from tests.unit.fakes import ScriptedConn, policy_rows
@@ -246,6 +252,56 @@ def test_a_recent_contact_change_blocks_the_approve_action() -> None:
     assert someone_else["actions"]["approve"] and someone_else["approve_blocked"] is None
     decided = bank_accounts.row_out(_row(status="approved"), CHECKER, frozenset({ENTERER.cis_user_id}))
     assert decided["approve_blocked"] is None
+
+
+ADMIN_ENTERER = Staff("it-1158p2-admin", None, "Admin", "admin", True, None)
+
+
+def test_no_approve_for_the_person_who_entered_unless_business_owner() -> None:
+    row = _row(entered_by=ADMIN_ENTERER.cis_user_id)
+    plain = bank_accounts.row_out(row, ADMIN_ENTERER)["actions"]
+    assert not plain["approve"] and not plain["approve_self"] and not plain["reject"] and plain["withdraw"]
+    owner = bank_accounts.row_out(row, ADMIN_ENTERER, self_ok=True)["actions"]
+    assert owner["approve"] and owner["approve_self"]
+    # A recent contact change still blocks the business owner's own approval.
+    blocked = bank_accounts.row_out(row, ADMIN_ENTERER, frozenset({ADMIN_ENTERER.cis_user_id}), self_ok=True)
+    assert not blocked["actions"]["approve"]
+
+
+@pytest.mark.parametrize(
+    ("status", "shown"),
+    [("pending", True), ("approved", True), ("withdrawn", False), ("rejected", False), ("superseded", False)],
+)
+def test_reveal_action_only_while_the_row_may_be_paid_to(status: str, shown: bool) -> None:
+    assert bank_accounts.row_out(_row(status=status), FIN)["actions"]["reveal"] is shown
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owner", [False, True])
+async def test_list_reads_the_owner_marker_only_for_an_own_pending_row(
+    monkeypatch: pytest.MonkeyPatch, owner: bool
+) -> None:
+    asked: list[str] = []
+
+    async def fake_may_self_approve(_conn: Any, staff: Staff, kind: str = "approve") -> bool:
+        asked.append(staff.cis_user_id)
+        return owner
+
+    monkeypatch.setattr(self_approval, "may_self_approve", fake_may_self_approve)
+    conn = (
+        ScriptedConn()
+        .on("FROM booking.suppliers WHERE", {"id": SUPPLIER, "code": "SUP-001158", "company_name": "Kestrel"})
+        .on("ORDER BY a.entered_at DESC", [_row(entered_by=ADMIN_ENTERER.cis_user_id)])
+        .on(
+            "FROM booking.supplier_bank_account a WHERE a.supplier_id",
+            {"pending": True, "last_approved": None, "now": NOW},
+        )  # fmt: skip
+    )
+    out = await bank_accounts.list_for(conn, ADMIN_ENTERER, SUPPLIER)
+    assert out["items"][0]["actions"]["approve"] is owner and asked == [ADMIN_ENTERER.cis_user_id]
+    asked.clear()
+    await bank_accounts.list_for(conn, CHECKER, SUPPLIER)  # not their row: no marker read
+    assert asked == []
 
 
 # ── The payout lock (clock override) ─────────────────────────────────────────
@@ -480,6 +536,82 @@ async def test_reveal_needs_the_read_right_and_audits() -> None:
     with pytest.raises(Conflict) as err:
         await bank_accounts.reveal(broken, FIN, kms, ROW)
     assert err.value.code == "bank_details_unreadable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["withdrawn", "rejected", "superseded"])
+async def test_reveal_refuses_a_closed_row(status: str) -> None:
+    kms = FakeKms()
+    conn = decide_conn(status=status)
+    with pytest.raises(Conflict) as err:
+        await bank_accounts.reveal(conn, FIN, kms, ROW)
+    assert err.value.code == "bank_account_closed" and status in err.value.message
+    assert kms.contexts == []  # no KMS Decrypt
+    assert conn.sql("ciphertext") == [] and conn.sql("INSERT INTO booking.audit_logs") == []
+
+
+# ── A 422 never echoes bank details (fix pass 2) ─────────────────────────────
+
+
+PLANTED_NUMBER = "VN7766554433221100998877665544332211009988776655"  # doubled below: over the 64 limit
+PLANTED_EXTRA = "planted-extra-field-value"
+
+
+def _bank_client() -> TestClient:
+    app = create_app(Settings(database_url=None, environment="test"), bank_key=FakeKms())
+    app.dependency_overrides[current_staff] = lambda: CHECKER
+    app.dependency_overrides[get_pool] = lambda: ScriptedConn()
+    return TestClient(app)
+
+
+def _assert_redacted(response: Any, *secrets: str) -> list[dict[str, Any]]:
+    assert response.status_code == 422, response.text
+    for secret in secrets:
+        assert secret not in response.text
+    detail = response.json()["detail"]
+    assert detail and all(set(e) == {"loc", "type", "msg"} and e["msg"] == e["type"] for e in detail)
+    return detail
+
+
+@pytest.mark.parametrize(
+    ("change", "field", "kind"),
+    [
+        ({"account_number": PLANTED_NUMBER * 2}, "account_number", "string_too_long"),
+        ({"currency": "U$D-PLANTED"}, "currency", "string_pattern_mismatch"),
+        ({"iban_full": PLANTED_EXTRA}, "iban_full", "extra_forbidden"),
+        ({"account_holder": ""}, "account_holder", "string_too_short"),
+    ],
+)
+def test_a_bad_entry_answers_field_names_and_types_only(
+    change: dict[str, Any], field: str, kind: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    body = {**GOOD, **change}
+    caplog.set_level(logging.DEBUG)
+    response = _bank_client().post(f"/booking/suppliers/{SUPPLIER}/bank-accounts", json=body)
+    secrets = [str(v) for v in change.values() if v] + [GOOD["account_holder"], "3456-7890"]
+    detail = _assert_redacted(response, *secrets)
+    assert {"loc": ["body", field], "type": kind, "msg": kind} in detail
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    for secret in secrets:
+        assert secret not in logged
+
+
+def test_a_bad_decision_body_answers_field_names_and_types_only() -> None:
+    note = "Called Mr Invented on +84 999 888 777 " * 20
+    response = _bank_client().post(
+        f"/booking/supplier-bank-accounts/{ROW}/decision", json={"action": "approve", "note": note, "x": "y-planted"}
+    )
+    detail = _assert_redacted(response, "+84 999 888 777", "y-planted")
+    assert {tuple(e["loc"]) for e in detail} == {("body", "note"), ("body", "x")}
+
+
+def test_a_body_that_is_not_json_is_redacted_too() -> None:
+    response = _bank_client().post(
+        f"/booking/suppliers/{SUPPLIER}/bank-accounts",
+        content=b'{"account_number": "' + PLANTED_NUMBER.encode() + b'"',
+        headers={"content-type": "application/json"},
+    )
+    _assert_redacted(response, PLANTED_NUMBER)
 
 
 # ── Profile fields ───────────────────────────────────────────────────────────
