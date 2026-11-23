@@ -934,6 +934,23 @@ function readinessItem(i: number): ReadinessItem {
     from_price: priced ? { amount: `${1235 + i * 10}.00`, currency: "USD", season: "Green season (shoulder months)" } : null,
     pending_recompute: false,
     note: null,
+    // AA-1149: the worst-case "Can operate" cell: blocked with long reasons, more than shown, every third row.
+    operable:
+      i % 3 === 0
+        ? {
+            status: "blocked" as const,
+            findings: range(3).map((n) => ({
+              rule: "N2" as const,
+              level: "block" as const,
+              key: `N2:day:${n + 1}:HTL-00${3100 + n}`,
+              detail: `day ${n + 1}: HTL-00${3100 + n} Superior Garden View Twin with Balcony has no published rate in the next 365 days`,
+              overridable: false,
+              covered: false,
+            })),
+            findings_total: 7,
+            exception_until: null,
+          }
+        : { status: "ready" as const, findings: [], findings_total: 0, exception_until: null },
   };
 }
 const READINESS_ITEMS = range(ROWS).map(readinessItem);
@@ -945,6 +962,7 @@ const READINESS: PriceReadiness = {
   summary: {
     total: 892,
     by_status: { priced: 41, hand_priced: 12, missing_rates: 96, missing_fx: 8, no_rule: 0, no_components: 731, inactive_component: 4 },
+    by_operable: { ready: 40, warnings: 6, blocked: 840, exception: 6 },
     by_country: ["Invented Land", "Lake Country of the North", "Coastland"].map((country, i) => ({
       country,
       total: 300 - i * 4,

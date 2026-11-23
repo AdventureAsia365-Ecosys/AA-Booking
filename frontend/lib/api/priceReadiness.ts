@@ -4,12 +4,16 @@
 // without a published rate in the next 365 days (codes only, never a net) and the cost currencies without an approved
 // FX rate. The summary counts every plan; `items` are the plans that match the filters.
 //
-//   GET /booking/catalog/price-readiness?status=&country=&q=&format=json|csv     (pricing.read)
+//   GET /booking/catalog/price-readiness?status=&country=&q=&operable=&format=json|csv     (pricing.read)
+//
+// AA-1149: each row also carries `operable`, the can-operate check of the tour (lib/api/operability.ts); a separate
+// field from the price status (a priced tour can still be blocked for agencies).
 //
 // The rate-sheet dry run (POST /booking/suppliers/{ref}/rate-sheets?dry_run=true) carries the sheet's `impact`
 // (lib/api/suppliers.ts RateSheetImpact).
 
 import { ApiError, BFF_BASE, bkGet, buildQuery } from "./client";
+import type { OperableStatus, OperableSummary } from "./operability";
 import type { DecimalString, IsoDate } from "./types";
 
 export const READINESS_STATUSES = [
@@ -56,6 +60,8 @@ export interface ReadinessItem {
   from_price: { amount: DecimalString; currency: string; season: string | null } | null;
   pending_recompute: boolean;
   note: string | null;
+  /** AA-1149: the can-operate check (null only when the plan could not be read). */
+  operable: OperableSummary | null;
 }
 
 export type StatusCounts = Record<ReadinessStatus, number>;
@@ -69,6 +75,7 @@ export interface PriceReadiness {
     total: number;
     by_status: StatusCounts;
     by_country: ({ country: string; total: number } & StatusCounts)[];
+    by_operable: Record<OperableStatus, number>;
   };
   items: ReadinessItem[];
   degraded: string[];
@@ -78,6 +85,7 @@ export interface ReadinessFilters {
   status?: string;
   country?: string;
   q?: string;
+  operable?: string;
 }
 
 /** The staff CSV (fixed columns, no net or margin), with the server's file name. */

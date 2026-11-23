@@ -48,4 +48,38 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu 2: một loại job dự kiến 5 phút bị coi là quá hạn sau 10 phút.",
         ),
     ),
+    "operable_exception_default_days": _g(
+        (
+            "How long a sale exception lasts when the administrator lets agencies buy a tour that cannot be operated "
+            "yet (a night without a hotel, a supplier not active) and picks no other length.",
+            "Exceptions last longer: fewer renewals, but a tour stays on sale longer with a gap ops must fill by hand.",
+            "Exceptions end sooner: the gap is looked at again sooner, with more renewals.",
+            "Raise it when supplier contracts usually take weeks; lower it when gaps are usually fixed within days.",
+            "Starting value 14 days.",
+        ),
+        (
+            "Một ngoại lệ bán kéo dài bao lâu khi quản trị viên cho đại lý mua một tour chưa vận hành được (một đêm "
+            "chưa có khách sạn, một nhà cung cấp chưa hoạt động) mà không chọn thời hạn khác.",
+            "Ngoại lệ kéo dài hơn: ít phải gia hạn, nhưng tour còn chỗ trống mà vận hành phải tự đặt tay lâu hơn.",
+            "Ngoại lệ hết sớm hơn: chỗ trống được xem lại sớm hơn, phải gia hạn nhiều hơn.",
+            "Tăng khi hợp đồng nhà cung cấp thường mất vài tuần; giảm khi chỗ trống thường được lấp trong vài ngày.",
+            "Giá trị ban đầu 14 ngày.",
+        ),
+    ),
+    "operable_exception_max_days": _g(
+        (
+            "The longest sale exception the administrator may set for a tour that cannot be operated yet.",
+            "Longer exceptions are allowed: a gap may stay open on sale for longer.",
+            "Every exception is short: the gap must be fixed or the exception renewed sooner.",
+            "Raise it only when a known gap takes long to close; keep it short so every gap is looked at again.",
+            "Starting value 30 days.",
+        ),
+        (
+            "Thời hạn dài nhất quản trị viên được đặt cho một ngoại lệ bán của tour chưa vận hành được.",
+            "Cho phép ngoại lệ dài hơn: một chỗ trống có thể còn mở bán lâu hơn.",
+            "Mọi ngoại lệ đều ngắn: chỗ trống phải được lấp hoặc gia hạn ngoại lệ sớm hơn.",
+            "Chỉ tăng khi một chỗ trống đã biết cần lâu mới đóng được; giữ ngắn để mọi chỗ trống được xem lại.",
+            "Giá trị ban đầu 30 ngày.",
+        ),
+    ),
 }

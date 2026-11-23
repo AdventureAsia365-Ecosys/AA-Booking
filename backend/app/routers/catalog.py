@@ -332,12 +332,14 @@ async def price_readiness_report(
     country: Annotated[str | None, Query(max_length=100, description="country name as the catalog gives it")] = None,
     q: Annotated[str | None, Query(max_length=200, description="part of the title or the tour key")] = None,
     format: Annotated[Literal["json", "csv"], Query()] = "json",  # noqa: A002 — the query parameter's name
+    operable: Annotated[Literal["ready", "warnings", "blocked", "exception"] | None, Query()] = None,
 ) -> Any:
     """AA-1029: which trip plans price and why the others do not (see ``app/catalog/price_readiness.py``). The
-    summary counts every plan; ``items`` are the plans that match the filters."""
+    summary counts every plan; ``items`` are the plans that match the filters. AA-1149: each item's ``operable``
+    (the can-operate check, ``app/catalog/operability.py``), filter ``operable``."""
     day = cost_sheet.today()
     async with pool.acquire() as conn:
-        report = await price_readiness.build(conn, on=day, status=status, country=country, q=q)
+        report = await price_readiness.build(conn, on=day, status=status, country=country, q=q, operable=operable)
     if format == "csv":
         return Response(
             price_readiness.to_csv(report),

@@ -8,8 +8,7 @@ change, "re-request"). Edges live in ``booking.ops_transitions`` (the database r
 ``illegal_transition``). **Live** = pending, requested or confirmed: at most one live booking per version item (a
 declined one can be replaced by a booking with another supplier, critic B3).
 
-**Supply state** (``booking.v_trip_case_supply_state``): ``none`` (nothing to book), ``confirming`` or ``booked`` —
-the computed **"Confirmed & Booked"** badge (design D1); never a case status.
+**Supply state** (``booking.v_trip_case_supply_state``): ``none``, ``confirming``, ``booked`` (badge D1; not a status).
 
 **Case auto-advance** (design D2, :func:`advance_case` = :func:`app.ops.track.advance_case`): the first supplier
 booking requested moves a ``confirmed`` case to ``supplier_confirming``; a ``supplier_confirming`` case with no live
@@ -33,8 +32,8 @@ real-world act with fees) and one staff notification asks to cancel them with th
 (:func:`record_cancel_fee`, ``supplier_cancel_fee``: the cost until the supplier's bill is approved). Reopening a
 case is refused while it has a live booking (bk-026 guard; 409 ``live_supplier_bookings``).
 
-Lock order (no deadlock with the B2B cancel, which locks the hold, then the case): the B2B hold of a linked booking,
-then the trip case, then the booking. Every write runs in the caller's transaction and writes one audit row.
+Lock order (no deadlock with the B2B cancel, which locks the hold, then the case): hold, case, booking. Every write
+runs in the caller's transaction with one audit row. Only an active supplier is requested (409 ``supplier_inactive``).
 Permissions: ``ops.read`` / ``ops.write`` (admin, sales, contracting); net amounts only with ``pricing.read``.
 """
 
@@ -42,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -53,10 +52,11 @@ from app.auth.staff import Staff
 from app.b2b import desk
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.notifications import service as notifications
+from app.ops import component_bookings, item_bookings, track
 from app.ops import files as ops_files
-from app.ops import track
+from app.ops.item_bookings import from_item as _from_item
+from app.ops.item_bookings import item_skip_reason as _item_skip_reason
 from app.pricing import fx, policy_values
-from app.supply import rates as supply_rates
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +97,8 @@ BOOKING_COLUMNS = """
     sb.departure_id::text AS departure_id, dp.start_date AS departure_start_date,
     sb.supplier_order_id::text AS supplier_order_id, so.code AS supplier_order_code, so.status AS supplier_order_status,
     sb.fx_rate_per_usd, sb.fx_as_of, sb.service_time, sb.pickup_point, sb.dropoff_point, sb.voucher_note,
-    sb.supplier_cancel_fee, sb.supplier_cancel_fee_currency
+    sb.supplier_cancel_fee, sb.supplier_cancel_fee_currency, sb.quote_part_id::text AS quote_part_id, sb.quantity,
+    qp.day_no AS tour_day, s.status AS supplier_status
 """
 BOOKING_FROM = """
 FROM booking.supplier_bookings sb
@@ -106,6 +107,7 @@ LEFT JOIN booking.departures dp ON dp.id = sb.departure_id
 LEFT JOIN booking.supplier_orders so ON so.id = sb.supplier_order_id
 JOIN booking.suppliers s ON s.id = sb.supplier_id
 LEFT JOIN booking.trip_case_version_itinerary i ON i.id = sb.version_item_id
+LEFT JOIN booking.b2b_quote_line_parts qp ON qp.id = sb.quote_part_id
 LEFT JOIN booking.b2b_hold_lines l ON l.hold_id = sb.b2b_hold_id AND l.line_ref = sb.b2b_line_ref
 LEFT JOIN booking.staff_users rq ON rq.cis_user_id = sb.requested_by
 LEFT JOIN booking.staff_users cf ON cf.cis_user_id = sb.confirmed_by
@@ -340,7 +342,7 @@ async def list_for_case(conn: asyncpg.Connection, staff: Staff, ref: str) -> dic
         "trip_case": {"id": case["id"], "code": case["code"], "status": case["status"], "channel": case["channel"]},
         "supply": await supply_state(conn, case["id"]),
         "items": [booking_out(r, staff, attached.get(r["id"])) for r in rows],
-        "unbooked_items": to_book,
+        "unbooked_items": to_book + await component_bookings.unbooked(conn, case),
         "documents_allowed": case["channel"] != "b2b",
     }
 
@@ -417,68 +419,6 @@ async def summary(conn: asyncpg.Connection) -> dict[str, Any]:
 # ── Generate and add ─────────────────────────────────────────────────────────
 
 
-def _item_skip_reason(case: Any, item: Any) -> str | None:
-    """Why an approved supply item gets no booking from Generate (None = it gets one)."""
-    if item["live_booking"] is not None:
-        return "booked"
-    if item["supplier_id"] is None:
-        return "no_supplier"
-    if case["channel"] == "b2b":
-        if item["b2b_line_status"] in ("declined", "cancelled") or item["b2b_declined"]:
-            return "b2b_line_closed"
-    return None
-
-
-def _net(item: Any) -> tuple[Decimal | None, str | None]:
-    """Sum of the item's cost rows in their one currency (critic note 17); mixed currencies are refused."""
-    amounts = list(item["net_amounts"] or [])
-    currencies = [c.strip() for c in (item["net_currencies"] or []) if c]
-    if not amounts:
-        return None, None
-    if len(currencies) > 1:
-        raise Conflict(
-            "mixed_cost_currencies",
-            f"item {item['position']} has cost rows in {', '.join(sorted(currencies))}; add its booking by hand",
-            position=item["position"],
-        )
-    return sum((Decimal(a) for a in amounts), Decimal("0")), currencies[0]
-
-
-def _nights(case: Any, item: Any) -> int | None:
-    """Room nights of a generated booking, on the convention the item was priced and sold on.
-
-    B2B items come from a held B2B line, where ``holds._open_case`` writes ``day_to = day_from + nights - 1``.
-    B2C items are costed per ``supply_rates.quantity('room_night')`` = max(day_to - day_from, 1), so the booking
-    asks the supplier for exactly the nights its net covers."""
-    if not item["hotel_room_type_id"]:
-        return None
-    day_from, day_to = int(item["day_from"]), int(item["day_to"])
-    if case["channel"] == "b2b":
-        return day_to - day_from + 1
-    return supply_rates.quantity("room_night", day_from=day_from, day_to=day_to, pax=None)
-
-
-def _from_item(case: Any, item: Any) -> dict[str, Any]:
-    net, currency = _net(item)
-    start = case["start_date"]
-    nights = _nights(case, item)
-    linked = case["channel"] == "b2b" and item["b2b_hold_id"] and item["b2b_held_as"] == "on_request"
-    return {
-        "version_item_id": item["id"],
-        "supplier_id": item["supplier_id"],
-        "hotel_room_type_id": item["hotel_room_type_id"],
-        "service_id": item["service_id"],
-        "item_description": (item["supply_label"] or item["title"] or "Item")[:500],
-        "service_date": start + timedelta(days=int(item["day_from"]) - 1) if start else None,
-        "nights": min(nights, 60) if nights is not None else None,
-        "pax": min(int(case["pax"]), 120) if case["pax"] else None,
-        "net_amount": net,
-        "net_currency": currency,
-        "b2b_hold_id": item["b2b_hold_id"] if linked else None,
-        "b2b_line_ref": item["b2b_line_ref"] if linked else None,
-    }
-
-
 INSERT_SQL = """
 INSERT INTO booking.supplier_bookings (trip_case_id, version_item_id, supplier_id, hotel_room_type_id, service_id,
     item_description, service_date, nights, pax, net_amount, net_currency, b2b_hold_id, b2b_line_ref, notes,
@@ -523,11 +463,8 @@ async def generate(conn: asyncpg.Connection, staff: Staff, ref: str) -> dict[str
         raise Conflict("no_approved_version", f"trip case {case['code']} has no approved version")
     items = await conn.fetch(ITEMS_SQL, case["id"])
     planned = [_from_item(case, i) for i in items if _item_skip_reason(case, i) is None]
-    created: list[str] = []
-    for data in planned:
-        new_id = await _insert(conn, staff, case["id"], data)
-        if new_id is not None:
-            created.append(new_id)
+    created = [new_id for data in planned if (new_id := await _insert(conn, staff, case["id"], data))]
+    created += await component_bookings.generate(conn, staff, case["id"])  # AA-1149: one per sold tour component
     if created:
         await audit.record(
             conn,
@@ -613,6 +550,26 @@ async def create(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[st
         after={"supplier_id": supplier, "version_item_id": row.get("version_item_id"), "status": "pending"},
     )
     return await _one_out(conn, staff, new_id)
+
+
+async def create_part(conn: asyncpg.Connection, staff: Staff, ref: str, data: dict[str, Any]) -> dict[str, Any]:
+    """AA-1149: book a sold tour component by hand (``quote_part_id``; a replacement or another supplier)."""
+    case = await lock_case(conn, ref)
+    _ensure_open(case)
+    new_id = await component_bookings.create_for_part(conn, staff, case, data, check_supply=_check_supply)
+    created = await _get(conn, new_id)
+    summary = f"Added supplier booking {created['code']} ({created['supplier_name']}) for a tour component"
+    after = {"supplier_id": created["supplier_id"], "quote_part_id": data["quote_part_id"], "status": "pending"}
+    await _audit(conn, staff, "supplier_booking.created", created, summary, after=after)
+    return await _one_out(conn, staff, new_id)
+
+
+async def waive_part(conn: asyncpg.Connection, staff: Staff, ref: str, part_id: str, reason: str) -> dict[str, Any]:
+    """AA-1149: close a sold tour component that needs no supplier booking (reason 20..500 characters)."""
+    case = await lock_case(conn, ref)
+    _ensure_open(case)
+    await component_bookings.waive(conn, staff, case, part_id, reason=reason)
+    return await list_for_case(conn, staff, case["id"])
 
 
 # ── Transitions ──────────────────────────────────────────────────────────────
@@ -731,6 +688,7 @@ async def request(conn: asyncpg.Connection, staff: Staff, booking_id: str) -> di
     if row["status"] == "requested":
         return await _one_out(conn, staff, row["id"])  # the same request again
     _ensure_open_or_departure(case)
+    item_bookings.require_active_supplier(row)
     await _set_status(conn, staff, row, "requested", {"requested_at": _now(), "requested_by": staff.cis_user_id})
     await _audit(
         conn,

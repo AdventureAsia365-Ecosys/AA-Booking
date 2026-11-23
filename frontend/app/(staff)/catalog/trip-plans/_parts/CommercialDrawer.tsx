@@ -5,7 +5,8 @@
 // empty), then, when the matrix was edited, PUT …/prices with the whole matrix (bk-032).
 // AA-996: the Figma CREATE / EDIT TEMPLATE form shows the tour content too; here it is the read-only "From CIS" block
 // (title, SKU, country, duration, days, summary, inclusions, exclusions) with "Edit in CIS ↗" for the roles that edit
-// content in CIS. Slice 2 adds the Supplier select (Figma "Supplier" card: active suppliers) and the price matrix
+// content in CIS. AA-1149 (B12): the field is shown as "Operations contact" and is never used for pricing.
+// Slice 2 adds the Supplier select (Figma "Supplier" card: active suppliers) and the price matrix
 // (Figma "Pricing" card: per-person prices by channel, season and pax band, PriceMatrixEditor). The price hint stays
 // as a free "from" guide for plans without a matrix. The supplier select lists the first 100 active suppliers (the
 // API page cap); a search box above it (debounced `q`) finds the others, and the picked supplier stays listed.
@@ -138,7 +139,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
       ? t("Showing the first {0} of {1} active suppliers; search to find the others.", supplierOptions.length, supplierTotal)
       : supplierQ && !supplierOptions.length
         ? t("No active supplier matches the search.")
-        : t("The main supplier (ground operator) of this plan. Active suppliers only.");
+        : t("The main local operator of this tour, shown to operations. Never used for pricing: each hotel and service has its own supplier.");
   return (
     <FormDrawer
       open
@@ -188,7 +189,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
         </span>
       </label>
       {canPickSupplier && (
-        <FormField label={t("Supplier")} hint={tx(supplierHint)} error={errorFor(fe, "supplier_id")}>
+        <FormField label={t("Operations contact")} hint={tx(supplierHint)} error={errorFor(fe, "supplier_id")}>
           <Input
             aria-label={t("Search active suppliers")}
             className={inputCls}
@@ -199,7 +200,7 @@ export function CommercialDrawer({ plan, onClose }: { plan: TripPlanDetail; onCl
             autoComplete="off"
           />
           <Select
-            aria-label={t("Supplier")}
+            aria-label={t("Operations contact")}
             className={inputCls}
             value={form.supplier_id}
             onChange={(e) => {

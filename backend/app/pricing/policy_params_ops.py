@@ -7,6 +7,9 @@ checks"), approved by the administrator group. :mod:`app.pricing.policy_params` 
 :class:`~app.pricing.policy_params.Param` from each spec here (plain data, so this module imports nothing from it).
 Read by :mod:`app.jobs.metrics` (the sampler, every 5 minutes) and listed with their values in force by the check
 registry the CIS alerts catalogue reads (``GET /booking/ops/checks``, :mod:`app.routers.ops_checks`).
+
+AA-1149 (bk-065): the default and maximum length of a can-operate sale exception, in the existing section
+"operations", approved by the administrator group; read by :mod:`app.catalog.sell_exceptions`.
 """
 
 from __future__ import annotations
@@ -14,8 +17,12 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
+from app.pricing import policy_cross_checks as cross
+
 STUCK_AFTER_S = "ops_jobs_stuck_after_s"
 OVERDUE_FACTOR = "ops_jobs_overdue_factor"
+OPERABLE_DEFAULT_DAYS = "operable_exception_default_days"
+OPERABLE_MAX_DAYS = "operable_exception_max_days"
 
 SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -43,5 +50,34 @@ SPECS: tuple[dict[str, Any], ...] = (
         "section": "ops",
         "minimum": Decimal("1.2"),
         "maximum": Decimal("10"),
+    },
+    {
+        "key": OPERABLE_DEFAULT_DAYS,
+        "type": "integer",
+        "unit": "days",
+        "question": "S285",
+        "group": "admin",
+        "label": "Sale exception: default length (days)",
+        "help": "How long a sale exception for a tour that cannot be operated yet lasts unless the administrator "
+        "picks another length.",
+        "used_by": "app.catalog.sell_exceptions",
+        "section": "operations",
+        "minimum": Decimal("1"),
+        "maximum": Decimal("90"),
+        "cross_check": cross.operable_default_within_max,
+    },
+    {
+        "key": OPERABLE_MAX_DAYS,
+        "type": "integer",
+        "unit": "days",
+        "question": "S285",
+        "group": "admin",
+        "label": "Sale exception: longest length (days)",
+        "help": "The longest a sale exception for a tour that cannot be operated yet may last.",
+        "used_by": "app.catalog.sell_exceptions",
+        "section": "operations",
+        "minimum": Decimal("1"),
+        "maximum": Decimal("90"),
+        "cross_check": cross.operable_max_covers_default,
     },
 )

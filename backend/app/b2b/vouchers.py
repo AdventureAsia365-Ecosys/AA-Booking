@@ -7,6 +7,7 @@ supplier on the day. Generated from the stored data, never uploaded (B2B cases t
   voucher note (``supplier_bookings`` bk-047 columns, kept on the Suppliers tab of the case);
 - the supplier's name and its confirmation ref (no contact field crosses the B2B API: the contract field policy keeps
   phones and e-mails out, so the agency calls AA, which calls the supplier);
+- the agency line it covers (a booking of a sold tour component, AA-1149, names its tour line);
 - the travellers of the agency line it covers by age band (what was sold less partial cancellations), else the case;
 - AA's 24-hour operations desk (setting ``b2b_ops_contact`` ``{"label": …}``, a company line AA publishes; no line
   when it is empty).
@@ -38,7 +39,8 @@ SELECT sb.code, coalesce(sb.b2b_line_ref, ql.line_ref) AS line_ref, sb.item_desc
 FROM booking.supplier_bookings sb
 JOIN booking.suppliers s ON s.id = sb.supplier_id
 LEFT JOIN booking.trip_case_version_itinerary it ON it.id = sb.version_item_id
-LEFT JOIN booking.b2b_quote_lines ql ON ql.quote_id = $2::uuid AND ql.line_no = it.position
+LEFT JOIN booking.b2b_quote_line_parts qp ON qp.id = sb.quote_part_id
+LEFT JOIN booking.b2b_quote_lines ql ON ql.quote_id = $2::uuid AND ql.line_no = coalesce(it.position, qp.line_no)
 WHERE sb.trip_case_id = $1::uuid AND sb.status = 'confirmed'
 ORDER BY sb.service_date NULLS LAST, sb.service_time NULLS LAST, sb.code
 """

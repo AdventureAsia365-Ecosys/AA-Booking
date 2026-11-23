@@ -6,7 +6,10 @@ global rule in ``app.auth.staff``.
 
 - ``GET /trip-cases/{ref}/supplier-bookings``: the case's bookings, supply state and the items still to book.
 - ``POST /trip-cases/{ref}/supplier-bookings/generate``: one pending booking per approved supply item (idempotent).
-- ``POST /trip-cases/{ref}/supplier-bookings``: add one by hand (extra item, or the replacement of a declined one).
+- ``POST /trip-cases/{ref}/supplier-bookings``: add one by hand (extra item, or the replacement of a declined one;
+  AA-1149: with ``quote_part_id``, a sold tour component).
+- ``POST /trip-cases/{ref}/supplier-bookings/parts/{part_id}/waive``: AA-1149, a sold tour component that needs no
+  booking (reason 20..500 characters).
 - ``GET /supplier-bookings`` (``supplier_id``, ``status``, ``from``, ``to``): the supplier Bookings tab, the ops queue.
 - ``GET /supplier-bookings/summary``: the dashboard tile "Supplier answers pending".
 - ``GET|PATCH /supplier-bookings/{id}``; ``POST …/request | confirm | decline | cancel | rerequest``.
@@ -27,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app import b2c
 from app.auth.staff import Staff, get_pool, require
+from app.errors import Invalid
 from app.ops import files as ops_files
 from app.ops import supplier_bookings as service
 
@@ -38,6 +42,7 @@ CanWrite = Annotated[Staff, Depends(require("ops.write"))]
 CaseRef = Annotated[str, Path(min_length=1, max_length=64, description="Trip case UUID or code (TC-000123)")]
 BookingId = Annotated[UUID, Path(description="supplier booking UUID")]
 FileId = Annotated[UUID, Path(description="operations file UUID")]
+PartId = Annotated[UUID, Path(description="sold tour component (quote part) UUID")]
 Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2)]
 Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 Reason = Annotated[str, Field(min_length=1, max_length=500)]
@@ -73,6 +78,13 @@ class BookingFacts(BaseModel):
 class NewBooking(BookingFacts):
     supplier_id: UUID
     version_item_id: UUID | None = None
+    quote_part_id: UUID | None = None  # AA-1149: a sold tour component (never with version_item_id)
+
+
+class WaiveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=20, max_length=500)
 
 
 class ConfirmIn(BaseModel):
@@ -139,7 +151,19 @@ async def generate(ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
 async def create(body: NewBooking, ref: CaseRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         await b2c.refuse_b2c_case_write(conn, ref)  # AA-1037: a b2c case is read-only
-        return await service.create(conn, staff, ref, _ids(body.model_dump()))
+        data = _ids(body.model_dump())
+        if body.quote_part_id is not None:
+            if body.version_item_id is not None:
+                raise Invalid("one_source", "a booking books a version item or a tour component, not both")
+            return await service.create_part(conn, staff, ref, data)
+        return await service.create(conn, staff, ref, data)
+
+
+@router.post("/trip-cases/{ref}/supplier-bookings/parts/{part_id}/waive", responses=b2c.GONE_RESPONSE)
+async def waive_part(body: WaiveIn, ref: CaseRef, part_id: PartId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        await b2c.refuse_b2c_case_write(conn, ref)  # AA-1037: a b2c case is read-only
+        return await service.waive_part(conn, staff, ref, str(part_id), body.reason)
 
 
 @router.get("/supplier-bookings")

@@ -85,6 +85,12 @@ export interface SupplierBooking {
   voucher_note: string | null;
   supplier_cancel_fee: DecimalString | null;
   supplier_cancel_fee_currency: string | null;
+  /** AA-1149: the sold tour component this booking books (null for a version item or an extra). */
+  quote_part_id: string | null;
+  /** Rooms, vehicles, people or days booked (tour components). */
+  quantity: number | null;
+  /** The tour day of a tour component. */
+  tour_day: number | null;
   files: OpsFile[];
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
@@ -100,11 +106,48 @@ export interface UnbookedItem {
   skip_reason: "booked" | "no_supplier" | "b2b_line_closed" | null;
 }
 
+/** AA-1149: a component of a sold tour (the quote's snapshot) without a live booking, or a tour line sold before
+ *  tours were split (skip reason sold_before_split, no part). */
+export interface UnbookedPart {
+  version_item_id: null;
+  quote_part_id: string | null;
+  position: number;
+  tour_day: number | null;
+  title: string;
+  supply_label: string | null;
+  supplier: { id: string; code: string; name: string } | null;
+  b2b_line_status: string | null;
+  bookable: boolean;
+  skip_reason:
+    | "booked"
+    | "waived"
+    | "b2b_line_closed"
+    | "line_not_confirmed"
+    | "supplier_not_active"
+    | "item_not_active"
+    | "sold_before_split"
+    | null;
+  waive_reason: string | null;
+}
+
+export function isPart(row: UnbookedItem | UnbookedPart): row is UnbookedPart {
+  return row.version_item_id === null;
+}
+
+/** The rooms and services of the approved version without a live booking (not the tour components). */
+export function versionItems(data: CaseSupplierBookings): UnbookedItem[] {
+  return data.unbooked_items.filter((r): r is UnbookedItem => !isPart(r));
+}
+
+export function tourParts(data: CaseSupplierBookings): UnbookedPart[] {
+  return data.unbooked_items.filter(isPart);
+}
+
 export interface CaseSupplierBookings {
   trip_case: { id: string; code: string; status: string; channel: "b2c" | "b2b" };
   supply: SupplyState;
   items: SupplierBooking[];
-  unbooked_items: UnbookedItem[];
+  unbooked_items: (UnbookedItem | UnbookedPart)[];
   documents_allowed: boolean;
   created?: number;
 }
@@ -126,6 +169,8 @@ export interface SupplierBookingSummary {
 export interface NewSupplierBooking {
   supplier_id: string;
   version_item_id?: string | null;
+  /** AA-1149: book a sold tour component. */
+  quote_part_id?: string | null;
   hotel_room_type_id?: string | null;
   service_id?: string | null;
   item_description?: string | null;
@@ -153,6 +198,9 @@ export const supplierBookingsApi = {
   summary: () => bkGet<SupplierBookingSummary>("supplier-bookings/summary"),
   update: (id: string, body: Partial<NewSupplierBooking>) =>
     bkSend<SupplierBooking & { changed: string[] }>(`supplier-bookings/${enc(id)}`, { method: "PATCH", body }),
+  /** AA-1149: a sold tour component that needs no supplier booking (reason 20-500 characters). */
+  waivePart: (ref: string, partId: string, reason: string) =>
+    bkSend<CaseSupplierBookings>(`trip-cases/${enc(ref)}/supplier-bookings/parts/${enc(partId)}/waive`, { body: { reason } }),
   request: (id: string) => bkSend<SupplierBooking>(`supplier-bookings/${enc(id)}/request`),
   confirm: (id: string, confirmation_ref: string, voucher_file_id?: string | null) =>
     bkSend<SupplierBooking>(`supplier-bookings/${enc(id)}/confirm`, {

@@ -228,7 +228,7 @@ export function TripPlanDetailView({ sourceId, editOnOpen = false }: { sourceId:
                 <Fact label={t("Trip style")}>{p.trip_style || "—"}</Fact>
                 {canPrice && (
                   <>
-                    <Fact label={t("Supplier")}>
+                    <Fact label={t("Operations contact")}>
                       {p.supplier ? (
                         <span>
                           {p.supplier.company_name ?? p.supplier.code}

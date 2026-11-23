@@ -26,10 +26,12 @@ import {
   type OpsFile,
   type SupplierBooking,
   type UnbookedItem,
+  versionItems,
 } from "@/lib/api/supplierBookings";
 import type { TripCaseDetail } from "@/lib/api/types";
 import { agencyOpsApi } from "@/lib/api/agencyOps";
 import { CostVsBilled } from "./CostVsBilled";
+import { SupplierGroups } from "./SupplierGroups";
 import {
   Input,
   Select,
@@ -316,10 +318,12 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
         />
       </Section>
 
-      {data && data.unbooked_items.length > 0 && (
+      <SupplierGroups c={c} data={data} canWrite={canWrite} sold={sold} onDone={refresh} />
+
+      {data && versionItems(data).length > 0 && (
         <Section title={t("Items without a live booking")} description={t("Rooms and services of the approved version that no live supplier booking covers.")}>
           <ul className="flex flex-col divide-y divide-line2 text-[13px]">
-            {data.unbooked_items.map((i) => (
+            {versionItems(data).map((i) => (
               <li key={i.version_item_id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="min-w-0">
                   <span className="font-medium text-ink">{t("Item")} {i.position}</span> · {i.supply_label ?? i.title}
@@ -623,7 +627,7 @@ function AddBooking({
       onClose();
     },
   });
-  const bookable = data.unbooked_items.filter((i) => i.bookable);
+  const bookable = versionItems(data).filter((i) => i.bookable);
   return (
     <FormDrawer
       open

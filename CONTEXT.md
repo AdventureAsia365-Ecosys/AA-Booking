@@ -1041,7 +1041,17 @@ counts every plan per status and per country; filters `status`, `country`, `q`; 
 (`price_readiness.CSV_COLUMNS`, formula-safe, never a net or margin; the from price is the public RRP). The rate-sheet
 dry run (`?dry_run=true`) adds `impact`: the plans whose components use the sheet's room types or services, for each
 whether every component would have a rate once the draft is published, its status after, and `would_move_to_priced`
-(the import drawer lists them under the Check result). Read only; the publish path is unchanged.
+(the import drawer lists them under the Check result). Read only; the publish path is unchanged. AA-1149: each row
+also carries `operable` (the can-operate check: `ready` | `warnings` | `blocked` | `exception`, the first findings,
+the exception's end; filter `operable`, `summary.by_operable`, CSV column `operable`), a separate field from the price
+status: the sellable gate reads price readiness only. The page shows it as "Can operate", with the administrator's
+"Allow sale…" drawer (its toast follows the returned status: a tour with a missing rate or an inactive item stays
+blocked); the components drawer of Price setup shows the check and the "No hotel needed" box per night
+(`PUT …/no-hotel-nights`, `trip_plan.write`, with a reason of 20..500 characters stored on the plan as
+`no_hotel_nights_reason` and in the audit row). **Decision (AA-1149 review):** contracting staff (`trip_plan.write`),
+not only the administrator, may lift rule N1 this way, with no expiry, unlike the sale exception; the required reason
+and the audit row are the control. Moving the route to `operable_exception.approve` is the tech lead's call. `trip_plans.supplier_id` is shown as "Operations contact" and is never
+used for pricing (each hotel and service has its own supplier).
 
 **Price setup workbench (AA-1091)** — everything the customer-service team needs to make tours sellable, on one
 staff page (Pricing → Price setup, `/pricing/workbench`; admin, sales, contracting read, admin and contracting edit).
@@ -1265,6 +1275,34 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   one is replaced with another supplier (B2C).
 - **Supply state** (`booking.v_trip_case_supply_state`, in the case detail as `supply`): `none` (nothing to book),
   `confirming`, `booked` = the **"Confirmed & Booked"** badge (design D1; never a status).
+- **A sold tour, one booking per component** (AA-1149 T15, bk-065; `app/b2b/quote_parts.py`,
+  `app/ops/component_bookings.py`): the quote calculation stores every component of a `tp:` line as priced in
+  `booking.b2b_quote_line_parts` (day and date, room type or service, supplier, quantity = rooms of the night or the rate
+  unit's quantity, pax, the room mix as asked, the net in the rates' currency or none when they differ, the rate ids). The
+  hold confirms one fixed quote, so those parts are the **sold snapshot**: Generate also makes one pending booking per
+  part (`quote_part_id`; one live booking per part, index `supplier_bookings_part_live_uq`; description e.g. "Hotel ·
+  Deluxe · Double ×2 + Single ×1, 1 night"), and a later edit of the tour changes nothing sold. Parts count only when
+  the hold line is `confirmed` (an on-request tour line once the desk accepted it: a declined line never leaves
+  component bookings) and the line has no departure (a departure's costs are booked per departure). Component bookings
+  are never linked to the hold line (the desk answers an on-request tour line). Skip reasons on the tab: `booked`,
+  `waived`, `line_not_confirmed`, `b2b_line_closed`, `supplier_not_active`, `item_not_active` (the part's room type,
+  hotel or service was deactivated since the sale: booked by description, with the same supplier or another); a case
+  sold before bk-065 lists its tour lines as `sold_before_split` (add by hand). **Fewer travellers after the sale**
+  (an agency partial cancellation, `b2b_line_reductions`): the generated booking takes the line's current pax (sold
+  adults and children minus those removed, the `CURRENT_PAX_SQL` rule of `app/b2b/amendments.py`), never more than the
+  part, and its notes say how many were removed; quantity (rooms, vehicles) and net stay as sold for staff to check
+  with the supplier and edit (the reduction notice reaches only bookings live at the time). The database guard also
+  refuses a booking of a part whose hold line is not `confirmed` or that a waiver closed. `request()` refuses a booking
+  whose supplier is no longer active (409 `supplier_inactive`, any booking: deactivated after Generate or while it
+  ran). `POST …/supplier-bookings` with `quote_part_id` books a part by hand
+  (another supplier, a replacement). With another supplier the part's room type / service (the old supplier's) is
+  dropped: the booking names the new supplier's room type or service when the body gives one (checked against it,
+  422 `supply_not_of_supplier`), else only the description (the body's `item_description`, or the part's); date, pax,
+  quantity and net stay as sold. `POST …/supplier-bookings/parts/{part_id}/waive` (reason 20..500 characters,
+  audited, refused while a live booking names the part) closes a part that needs no booking. **Behaviour change**: the
+  supply view counts the parts, so a new B2B tour case reaches `pre_departure` only once every part is confirmed or
+  waived. The old `supplier_bookings_item_live_uq` stays as it was (MIG-4: the running code's `ON CONFLICT` inferred
+  it during the migration window). Agency vouchers and the confirmation name the tour line of a component booking.
 - **Case statuses after the sale are system-managed** (critic B1): `change_status` refuses every post-sale target but
   `cancelled` (409 `status_system_managed`); `advance_case` moves `confirmed → supplier_confirming` on the first request
   and back when no live booking is left (empty actor, an "Auto: …" status note, a system audit row); the bk-026 guard
@@ -1322,6 +1360,21 @@ are the same file (`tariff.CSV_COLUMNS`, formula-injection safe). Staff page: Pr
   Stored append-only in `b2b_quotes` / `b2b_quote_lines` with the net (`net_cost_usd`, `conf:commercial`) that never
   leaves Booking. No column, field or key is named `supplier_net` (unit test over the B2B OpenAPI, integration test
   over the schema).
+- **Can operate** (AA-1149 B13; `app/catalog/operability.py`): before pricing, `POST /quotes` (and the staff desk
+  booking, the same `quote_in`) refuses a tailor-made `tp:` line (no departure) whose tour cannot be operated, 422
+  `invalid` naming the line and the findings, e.g. "line T1: this tour cannot be sold to agencies yet: night 2 has no
+  hotel (N1)" (contract code unchanged; a `not_operable` code is part 2). Blocking: N1 a night without a hotel component
+  (unless in `trip_plans.no_hotel_nights`), N2 a component without a published rate in the next 365 days (at the quote:
+up to `max(today + 365, service date + days)`, so a tour quoted for a season past the horizon is judged on that
+season's rates; the readiness report keeps 365 days), N3 a supplier
+  not active or an inactive room type / hotel / service. Warnings only: N4 a hotel destination change with no transfer
+  that day, N5 a guide on some days only. A line on a fixed departure is not checked. The admin **sale exception**
+  (`trip_plan_operable_overrides`, `operable_exception.approve` = administrator, approve class: never a custom role)
+  covers the exact N1 / N3-supplier findings listed when it was made, until it expires (default 14 days, at most 30:
+  pricing policy, section operations) or is revoked; a new finding blocks again; a missing rate or an inactive item can
+  never be covered. The quote line records the exception that covered it (`operable_override_id`); confirming its hold
+  adds an open custom trip check "Sold under a sale exception: book by hand what is missing (…)". **The quote is the
+  only gate**: placing and confirming a hold do not check again (a quote lives `quote_validity_days`).
 
 ## Invoices and manual payments (AA-682 S3, bk-028): retired (AA-1046)
 
@@ -2407,8 +2460,10 @@ the app's checks). `v_trip_case_supply_state` (same columns) also counts the par
 that no waiver closed (behaviour change for a new `tp:` case: `pre_departure` needs every part confirmed or waived).
 New `trip_case_part_waivers` (append-only; reason 20..500, `pii:free_text`), `trip_plans.no_hotel_nights`
 (`smallint[]`) with `no_hotel_nights_reason` (why the nights were last set, 20..500, `pii:free_text`, NULL until first
-set; contracting staff lift rule N1 this way, so every change has a reason), `trip_plan_operable_overrides` (the admin sale exception: N1 / N3-supplier findings only, reason
-20..500, at most 90 days as a backstop, one unrevoked per tour, revoked once; guard; `booking` updates the revoke
+set; contracting staff lift rule N1 this way, so every change has a reason), `trip_plan_operable_overrides` (the admin
+sale exception: N1 / N3-supplier findings only, reason 20..500, at most 90 days as a backstop, the expiry computed in
+SQL from the transaction clock so a 90-day choice passes the CHECK, one unrevoked per tour, revoked once; guard;
+`booking` updates the revoke
 columns only), `b2b_quote_lines.operable_override_id`, and the trigger `b2b_holds_sale_exception_checks` (a hold
 confirmed with a covered line adds one open custom trip check per exception). Version 1 of the pricing policy
 parameters `operable_exception_default_days` = 14 and `operable_exception_max_days` = 30 (section operations, approver

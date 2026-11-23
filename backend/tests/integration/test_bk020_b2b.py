@@ -62,6 +62,10 @@ async def _clean(conn: asyncpg.Connection) -> None:
         await conn.execute("UPDATE booking.supplier_bookings SET voucher_file_id = NULL")
         await conn.execute("DELETE FROM booking.ops_files")
         await conn.execute("DELETE FROM booking.supplier_bookings")
+        # AA-1149 (bk-065): waivers reference cases; quote lines reference sale exceptions, which reference plans.
+        await conn.execute("DELETE FROM booking.trip_case_part_waivers")
+        await conn.execute("UPDATE booking.b2b_quote_lines SET operable_override_id = NULL")
+        await conn.execute("DELETE FROM booking.trip_plan_operable_overrides")
         # AA-1075 (bk-047): staff bookings and partial cancellations reference holds, quotes and cases.
         await conn.execute("DELETE FROM booking.b2b_desk_bookings")
         await conn.execute("DELETE FROM booking.b2b_line_reductions")

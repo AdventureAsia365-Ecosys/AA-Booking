@@ -1,0 +1,60 @@
+// app/(staff)/pricing/readiness/_parts/SellExceptionDrawer.messages.ts
+// AA-1149: the English and Vietnamese text of SellExceptionDrawer.tsx (kit core/i18n.ts). The keys are the English
+// text; the phrasebook registers the Vietnamese side for text kept in module-level tables (ui/local/phrasebook.ts).
+import { defineMessages } from "@/ui/core/i18n";
+import { phrasebook } from "@/ui/local/phrasebook";
+
+export const MSG = phrasebook(
+  defineMessages(
+  {
+    "Sale exception": "Sale exception",
+    "Close": "Close",
+    "Loading…": "Loading…",
+    "A night without a hotel (N1)": "A night without a hotel (N1)",
+    "A supplier not active (N3)": "A supplier not active (N3)",
+    "Agencies can buy this tour until the exception ends": "Agencies can buy this tour until the exception ends",
+    "Exception saved, but agencies still cannot buy this tour: a missing rate or an inactive item remains": "Exception saved, but agencies still cannot buy this tour: a missing rate or an inactive item remains",
+    "Exception revoked": "Exception revoked",
+    "Why it cannot be sold": "Why it cannot be sold",
+    "cannot be overridden": "cannot be overridden",
+    "A missing rate or an inactive room type, hotel or service cannot be overridden.": "A missing rate or an inactive room type, hotel or service cannot be overridden.",
+    "Exception until": "Exception until",
+    "Revoke": "Revoke",
+    "Allow the sale despite": "Allow the sale despite",
+    "Reason": "Reason",
+    "{0} / at least {1} characters": (...a: unknown[]) => `${a[0]} / at least ${a[1]} characters`,
+    "Days (at most {0})": (...a: unknown[]) => `Days (at most ${a[0]})`,
+    "Allow sale": "Allow sale",
+    "Trips sold under the exception get a trip check to book what is missing by hand.": "Trips sold under the exception get a trip check to book what is missing by hand.",
+    "Nothing on this tour can be overridden now.": "Nothing on this tour can be overridden now.",
+    "Night {0} has no hotel": (...a: unknown[]) => `Night ${a[0]} has no hotel`,
+    "Supplier {0} is not active": (...a: unknown[]) => `Supplier ${a[0]} is not active`,
+    "Day {0}: the hotel moves with no transfer": (...a: unknown[]) => `Day ${a[0]}: the hotel moves with no transfer`,
+  },
+  {
+    "Sale exception": "Ngoại lệ bán",
+    "Close": "Đóng",
+    "Loading…": "Đang tải…",
+    "A night without a hotel (N1)": "Một đêm chưa có khách sạn (N1)",
+    "A supplier not active (N3)": "Một nhà cung cấp chưa hoạt động (N3)",
+    "Agencies can buy this tour until the exception ends": "Đại lý có thể mua tour này cho đến khi ngoại lệ hết hạn",
+    "Exception saved, but agencies still cannot buy this tour: a missing rate or an inactive item remains": "Đã lưu ngoại lệ, nhưng đại lý vẫn chưa mua được tour này: còn thiếu giá hoặc có mục ngừng hoạt động",
+    "Exception revoked": "Đã thu hồi ngoại lệ",
+    "Why it cannot be sold": "Vì sao chưa bán được",
+    "cannot be overridden": "không thể bỏ qua",
+    "A missing rate or an inactive room type, hotel or service cannot be overridden.": "Thiếu giá hoặc loại phòng, khách sạn, dịch vụ ngừng hoạt động thì không thể bỏ qua.",
+    "Exception until": "Ngoại lệ đến",
+    "Revoke": "Thu hồi",
+    "Allow the sale despite": "Cho phép bán dù",
+    "Reason": "Lý do",
+    "{0} / at least {1} characters": (...a: unknown[]) => `${a[0]} / tối thiểu ${a[1]} ký tự`,
+    "Days (at most {0})": (...a: unknown[]) => `Số ngày (tối đa ${a[0]})`,
+    "Allow sale": "Cho phép bán",
+    "Trips sold under the exception get a trip check to book what is missing by hand.": "Chuyến bán theo ngoại lệ sẽ có một việc cần làm để đặt thủ công phần còn thiếu.",
+    "Nothing on this tour can be overridden now.": "Hiện không có gì trên tour này có thể bỏ qua.",
+    "Night {0} has no hotel": (...a: unknown[]) => `Đêm ${a[0]} chưa có khách sạn`,
+    "Supplier {0} is not active": (...a: unknown[]) => `Nhà cung cấp ${a[0]} chưa hoạt động`,
+    "Day {0}: the hotel moves with no transfer": (...a: unknown[]) => `Ngày ${a[0]}: đổi khách sạn sang nơi khác mà không có xe đưa đón`,
+  },
+  ),
+);

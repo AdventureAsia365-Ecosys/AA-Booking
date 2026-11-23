@@ -24,6 +24,7 @@
       "customer.admin",
       "customer.read",
       "customer.write",
+      "operable_exception.approve",
       "ops.read",
       "ops.write",
       "payment.verify",

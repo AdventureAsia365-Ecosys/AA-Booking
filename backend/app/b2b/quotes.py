@@ -72,9 +72,10 @@ from typing import Any
 
 import asyncpg
 
-from app.b2b import agency_pricing, cancellation, departures, price_adjustments, served
+from app.b2b import agency_pricing, cancellation, departures, price_adjustments, quote_parts, served
 from app.b2b.components import PREFIX_PLAN, LineAsk, LineCost, parse_component, price_lines
 from app.b2b.errors import B2BError
+from app.catalog import operability
 from app.pricing import engine, policy_values, repository, seasons
 from app.supply import restrictions
 
@@ -539,6 +540,13 @@ async def quote_in(
 
     # AA-986 L5: a tp: line whose tour left the catalog is 409 tour_not_served, before any rate is read.
     await served.require_served(conn, [(line.ask.line_ref, line.ask.component_id) for line in lines])
+    # AA-1149 (B13): a tailor-made tp: line of a tour that cannot be operated is refused (422 invalid, the findings).
+    covered_by = await operability.require_for_quote(
+        conn,
+        [(x.ask.line_ref, _line_plan(x.ask.component_id), x.departure_id, x.ask.service_date) for x in lines],
+        on=on,
+        now=now,
+    )
     costs: list[LineCost] = await price_lines(
         conn,
         [line.ask for line in lines],
@@ -644,6 +652,7 @@ async def quote_in(
                 "agency_discount_pct": price.discount,
                 "rate_card_id": price.rate_card_id,
                 "price_note": note or None,
+                "operable_override_id": covered_by[no - 1],
             }
         )
     quoted_total = sum((p["b2b_price"] for p in priced), start=engine.ZERO)
@@ -699,9 +708,9 @@ async def quote_in(
             INSERT INTO booking.b2b_quote_lines
                 (quote_id, line_no, line_ref, component_id, component_kind, service_date, nights, pax_adult,
                  pax_child, pax_infant, rooms, unit, availability, b2b_price, net_cost_usd, supplier_rate_ids,
-                 departure_id, agency_discount_pct, rate_card_id, price_note)
+                 departure_id, agency_discount_pct, rate_card_id, price_note, operable_override_id)
             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16::uuid[],
-                    $17::uuid, $18, $19::uuid, $20::jsonb)
+                    $17::uuid, $18, $19::uuid, $20::jsonb, $21::uuid)
             """,
             [
                 (
@@ -725,10 +734,13 @@ async def quote_in(
                     p["agency_discount_pct"],
                     p["rate_card_id"],
                     json.dumps(p["price_note"], sort_keys=True) if p["price_note"] else None,
+                    p["operable_override_id"],
                 )
                 for p in priced
             ],
         )
+        # AA-1149 (T15, bk-065): the components of each tp: line as priced, the sold snapshot of a confirmed hold.
+        await quote_parts.store(conn, quote_id, [p["line_no"] for p in priced], costs)
     log.info("b2b_quote_created quote=%s partner=%s lines=%s", quote_id, partner_id, len(priced))
     body = {
         "quote_id": quote_id,

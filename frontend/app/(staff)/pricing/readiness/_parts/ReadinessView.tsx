@@ -5,6 +5,8 @@
 // published rates in the next 365 days, an exchange rate, an agency pricing rule). Summary tiles count every plan; the
 // status / country / search filters narrow the table (URL query). Each row opens the trip plan (its commercial drawer
 // for staff who edit plans). "Download CSV" saves the same list as the staff CSV (fixed columns, never a net).
+// AA-1149: the "Can operate" column (OperableCell.tsx) and its filter: whether agencies may buy the tour, apart from
+// its price status.
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -37,6 +39,8 @@ import { outOfCatalog, tourName, type OutOfCatalog } from "@/ui/booking/priceWor
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./ReadinessView.messages";
+import { OPERABLE_STATUSES } from "@/lib/api/operability";
+import { OPERABLE_META, OperableCell } from "./OperableCell";
 
 const MAX_LISTED = 3;
 
@@ -110,11 +114,11 @@ export function ReadinessView() {
   const toast = useToast();
   const { get } = useUrlFilters();
   const canEditPlans = useCan("trip_plan.write");
-  const filters = { status: get("status"), country: get("country"), q: get("q") };
+  const filters = { status: get("status"), country: get("country"), q: get("q"), operable: get("operable") };
   const [downloading, setDownloading] = useState(false);
 
   const report = useQuery({
-    queryKey: ["price-readiness", filters.status, filters.country, filters.q],
+    queryKey: ["price-readiness", filters],
     queryFn: () => priceReadinessApi.get(filters),
     placeholderData: (previous) => previous,
   });
@@ -141,6 +145,12 @@ export function ReadinessView() {
       cell: ({ row }) => <PriceReadinessBadge status={row.original.status} />,
     },
     { id: "needs", header: t("What it needs"), enableSorting: false, accessorFn: (r) => r.reason ?? "", cell: ({ row }) => <Needs row={row.original} /> },
+    {
+      id: "operable",
+      header: t("Can operate"),
+      accessorFn: (r) => r.operable?.status ?? "",
+      cell: ({ row }) => <OperableCell tourKey={row.original.tour_key} operable={row.original.operable} onChanged={() => report.refetch()} />,
+    },
     { id: "components", header: t("Components"), accessorKey: "components" },
     {
       id: "rows",
@@ -198,7 +208,7 @@ export function ReadinessView() {
   }
 
   const priced = counts ? counts.priced + counts.hand_priced : undefined;
-  const filtered = !!(filters.status || filters.country || filters.q);
+  const filtered = Object.values(filters).some(Boolean);
   return (
     <PageFrame
       title={t("Price readiness")}
@@ -265,6 +275,13 @@ export function ReadinessView() {
                   options: (data?.summary.by_country ?? []).map((c) => ({ value: c.country, label: `${c.country} (${c.total})` })),
                   width: 170, // the countries load with the report: a fixed width keeps the bar from shifting
                 },
+                {
+                  key: "operable",
+                  label: t("Can operate"),
+                  allLabel: t("Any"),
+                  options: OPERABLE_STATUSES.map((s) => ({ value: s, label: tx(OPERABLE_META[s].label) })),
+                  width: 150,
+                },
               ]}
             />
           }
@@ -285,7 +302,7 @@ export function ReadinessView() {
               ? t("Change the search or the filters, or reset them to see every plan.")
               : t("Trip plans appear here once the catalog sync has created them.")
           }
-          tableMinWidth={980}
+          tableMinWidth={1160}
         />
       </Section>
     </PageFrame>
