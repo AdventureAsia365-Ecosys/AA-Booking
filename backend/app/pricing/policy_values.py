@@ -22,7 +22,7 @@ from typing import Any
 import asyncpg
 
 from app.errors import Unavailable
-from app.pricing import policy_params
+from app.pricing import pax_bands, policy_params
 
 IN_FORCE_SQL = """
 SELECT DISTINCT ON (p.param_key) p.param_key, p.value::text AS value, p.version_no, p.id::text AS id,
@@ -146,6 +146,11 @@ class Policy:
     def child_price_pct_by_service_type(self) -> dict[str, Decimal]:
         """AA-1145 (bk-060, B4): the default child net as a % of the adult net per service type (100 = adult price)."""
         return self.amounts("child_price_pct_by_service_type")
+
+    @property
+    def pax_bands(self) -> tuple[pax_bands.Band, ...]:
+        """AA-1175 (bk-066): ``price_pax_bands``, the group-size bands of the computed price matrix."""
+        return pax_bands.as_bands(self.get(pax_bands.KEY))
 
     @property
     def rounding_increments(self) -> dict[str, Decimal]:

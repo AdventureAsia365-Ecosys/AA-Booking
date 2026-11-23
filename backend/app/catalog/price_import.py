@@ -886,16 +886,15 @@ def build_workbook(
     prices: Sequence[Mapping[str, Any]] = (),
     departure_rows: Sequence[Mapping[str, Any]] = (),
     *,
-    note: str | None = None,
+    notes: Sequence[str] = (),
 ) -> bytes:
-    """The workbook: empty, or prefilled with the given rows (dicts keyed like the database rows)."""
+    """The workbook: empty, or prefilled with the given rows (dicts keyed like the database rows); ``notes`` = more
+    README lines (AA-1175: the group sizes of the computed prices in force)."""
     wb = Workbook()
     ws = wb.active
     ws.title = README
-    for line in README_LINES:
+    for line in (*README_LINES, *notes):
         ws.append([line])
-    if note:
-        ws.append([note])
     sheets = {name: wb.create_sheet(name) for name in (TOURS, COMPONENTS, PRICES, DEPARTURES)}
     for name, sheet in sheets.items():
         sheet.append(list(COLUMNS[name]))
@@ -949,11 +948,13 @@ def build_workbook(
     return buf.getvalue()
 
 
-def template() -> bytes:
-    return build_workbook()
+def template(notes: Sequence[str] = ()) -> bytes:
+    return build_workbook(notes=notes)
 
 
-async def prefilled(conn: asyncpg.Connection, items: Sequence[Mapping[str, Any]], *, today: date) -> bytes:
+async def prefilled(
+    conn: asyncpg.Connection, items: Sequence[Mapping[str, Any]], *, today: date, notes: Sequence[str] = ()
+) -> bytes:
     """The workbook prefilled with the current state of the given workbench rows (at most :data:`MAX_TOURS`)."""
     chosen = list(items[:MAX_TOURS])
     keys = [r["tour_key"] for r in chosen]
@@ -967,7 +968,7 @@ async def prefilled(conn: asyncpg.Connection, items: Sequence[Mapping[str, Any]]
         [dict(r) for r in await conn.fetch(TEMPLATE_COMPONENTS_SQL, keys)],
         [dict(r) for r in await conn.fetch(TEMPLATE_PRICES_SQL, keys)],
         [dict(r) for r in await conn.fetch(TEMPLATE_DEPARTURES_SQL, keys, today)],
-        note=note,
+        notes=(*notes, note) if note else notes,
     )
 
 

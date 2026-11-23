@@ -30,6 +30,7 @@ function valueHint(t: T, p: PolicyParam, cross: string | null): string | undefin
   if (p.type === "currency_map") parts.push(t("fieldValueMap") as string);
   if (p.type === "amount_map") parts.push(t("fieldValueAmounts", p.choices.join(", ")) as string);
   if (LISTS.has(p.type)) parts.push(t("fieldValueList") as string);
+  if (p.type === "pax_bands") parts.push(t("fieldValuePaxBands") as string);
   if (range && p.type !== "currency_map") parts.push(t("fieldValueHint", range) as string);
   if (cross) parts.push(t("crossHint", cross) as string);
   return parts.length ? parts.join(" ") : undefined;

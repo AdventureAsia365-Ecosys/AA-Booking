@@ -320,7 +320,9 @@ backend/
                            price text when catalog.v_tour_price_reference_v1 is readable; AA-1091: the structured
                            reference of catalog.v_tour_price_reference_v2 when readable) + SyncSchedule
   app/catalog/cost_sheet.py  AA-1029: bk_price_recompute (components x rates in force -> computed matrix rows per
-                           window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule
+                           window x pax band, priced by the rules in force, hand rows kept) + RecomputeSchedule;
+                           AA-1175: the bands = the pricing policy price_pax_bands in force on the recompute day
+                           (app/pricing/pax_bands.py); its job SQL in cost_sheet_sql.py
   app/catalog/price_history.py  AA-1029 (bk-039): dated price history (close open rows, insert the new set; as_of)
   app/catalog/price_versions.py  AA-1091 (bk-054): price list versions (draft / submit with frozen diff + impact /
                            approve / reject / withdraw + preview, maker-checker; workbook import drafts)
@@ -680,6 +682,14 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   versions and tariffs only. The B2B quote reads `quote_validity_days` (`valid_until`) and `group_on_request_min_pax`
   (a `tp:` line of that many travellers or more is `on_request`, and its hold stays on request); the other
   parameters are stored for the price-version, season-calendar and tariff slices.
+  **Group-size bands (AA-1175, bk-066)**: `price_pax_bands` (type `pax_bands`, section prices, approver pricing) holds
+  the bands of the computed price matrix as `[[smallest, largest | null], ...]`: from 1, no gap or overlap, only the
+  last band open, each value 1..60, at most 8 bands (`app/pricing/pax_bands.py`, `MAX_BANDS` bounded by the 200-row
+  matrix). The cost sheet, the readiness probe and through them the agency tariff (its rows are the matrix rows) read
+  it for the recompute day; the price setup workbook's README names the bands in force; hand prices keep any Pax min /
+  Pax max. The B2B quote prices the real party from components and never reads the bands, so it can be lower than
+  the tariff row of the party's band. Approval is the same
+  two-person flow as every pricing parameter (no business-owner self-approval: the table CHECK `actor <> maker`).
   **S279 thresholds (AA-1096, bk-056)**: every Booking threshold and policy value is a parameter too, grouped by
   `section` on the page: holds (`b2b_hold_hours`, `b2b_hold_extend_hours`, `b2b_hold_max_extensions`,
   `b2b_rehold_limit_per_day`), the on-request desk SLA, traveller ages, `departure_decision_days_default`, the ops
@@ -1015,8 +1025,11 @@ Loading supplier rates makes prices flow with no hand step after the plan's comp
    `create_rate`, so the same checks and audit); a second person publishes it (maker-checker). Items are matched to
    the supplier's existing hotels (code + room type name) and services (code); every problem is reported by sheet, row
    and column and nothing is written while one is left.
-3. **Cost sheet** (`app/catalog/cost_sheet.py`): net per person per start-date window x pax band (1, 2, 3–4, 5–6,
-   7–10, 11+; the band's smallest party) from the plan's components (rooms: doubles + a single when odd; services per
+3. **Cost sheet** (`app/catalog/cost_sheet.py`): net per person per start-date window x pax band (AA-1175, bk-066: the
+   bands of the pricing policy parameter `price_pax_bands` in force on the recompute day, seeded 1, 2, 3, 4, 5–7, 8–10,
+   11+; until bk-066 the code constant 1, 2, 3–4, 5–6, 7–10, 11+; each band priced for its smallest party; computed
+   rows move to new bands only at the next recompute, which an approved policy change queues through the watermark;
+   no bands in force = no computed row, reason `no_rule`) from the plan's components (rooms: doubles + a single when odd; services per
    unit) and the rates in force (the B2B quote's choice), windows cut at rate validity edges shifted by the day offset,
    anchored on the rate validity (never on today: the same inputs the next day write nothing; windows already over are
    left out) and merged when equal; priced by the engine per channel with a rule in force (`b2b`, `fixed_departure`;
@@ -2476,6 +2489,14 @@ columns only), `b2b_quote_lines.operable_override_id`, and the trigger `b2b_hold
 confirmed with a covered line adds one open custom trip check per exception). Version 1 of the pricing policy
 parameters `operable_exception_default_days` = 14 and `operable_exception_max_days` = 30 (section operations, approver
 admin). DM-7.1 rows for the three tables in the root data standards. `cis_app` reads none of it.
+
+### `bk-066` (AA-1175 group-size price bands — needs `bk-050`)
+
+A **contract** file (config rows into `pricing_policy`; MIG-4, the code PR raises readiness to bk-066). The pricing
+policy parameter `price_pax_bands` (unit travellers) with two versions made by `seed:bk-066`, submitted and approved by
+another actor: v1, from 2026-01-01, the bands the code used (`[[1,1],[2,2],[3,4],[5,6],[7,10],[11,null]]`); v2, from
+2026-11-23, replacing v1 with a frozen diff, the business owner's bands with 3 on its own and an open 11+
+(`[[1,1],[2,2],[3,3],[4,4],[5,7],[8,10],[11,null]]`). The running code ignores the key until the code PR reads it.
 
 ## Out of scope today
 

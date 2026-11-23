@@ -9,7 +9,6 @@
   "catalog/component_suggest.py:MIN_SCORE",
   "catalog/cost_sheet.py:MAX_ATTEMPTS",
   "catalog/cost_sheet.py:MAX_SEGMENTS",
-  "catalog/cost_sheet.py:PAX_BANDS",
   "catalog/cost_sheet.py:SEASON_MAX",
   "catalog/destinations.py:MAX_SEARCH",
   "catalog/geo.py:MAX_COUNTRY_DESTINATIONS",

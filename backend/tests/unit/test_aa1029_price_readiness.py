@@ -14,7 +14,7 @@ import pytest
 
 from app.catalog import cost_sheet, liveness, price_readiness
 from app.catalog.price_readiness import Component, Plan
-from tests.unit.fakes import STATES_FRAGMENT, VIEW_READY_FRAGMENT, ScriptedConn, state_row
+from tests.unit.fakes import SEED_BANDS, STATES_FRAGMENT, VIEW_READY_FRAGMENT, ScriptedConn, state_row
 
 ON = date(2027, 3, 1)
 ROOM, GUIDE, BOAT = "room-1", "svc-guide", "svc-boat"
@@ -255,7 +255,12 @@ async def test_a_plan_only_the_cost_sheet_can_decide_is_probed(monkeypatch: pyte
         Plan("p-late", "k-3", True, components=[_room()]),
         Plan("p-bare", "k-4", True),
     ]
-    pricing = cost_sheet.Pricing(on=ON, rules={cost_sheet.engine.Channel.B2B: object()}, fx={})  # type: ignore[dict-item]
+    pricing = cost_sheet.Pricing(
+        on=ON,
+        rules={cost_sheet.engine.Channel.B2B: object()},  # type: ignore[dict-item]
+        fx={},
+        bands=SEED_BANDS,
+    )
     facts = price_readiness.Facts(ON, pricing, plans, {ROOM: {"USD"}}, [])
     out = {r["tour_key"]: r for r in await price_readiness.resolve(_Conn(), facts, facts.rated)}  # type: ignore[arg-type]
     assert asked == ["p-rows", "p-none"]  # at most MAX_PROBES, never a plan with a reason

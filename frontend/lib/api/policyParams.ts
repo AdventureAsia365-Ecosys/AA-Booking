@@ -15,6 +15,7 @@
 import type { CrossBound } from "../policyEdit";
 import type { PolicyGuide } from "../policyGuide";
 import { decimalText } from "../policyGuide";
+import { bandsToText, formatBands, textToBands, type PaxBand } from "../paxBands";
 import { bkGet, bkSend } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
 
@@ -29,7 +30,8 @@ export type ParamType =
   | "codes"
   | "currency_map"
   | "integers"
-  | "amount_map";
+  | "amount_map"
+  | "pax_bands";
 /** pricing = the product / pricing lead approves; finance = finance approves (FX, tax, surcharges, payment terms);
  *  admin = the administrator approves (data retention windows, S279). */
 export type ApproverGroup = "pricing" | "finance" | "admin";
@@ -54,8 +56,9 @@ export type Section = (typeof SECTIONS)[number];
 /** draft / pending: not used yet; in_force: used today; scheduled: approved, from a later day; superseded: replaced. */
 export type VersionStatus = "draft" | "pending" | "in_force" | "scheduled" | "superseded" | "rejected" | "withdrawn";
 /** integer: number; decimal: "5" (a percentage); boolean; "MM-DD"; a list of those or of codes; country -> currency;
- *  integers: a list of whole numbers ([1, 7, 14]); amount_map: currency -> amount ({"USD": "5"}). */
-export type ParamValue = number | string | boolean | string[] | number[] | Record<string, string>;
+ *  integers: a list of whole numbers ([1, 7, 14]); amount_map: currency -> amount ({"USD": "5"}); pax_bands: group
+ *  size bands [[1, 1], [2, 2], [5, 7], [8, null]] (AA-1175, lib/paxBands.ts). */
+export type ParamValue = number | string | boolean | string[] | number[] | Record<string, string> | PaxBand[];
 
 export interface Person {
   id: string;
@@ -151,7 +154,15 @@ export interface ValueWords {
 }
 const EN_WORDS: ValueWords = { yes: "Yes", no: "No", none: "None", others: "others" };
 
-/** The value as staff read it ("14 days", "5 %", "Yes", "12-24, 12-31", "fx, tax", "VN: VND, others: USD"). */
+/** A map value: "USD 5, EUR 5" (amount_map) or "VN: VND, others: USD" (currency_map). */
+function formatMap(map: Record<string, string>, type: "amount_map" | "currency_map", words: ValueWords): string {
+  if (type === "amount_map") return Object.entries(map).map(([k, v]) => `${k} ${v}`).join(", ");
+  const named = Object.entries(map).filter(([k]) => k !== "*").map(([k, v]) => `${k}: ${v}`);
+  return [...named, `${words.others}: ${map["*"] ?? "—"}`].join(", ");
+}
+
+/** The value as staff read it ("14 days", "5 %", "Yes", "12-24, 12-31", "fx, tax", "VN: VND, others: USD",
+ *  "1, 2, 5–7, 8+ travellers"). */
 export function formatValue(
   value: ParamValue | null | undefined,
   type: ParamType,
@@ -168,14 +179,8 @@ export function formatValue(
     const list = value as number[];
     return list.length ? `${list.join(", ")}${unit ? ` ${unit}` : ""}` : words.none;
   }
-  if (type === "amount_map") {
-    return Object.entries(value as Record<string, string>).map(([k, v]) => `${k} ${v}`).join(", ");
-  }
-  if (type === "currency_map") {
-    const map = value as Record<string, string>;
-    const named = Object.entries(map).filter(([k]) => k !== "*").map(([k, v]) => `${k}: ${v}`);
-    return [...named, `${words.others}: ${map["*"] ?? "—"}`].join(", ");
-  }
+  if (type === "amount_map" || type === "currency_map") return formatMap(value as Record<string, string>, type, words);
+  if (type === "pax_bands") return formatBands(value as PaxBand[], unit);
   if (type === "month_day") return String(value);
   return unit === "%" ? `${value} %` : unit ? `${value} ${unit}` : String(value);
 }
@@ -183,6 +188,7 @@ export function formatValue(
 /** The editor text of a value (lists and maps one item per comma) and back; null when the text is not valid. */
 export function valueToText(value: ParamValue | null | undefined, type: ParamType): string {
   if (value === null || value === undefined) return "";
+  if (type === "pax_bands") return bandsToText(value as PaxBand[]);
   if (type === "month_days" || type === "codes" || type === "integers") return (value as (string | number)[]).join(", ");
   if (type === "currency_map" || type === "amount_map") return Object.entries(value as Record<string, string>).map(([k, v]) => `${k}=${v}`).join(", ");
   return String(value);
@@ -194,27 +200,23 @@ export function textToValue(text: string, type: ParamType): ParamValue | null {
   if (type === "integer") return /^-?\d+$/.test(t) ? Number(t) : null;
   if (type === "decimal") return decimalText(t);
   if (type === "month_day") return /^\d{2}-\d{2}$/.test(t) ? t : null;
+  if (type === "pax_bands") return textToBands(t);
   const parts = t ? t.split(",").map((p) => p.trim()).filter(Boolean) : [];
   if (type === "month_days") return parts.every((p) => /^\d{2}-\d{2}$/.test(p)) ? parts : null;
   if (type === "codes") return parts;
   if (type === "integers") return parts.length && parts.every((p) => /^\d+$/.test(p)) ? parts.map(Number) : null;
-  if (type === "amount_map") {
-    const map: Record<string, string> = {};
-    for (const p of parts) {
-      const [k, v] = p.split("=").map((x) => x.trim());
-      if (!k || !v || !/^\d+(\.\d{1,2})?$/.test(v)) return null;
-      map[k.toUpperCase()] = v;
-    }
-    return map;
-  }
-  if (type === "currency_map") {
-    const map: Record<string, string> = {};
-    for (const p of parts) {
-      const [k, v] = p.split("=").map((x) => x.trim().toUpperCase());
-      if (!k || !v) return null;
-      map[k] = v;
-    }
-    return map;
-  }
+  if (type === "amount_map" || type === "currency_map") return textToMap(parts, type);
   return null;
+}
+
+/** "USD=5, EUR=5" (amount_map: amounts of at most 2 decimals) or "VN=VND, *=USD" (currency_map), keys upper case. */
+function textToMap(parts: string[], type: "amount_map" | "currency_map"): Record<string, string> | null {
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    const [k, raw] = p.split("=").map((x) => x.trim());
+    const v = type === "currency_map" ? raw?.toUpperCase() : raw;
+    if (!k || !v || (type === "amount_map" && !/^\d+(\.\d{1,2})?$/.test(v))) return null;
+    map[k.toUpperCase()] = v;
+  }
+  return map;
 }

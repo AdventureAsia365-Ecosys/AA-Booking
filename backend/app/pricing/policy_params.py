@@ -17,7 +17,8 @@ Value shapes, as stored in ``pricing_policy.value`` (jsonb) and as the staff API
 - ``currency_map``: ``{"<ISO country>" | "*": "<ISO currency>"}`` with a ``"*"`` (every other country) entry;
 - ``integers``: a sorted list of distinct whole numbers, each inside the range (``[1, 7, 14]``);
 - ``amount_map``: ``{"<ISO currency>": "<decimal>"}`` with exactly the currencies of ``choices``, each amount inside
-  the range (``{"USD": "5", ...}``).
+  the range (``{"USD": "5", ...}``);
+- ``pax_bands``: ``[[smallest, largest | null], ...]`` traveller bands from 1 (AA-1175, :mod:`app.pricing.pax_bands`).
 
 S279 (thresholds program, lane L3, bk-056): the threshold and policy values Booking kept in ``booking.settings`` or in
 code (hold length and limits, the on-request SLA, traveller ages, the departure decision day, the operations
@@ -41,8 +42,10 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from app.pricing import pax_bands, policy_params_ops, policy_params_security
 from app.pricing import policy_cross_checks as cross
-from app.pricing import policy_params_ops, policy_params_security
+from app.pricing.policy_shapes import PolicyValueError as PolicyValueError
+from app.pricing.policy_shapes import currency_map
 
 INTEGER = "integer"
 DECIMAL = "decimal"
@@ -53,7 +56,8 @@ CODES = "codes"
 CURRENCY_MAP = "currency_map"
 INTEGERS = "integers"
 AMOUNT_MAP = "amount_map"
-TYPES = (INTEGER, DECIMAL, BOOLEAN, MONTH_DAY, MONTH_DAYS, CODES, CURRENCY_MAP, INTEGERS, AMOUNT_MAP)
+PAX_BANDS = pax_bands.TYPE
+TYPES = (INTEGER, DECIMAL, BOOLEAN, MONTH_DAY, MONTH_DAYS, CODES, CURRENCY_MAP, INTEGERS, AMOUNT_MAP, PAX_BANDS)
 
 PRICING = "pricing"
 FINANCE = "finance"
@@ -88,13 +92,7 @@ ROUNDING_CURRENCIES = ("AUD", "EUR", "GBP", "SGD", "USD")
 SERVICE_TYPES = ("activity", "entrance", "guide", "meal", "transfer")
 
 MONTH_DAY_RE = re.compile(r"^(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$")
-COUNTRY_RE = re.compile(r"^(\*|[A-Z]{2})$")
-CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 MAX_LIST = 24
-
-
-class PolicyValueError(ValueError):
-    """A value outside its type or allowed range; the message says what is allowed."""
 
 
 @dataclass(frozen=True)
@@ -689,7 +687,8 @@ PARAMS: dict[str, Param] = {
             minimum=_d("0"),
             maximum=_d("3650"),
         ),
-        *(Param(**spec) for spec in (*policy_params_security.SPECS, *policy_params_ops.SPECS)),  # AA-1171: ops
+        # AA-1158 security, AA-1171 ops, AA-1175 the group-size bands (pax_bands.py)
+        *(Param(**spec) for spec in (*policy_params_security.SPECS, *policy_params_ops.SPECS, *pax_bands.SPECS)),
     )
 }
 
@@ -762,18 +761,9 @@ def normalise(key: str, value: Any, current: Mapping[str, Any] | None = None) ->
             raise PolicyValueError(f"{key}: unknown code(s) {', '.join(unknown)} (allowed: {', '.join(param.choices)})")
         out = sorted(set(value))
     elif param.type == CURRENCY_MAP:
-        if not isinstance(value, dict) or not value or len(value) > MAX_LIST:
-            raise PolicyValueError(f"{key}: a map of country to currency is required")
-        out = {}
-        for country, currency in value.items():
-            if not isinstance(country, str) or not COUNTRY_RE.match(country):
-                raise PolicyValueError(f"{key}: {country!r} is not an ISO country code or *")
-            if not isinstance(currency, str) or not CURRENCY_RE.match(currency):
-                raise PolicyValueError(f"{key}: {currency!r} is not an ISO currency code")
-            out[country] = currency
-        if "*" not in out:
-            raise PolicyValueError(f"{key}: an entry for * (every other country) is required")
-        out = dict(sorted(out.items()))
+        out = currency_map(value, key, MAX_LIST)
+    elif param.type == PAX_BANDS:
+        out = pax_bands.normalise(value, key, param.minimum, param.maximum)
     elif param.type == INTEGERS:
         if not isinstance(value, list) or not value or len(value) > MAX_LIST:
             raise PolicyValueError(f"{key}: a list of 1 to {MAX_LIST} whole numbers is required")

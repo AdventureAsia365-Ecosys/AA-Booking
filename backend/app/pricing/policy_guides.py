@@ -20,6 +20,7 @@ Text only, no logic: the definitions (types, ranges, approvers) stay in ``policy
 from __future__ import annotations
 
 from app.pricing.policy_guides_ops import OPS_GUIDES
+from app.pricing.policy_guides_prices import PRICES_GUIDES
 from app.pricing.policy_guides_security import SECURITY_GUIDES
 
 PARTS = ("what", "raise", "lower", "when", "example")
@@ -786,6 +787,7 @@ GUIDES: dict[str, dict[str, dict[str, str]]] = {
     ),
     **SECURITY_GUIDES,  # AA-1158 (bk-064): the business-owner self-approval switches (policy_guides_security.py)
     **OPS_GUIDES,  # AA-1171 (bk-063): the job check thresholds (policy_guides_ops.py)
+    **PRICES_GUIDES,  # AA-1175 (bk-066): the group-size bands of the price matrix (policy_guides_prices.py)
 }
 
 

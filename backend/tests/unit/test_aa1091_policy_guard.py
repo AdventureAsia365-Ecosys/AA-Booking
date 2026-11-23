@@ -79,7 +79,6 @@ KNOWN: dict[tuple[str, str], str] = {
     ("catalog/trip_plan_prices.py", "MIN_MARGIN"): TECH,
     ("catalog/trip_plan_prices.py", "CHANGES_SHOWN"): TECH,
     ("catalog/cost_sheet.py", "MAX_ATTEMPTS"): TECH,
-    ("catalog/cost_sheet.py", "PAX_BANDS"): GAP + " (the pax bands of a computed price matrix)",
     ("catalog/cost_sheet.py", "MAX_SEGMENTS"): TECH,
     ("catalog/cost_sheet.py", "FOREVER"): TECH,
     ("catalog/cost_sheet.py", "SEASON_MAX"): TECH,

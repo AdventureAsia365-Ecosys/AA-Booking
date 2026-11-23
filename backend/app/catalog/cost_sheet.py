@@ -1,9 +1,11 @@
 """The cost sheet of a trip plan (root ADR 0005 decision 3, AA-1029 R4): its price matrix computed from its bookable
 components (``booking.trip_plan_components``) and the supplier rates in force, priced per channel by the existing
-engine, recomputed whenever a rate, a pricing rule or an FX rate changes. Hand rows are kept.
+engine, recomputed whenever a rate, a pricing rule, a policy value or an FX rate changes. Hand rows are kept.
 
-**Net cost per person**, per **start date** window x **pax band** (1, 2, 3-4, 5-6, 7-10, 11+; ADR 0005 d3), for the
-band's smallest party (fixed costs are shared by fewer people there, so the price covers the whole band):
+**Net cost per person**, per **start date** window x **pax band** (AA-1175, bk-066: the pricing policy parameter
+``price_pax_bands`` in force on the recompute day, :mod:`app.pricing.pax_bands`; was the constant 1, 2, 3-4, 5-6, 7-10,
+11+ of ADR 0005 d3), for the band's smallest party (fixed costs are shared by fewer people there, so the price covers
+the whole band). Rows computed on older bands change only at the next recompute. Per band:
 
 - a room component on day ``n`` = one night on ``start + n - 1`` for the party's room mix (``party // 2`` doubles plus
   a single when the party is odd; singles only on a room type that holds one), the rate's pax band matched against the
@@ -17,18 +19,18 @@ band's smallest party (fixed costs are shared by fewer people there, so the pric
   currencies are summed in USD at the approved plain rate in force.
 
 **Windows.** Start dates are cut wherever a component's rate validity starts or ends (shifted by its day offset), from
-the earliest cut to the end of the latest rate, so every window prices the same rates for every departure in it;
-windows over before the recompute day are left out (at most :data:`MAX_SEGMENTS` windows, the latest left out first)
-and neighbouring windows with the same nets, season and peak are merged. The windows are anchored on the rate
-validity, never on today, so a recompute on the next day with the same inputs computes the same rows and writes
-nothing (no daily history copies, no false ``updated_at`` move for the products feed); a row changes only when a rate,
-rule or FX rate changes or a window ends. A window or band with a component without a rate in force gets no row
-(never a guessed or zero net). The season label = the labels of the rates
-used for 2 travellers (for staff); the season itself is the plan's season calendar on the window's start dates
-(AA-1091, bk-055, :mod:`app.pricing.seasons`: windows are also cut where it changes, ``season_code`` on each row),
-and ``peak`` = a peak or festive season (the rule's peak uplift then applies). While the plan's calendar is not
-configured (no approved range yet), the old rule stays so no price moves before staff enter seasons: ``peak`` when a
-2-traveller rate label says "peak" (``season_code`` ``peak``, else ``low``).
+the earliest cut to the end of the latest rate, so every window prices the same rates for every departure in it; windows
+over before the recompute day are left out (at most :data:`MAX_SEGMENTS` windows, the latest left out first) and
+neighbouring windows with the same nets, season and peak are merged. The windows are anchored on the rate validity,
+never on today, so a recompute on the next day with the same inputs computes the same rows and writes nothing (no daily
+history copies, no false ``updated_at`` move for the products feed); a row changes only when a rate, rule or FX rate
+changes or a window ends. A window or band with a component without a rate in force gets no row (never a guessed or zero
+net). The season label = the labels of the rates used for the band that holds 2 travellers (for staff); the season
+itself is the plan's season calendar on the window's start dates (AA-1091, bk-055, :mod:`app.pricing.seasons`: windows
+are also cut where it changes, ``season_code`` on each row), and ``peak`` = a peak or festive season (the rule's peak
+uplift then applies). While the plan's calendar is not configured (no approved range yet), the old rule stays so no
+price moves before staff enter seasons: ``peak`` when a 2-traveller rate label says "peak" (``season_code`` ``peak``,
+else ``low``).
 
 **Channels.** ``b2b`` and ``fixed_departure`` (root ADR 0019: the B2C channels are retired; the approved AA-1029
 re-scope and the R4 milestone keep these two, fixed departures being sold to agencies too), each only while an
@@ -44,12 +46,12 @@ it changed. A computed row that overlaps only a hand row already over (ended bef
 after it instead of being left out (``trimmed``). At most ``MAX_ROWS`` rows: the latest windows are left out first
 (``truncated``).
 
-**The job** ``bk_price_recompute`` (:func:`run`): every plan with a component, a computed row or a ``b2b`` row (a
-plan priced by hand gets its RRP filled and refreshed under the b2b rule's markup in force), or one plan
+**The job** ``bk_price_recompute`` (:func:`run`): every plan with a component, a computed row or a ``b2b`` row (a plan
+priced by hand gets its RRP filled and refreshed under the b2b rule's markup in force), or one plan
 (``payload.plan_id``). Queued by :class:`RecomputeSchedule` whenever the watermark of its inputs moves (approvals of
-rules and FX rates, contract and rate edits, plan and component changes, and the UTC day, so a rule or FX rate dated
-to start today and a window that ended are picked up; an unchanged day writes nothing);
-staff can also recompute one plan at once (``POST …/prices/recompute``).
+rules, FX rates and policy values, contract and rate edits, plan and component changes, and the UTC day, so a rule or FX
+rate dated to start today and a window that ended are picked up; an unchanged day writes nothing); staff can also
+recompute one plan at once (``POST …/prices/recompute``).
 """
 
 from __future__ import annotations
@@ -66,9 +68,10 @@ import asyncpg
 
 from app.catalog import trip_plan_prices as prices
 from app.catalog import version_matrix
+from app.catalog.cost_sheet_sql import COMPONENTS_SQL, PLANS_SQL, WATERMARK_SQL
 from app.jobs import queue
 from app.jobs.queue import Job
-from app.pricing import engine, repository, seasons
+from app.pricing import engine, pax_bands, policy_values, repository, seasons
 from app.pricing import service as pricing_service
 from app.supply.rates import RateAsk, rates_in_force_many
 
@@ -80,7 +83,6 @@ SCHEDULER = "system:price_recompute"
 MAX_ATTEMPTS = 3
 ACTION = "trip_plan.prices_recomputed"
 
-PAX_BANDS: tuple[tuple[int, int | None], ...] = ((1, 1), (2, 2), (3, 4), (5, 6), (7, 10), (11, None))
 CHANNELS: tuple[engine.Channel, ...] = (engine.Channel.B2B, engine.Channel.FIXED_DEPARTURE)
 SELLING_CURRENCY = engine.BASE_CURRENCY
 MAX_SEGMENTS = 60
@@ -88,16 +90,6 @@ FOREVER = date(9999, 12, 31)
 SEASON_MAX = 80
 CENT = Decimal("0.01")
 
-COMPONENTS_SQL = """
-SELECT c.day_no, c.hotel_room_type_id::text AS room_type_id, c.service_id::text AS service_id, rt.max_occupancy,
-       coalesce(rt.status, s.status) AS status, coalesce(h.status, 'active') AS hotel_status
-FROM booking.trip_plan_components c
-LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id
-LEFT JOIN booking.hotels h ON h.id = rt.hotel_id
-LEFT JOIN booking.services s ON s.id = c.service_id
-WHERE c.trip_plan_id = $1::uuid
-ORDER BY c.day_no, coalesce(c.hotel_room_type_id, c.service_id)
-"""
 # Validity spans of every published adult rate of the plan's items (the rate's validity inside its contract's; a child
 # or infant rate, bk-060, never prices a component alone); also read by
 # the price readiness report (``app.catalog.price_readiness``), which uses the currency too.
@@ -109,31 +101,7 @@ FROM booking.supplier_rates x JOIN booking.supplier_contracts k ON k.id = x.supp
 WHERE k.status = 'published' AND (x.hotel_room_type_id = ANY($1::uuid[]) OR x.service_id = ANY($2::uuid[]))
   AND x.pax_type = 'adult'
 """
-PLANS_SQL = """
-SELECT p.id::text AS id, p.source_id FROM booking.trip_plans p
-WHERE ($1::uuid IS NULL OR p.id = $1::uuid)
-  AND (EXISTS (SELECT 1 FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id)
-       OR EXISTS (SELECT 1 FROM booking.trip_plan_prices r
-                  WHERE r.trip_plan_id = p.id AND (r.computed OR r.channel = 'b2b'))
-       OR EXISTS (SELECT 1 FROM booking.price_list_versions v
-                  WHERE v.trip_plan_id = p.id AND v.status IN ('published', 'superseded')))
-ORDER BY p.source_id
-"""
 LOCK_SQL = "SELECT id::text AS id, source_id FROM booking.trip_plans WHERE id = $1::uuid FOR UPDATE"
-# What a recompute depends on; a change of any part queues one run (the idempotency key is the hash).
-WATERMARK_SQL = """
-SELECT concat_ws('|',
-    (SELECT count(*) || ':' || coalesce(max(approved_at)::text, '') FROM booking.policy_approvals),
-    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_contracts),
-    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.supplier_rates),
-    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.trip_plans),
-    (SELECT count(*) FROM booking.trip_plan_components),
-    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.price_list_versions),
-    (SELECT count(*) || ':' || coalesce(max(greatest(decided_at, ended_at))::text, '') FROM booking.season_ranges),
-    (SELECT count(*) || ':' || coalesce(max(greatest(decided_at, ended_at))::text, '') FROM booking.holiday_events),
-    (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM booking.season_calendars),
-    (now() AT TIME ZONE 'UTC')::date::text) AS mark
-"""
 
 
 # Why a plan gets no computed row (``compute`` info ``reason``; the price readiness report uses the same words).
@@ -280,11 +248,12 @@ def horizon(today: date, spans: Iterable[Span]) -> date | None:
     return max(stops) if stops else None
 
 
-def asks(wins: Sequence[Window], parts: Sequence[Part]) -> list[RateAsk]:
-    """Every rate lookup the windows x bands x components need (the batched query dedupes repeats)."""
+def asks(wins: Sequence[Window], parts: Sequence[Part], bands: Sequence[pax_bands.Band]) -> list[RateAsk]:
+    """Every rate lookup the windows x bands x components need, plus the single and double rate of every room that
+    holds two (:func:`single_supplement`, whatever the bands); the batched query dedupes repeats."""
     out: list[RateAsk] = []
     for win in wins:
-        for low, _ in PAX_BANDS:
+        for low, _ in bands:
             for part in parts:
                 on = win.start + timedelta(days=part.offset)
                 if part.room_type_id:
@@ -292,17 +261,24 @@ def asks(wins: Sequence[Window], parts: Sequence[Part]) -> list[RateAsk]:
                         out.append(RateAsk(part.room_type_id, None, on, occupancy))
                 else:
                     out.append(RateAsk(None, part.service_id, on, low))
+        for part in parts:
+            if part.room_type_id and not (part.max_occupancy is not None and part.max_occupancy < 2):
+                on = win.start + timedelta(days=part.offset)
+                out.extend(RateAsk(part.room_type_id, None, on, occupancy) for occupancy in (1, 2))
     return out
 
 
 def cells(
-    wins: Sequence[Window], parts: Sequence[Part], found: dict[RateAsk, dict[str, Any] | None]
+    wins: Sequence[Window],
+    parts: Sequence[Part],
+    found: dict[RateAsk, dict[str, Any] | None],
+    bands: Sequence[pax_bands.Band],
 ) -> list[list[Cell]]:
     """``[window][band]`` cost cells from the rates found for :func:`asks`."""
     grid: list[list[Cell]] = []
     for win in wins:
         row: list[Cell] = []
-        for low, _ in PAX_BANDS:
+        for low, _ in bands:
             cell = Cell()
             for part in parts:
                 on = win.start + timedelta(days=part.offset)
@@ -345,7 +321,7 @@ def single_supplement(
 ) -> tuple[Decimal, str] | None:
     """AA-1075 (bk-15): the net single supplement per person of a start date window: for every room component that
     holds two, the single room rate less half the double rate of its night (never below 0). None when the plan has
-    no such room or a rate is missing. The asks of bands 1 and 2 already read both rates."""
+    no such room or a rate is missing. :func:`asks` reads both rates."""
     cell = Cell()
     rooms = 0
     for part in parts:
@@ -400,6 +376,7 @@ def net_rows(
     wins: Sequence[Window],
     grid: Sequence[Sequence[Cell]],
     fx: dict[str, engine.FxRate],
+    bands: Sequence[pax_bands.Band],
     singles: Sequence[tuple[Decimal, str] | None] | None = None,
     codes: Sequence[str] | None = None,
 ) -> tuple[list[NetRow], int]:
@@ -407,13 +384,15 @@ def net_rows(
     cells. ``singles`` (AA-1075): the single supplement of each window (:func:`single_supplement`). ``codes``
     (AA-1091, bk-055): the calendar season of each window's start dates (:mod:`app.pricing.seasons`); ``peak`` =
     a peak or festive season (the rule's peak uplift). Without codes (the plan's calendar is not configured) the old
-    rule: a window is ``peak`` when a 2-traveller rate's season label says "peak", else ``low``."""
+    rule: a window is ``peak`` when a 2-traveller rate's season label says "peak", else ``low``. ``bands`` (AA-1175):
+    the group-size bands of ``grid``'s columns; the season label comes from the band that holds 2 travellers."""
     unpriced = 0
     keyed: list[tuple[Window, tuple[Any, ...], str | None, str, Any]] = []
-    two = next(i for i, (low, _) in enumerate(PAX_BANDS) if low == 2)
+    two = pax_bands.index_for(bands, 2)
+    two = len(bands) - 1 if two is None else two  # bands capped at 1 traveller: the only band
     for i, (win, row) in enumerate(zip(wins, grid, strict=True)):
         nets = []
-        for (low, _), cell in zip(PAX_BANDS, row, strict=True):
+        for (low, _), cell in zip(bands, row, strict=True):
             value = per_person(cell, low, fx)
             unpriced += value is None
             nets.append(value)
@@ -431,7 +410,7 @@ def net_rows(
             merged.append((win, nets, season, code, single))
     out: list[NetRow] = []
     for win, nets, season, code, single in merged:
-        for (low, high), value in zip(PAX_BANDS, nets, strict=True):
+        for (low, high), value in zip(bands, nets, strict=True):
             if value is not None:
                 single_net = in_currency(single[0], single[1], value[1], fx) if single else None
                 out.append(
@@ -464,6 +443,14 @@ class Pricing:
     # S279 L3 (bk-056): the rounding increments in force (pricing policy); empty when the policy has none, then every
     # row is refused like a row without a rule.
     rounding: engine.Increments = field(default_factory=dict)
+    # AA-1175 (bk-066): the group-size bands in force (pricing policy ``price_pax_bands``); empty when the policy has
+    # none, then no row is computed (reason ``no_rule``, like a plan without a rule).
+    bands: tuple[pax_bands.Band, ...] = ()
+
+    @property
+    def can_price(self) -> bool:
+        """A rule of a channel and the group-size bands are in force (the readiness report asks the same)."""
+        return bool(self.rules) and bool(self.bands)
 
     @property
     def markup(self) -> Decimal | None:
@@ -484,7 +471,13 @@ async def load_pricing(conn: asyncpg.Connection, on: date) -> Pricing:
     except pricing_service.PricingDataUnavailable:
         log.warning("cost_sheet_rounding_unavailable on=%s", on)
         rounding = {}
-    return Pricing(on=on, rules=rules, fx={c: d.rate for c, d in dated_fx.items()}, rounding=rounding)
+    try:
+        bands = (await policy_values.require(conn, on, "price_pax_bands")).pax_bands
+    except policy_values.PolicyUnavailable:
+        log.warning("cost_sheet_pax_bands_unavailable on=%s", on)
+        bands = ()
+    fx = {c: d.rate for c, d in dated_fx.items()}
+    return Pricing(on=on, rules=rules, fx=fx, rounding=rounding, bands=bands)
 
 
 def _dec(value: Any) -> Decimal | None:
@@ -652,7 +645,7 @@ async def compute(
     """The computed rows of one plan and why some are missing (no DB write)."""
     info: dict[str, Any] = {"windows": 0, "unpriced_cells": 0, "refused": 0, "reason": None}
     parts, active = await _parts(conn, plan_id)
-    if reason := blocking_reason(len(parts), active, bool(pricing.rules)):
+    if reason := blocking_reason(len(parts), active, pricing.can_price):
         info["reason"] = reason
         return [], info
     rooms = sorted({p.room_type_id for p in parts if p.room_type_id})
@@ -667,11 +660,12 @@ async def compute(
         info["reason"] = NO_RATES
         return [], info
     info["windows"] = len(wins)
-    wanted = asks(wins, parts)
+    wanted = asks(wins, parts, pricing.bands)
     found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
     singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
     codes = [cal.season_on(w.start).code for w in wins] if cal.configured else None
-    nets, info["unpriced_cells"] = net_rows(wins, cells(wins, parts, found), pricing.fx, singles, codes)
+    grid = cells(wins, parts, found, pricing.bands)
+    nets, info["unpriced_cells"] = net_rows(wins, grid, pricing.fx, pricing.bands, singles, codes)
     rows, info["refused"] = priced_rows(nets, pricing)
     if not rows:
         info["reason"] = NO_RATES
@@ -746,6 +740,7 @@ async def run(pool: asyncpg.Pool, plan_id: str | None = None, *, on: date | None
         "priced_on": day.isoformat(),
         "rules": sorted(c.value for c in pricing.rules),
         "rrp_markup": None if pricing.markup is None else str(pricing.markup),
+        "pax_bands": pax_bands.describe(pricing.bands),
         **totals,
         "reasons": reasons,
     }

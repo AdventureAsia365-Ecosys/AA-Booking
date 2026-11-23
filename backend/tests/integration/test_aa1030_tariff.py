@@ -129,10 +129,11 @@ async def test_the_tariff_is_what_a_quote_charges(
     tariffs: dict[str, dict[str, Any]] = {}
     for tenant in agencies:
         tariffs[tenant] = await _ok(await c.get(url.format(ids[tenant]), headers=sales))
-    # The cost sheet's six pax bands of the 2027 window, all quotable (a room and a transfer with rates in force).
+    # The cost sheet's pax bands of the 2027 window (AA-1175: the seeded policy price_pax_bands, bk-066 v2), all
+    # quotable (a room and a transfer with rates in force).
     standard = tariffs[TENANT_STANDARD]
     assert [(i["pax_min"], i["pax_max"]) for i in standard["items"]] == [
-        (1, 1), (2, 2), (3, 4), (5, 6), (7, 10), (11, None)
+        (1, 1), (2, 2), (3, 3), (4, 4), (5, 7), (8, 10), (11, None)
     ]  # fmt: skip
     assert standard["unpriced"] == [] and standard["truncated"] is False
     assert standard["partner"]["tier_code"] == "standard" and standard["basis"] == "per_person_band_min_twin_share"
