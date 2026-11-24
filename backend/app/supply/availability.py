@@ -10,6 +10,10 @@ several DMCs, each under its own AA contract) reads only that supplier's restric
 on-request terms and its stop-sales) and counts only that supplier's use. An ask without one reads every supplier's
 rows and use (the staff check of a component).
 
+**One contract per DMC and date** (:func:`app.supply.restrictions.current_terms`): when two published contracts of
+one supplier carry terms on a date (an exported, edited and re-imported contract), only the newest published one's
+terms count, so a round trip never doubles an allotment.
+
 **Allotment use** = units already taken for the component, supplier and date:
 
 - supplier bookings ``requested`` or ``confirmed`` (rooms: ``quantity`` rooms, at least 1, per night of the stay;
@@ -61,8 +65,8 @@ MAX_NOTE_DATES = 10  # technical-constant: dates listed per reason in a quote li
 # Stop-sales in effect (whatever the contract's state now) and the terms of published contracts, over a date range.
 RESTRICTIONS_SQL = """
 SELECT r.id::text AS id, r.hotel_room_type_id::text AS room_type_id, r.service_id::text AS service_id,
-       k.supplier_id::text AS supplier_id, r.inventory_kind AS kind, r.date_from, r.date_to, r.units, r.release_days,
-       r.max_pax, r.status, r.ended_at IS NOT NULL AS ended
+       k.supplier_id::text AS supplier_id, k.id::text AS contract_id, k.published_at, r.inventory_kind AS kind,
+       r.date_from, r.date_to, r.units, r.release_days, r.max_pax, r.status, r.ended_at IS NOT NULL AS ended
 FROM booking.supply_restrictions r
 JOIN booking.supplier_contracts k ON k.id = r.supplier_contract_id
 WHERE (r.hotel_room_type_id = ANY($1::uuid[]) OR r.service_id = ANY($2::uuid[]))
@@ -147,6 +151,8 @@ def _row(r: Any) -> Restriction:
         max_pax=r["max_pax"],
         ended=bool(r["ended"]),
         supplier_id=r["supplier_id"],
+        contract_id=r["contract_id"],
+        published_at=r["published_at"],
     )
 
 

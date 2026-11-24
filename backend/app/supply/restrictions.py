@@ -40,7 +40,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import asyncpg
@@ -83,6 +83,8 @@ class Restriction:
     max_pax: int | None = None
     ended: bool = False
     supplier_id: str | None = None  # AA-1153 part 2: the supplier (DMC) of the row's contract
+    contract_id: str | None = None  # the row's contract (a re-imported contract replaces its terms, see current_terms)
+    published_at: datetime | None = None  # when that contract was published
 
     def covers(self, day: date) -> bool:
         return self.date_from <= day <= self.date_to
@@ -106,12 +108,31 @@ class Verdict:
         return {"status": self.status, "reason": self.reason, "restriction_id": self.restriction_id}
 
 
+def _contract_rank(row: Restriction) -> tuple[bool, float, str]:
+    published = row.published_at
+    return (published is not None, published.timestamp() if published else 0.0, row.contract_id or "")
+
+
+def current_terms(live: list[Restriction]) -> list[Restriction]:
+    """The rows that count on one date: every stop-sale, and per supplier only the contract terms of its newest
+    published contract with a term on that date. A contract exported, edited and imported back is a second published
+    contract with a copy of the same terms; counting both would double an allotment (2 + 2 rooms for a DMC that holds
+    2). The newer contract's terms replace the older's on the dates they cover; to close an older term early, the new
+    contract carries an ``on_request`` term on those dates (or the older contract expires)."""
+    newest: dict[str | None, tuple[bool, float, str]] = {}
+    for row in live:
+        if row.kind != STOP_SALE:
+            rank = _contract_rank(row)
+            newest[row.supplier_id] = max(newest.get(row.supplier_id, rank), rank)
+    return [r for r in live if r.kind == STOP_SALE or _contract_rank(r) == newest[r.supplier_id]]
+
+
 def evaluate(
     rows: Iterable[Restriction], day: date, *, pax: int, units: int = 1, used: int = 0, today: date
 ) -> Verdict:
     """The availability of one component on ``day`` for a party of ``pax`` needing ``units`` (rooms or seats), with
     ``used`` units of the allotment already booked. Precedence: stop_sale > allotment / free_sale > on_request."""
-    live = sorted((r for r in rows if r.in_effect and r.covers(day)), key=lambda r: r.id)
+    live = current_terms(sorted((r for r in rows if r.in_effect and r.covers(day)), key=lambda r: r.id))
     stop = next((r for r in live if r.kind == STOP_SALE), None)
     if stop is not None:
         return Verdict(ON_REQUEST, R_STOP, stop.id)

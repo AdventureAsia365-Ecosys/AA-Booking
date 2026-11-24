@@ -69,6 +69,7 @@ import asyncpg
 from openpyxl import Workbook, load_workbook
 
 from app.auth.staff import Staff
+from app.b2b.tariff import FORMULA_START
 from app.catalog import cost_sheet, price_readiness
 from app.errors import Invalid
 from app.pricing import policy_values
@@ -656,6 +657,18 @@ CONTRACT_HELP = (
 )
 
 
+def _append(sheet: Any, row: list[Any]) -> None:
+    """Append a row; a text that starts like a formula (``=``, ``+``, ``-``, ``@``, tab, CR) stays text. openpyxl stores
+    a str starting with "=" as a formula, and an export writes free text a DMC sent (titles, notes, season and room
+    names): a string cell with Excel's quote prefix, the value unchanged, so the round trip still matches (as
+    :mod:`app.catalog.price_import` does for the price workbook)."""
+    sheet.append(row)
+    for cell in sheet[sheet.max_row]:
+        if isinstance(cell.value, str) and cell.value.startswith(FORMULA_START):
+            cell.data_type = "s"
+            cell.quotePrefix = True
+
+
 def build_workbook(
     contract: dict[str, Any] | None = None,
     hotel_rows: list[tuple[Any, ...]] | None = None,
@@ -666,22 +679,22 @@ def build_workbook(
 ) -> bytes:
     """An AA rate-sheet workbook: the empty template, or one filled with the given rows (tests, fixtures, and the
     export of a contract, :mod:`app.supply.rate_sheet_export`; AA-1153: with the Seasons, Hotel children and
-    Inventory sheets)."""
+    Inventory sheets). Text cells never become formulas (:func:`_append`)."""
     wb = Workbook()
     ws = wb.active
     ws.title = CONTRACT_SHEET
     values = contract or {}
     for label, hint in CONTRACT_HELP:
-        ws.append([label, values.get(label, ""), hint if not contract else None])
+        _append(ws, [label, values.get(label, ""), hint if not contract else None])
     hotel = wb.create_sheet(HOTEL_SHEET)
     hotel.append(list(HOTEL_COLUMNS))
     for row in hotel_rows or []:
-        hotel.append(list(row))
+        _append(hotel, list(row))
     for name in SERVICE_SHEETS:
         sheet = wb.create_sheet(name)
         sheet.append(list(SERVICE_COLUMNS))
         for row in (service_rows or {}).get(name, []):
-            sheet.append(list(row))
+            _append(sheet, list(row))
     for title, columns, extra in (
         (SEASONS_SHEET, SEASON_COLUMNS, season_rows),
         (CHILDREN_SHEET, CHILDREN_COLUMNS, child_rows),
@@ -690,7 +703,7 @@ def build_workbook(
         sheet = wb.create_sheet(title)
         sheet.append(list(columns))
         for row in extra or []:
-            sheet.append(list(row))
+            _append(sheet, list(row))
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

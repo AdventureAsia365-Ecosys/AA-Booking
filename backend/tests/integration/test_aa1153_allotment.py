@@ -176,7 +176,7 @@ async def test_contract_exports_and_imports_back_as_a_new_draft(
     admin: asyncpg.Connection,  # noqa: F811
     lodge: dict[str, str],  # noqa: F811
 ) -> None:
-    c, cis, _, _ = client
+    c, cis, m2m, _ = client
     k = await _allotment_contract(c, cis, admin, lodge)
     response = await c.get(f"/contracts/{k}/rate-sheet", headers=_staff(cis, SALES))
     assert response.status_code == 200, response.text
@@ -207,6 +207,21 @@ async def test_contract_exports_and_imports_back_as_a_new_draft(
         "SELECT count(*) FROM booking.supply_restrictions WHERE supplier_contract_id = $1::uuid", done["contract"]["id"]
     )
     assert terms == 1
+
+    # Published, the re-imported contract replaces the terms it copies: still 2 rooms for Harbour, never 2 + 2.
+    publish = {"status": "published", "acknowledge_checks": True}
+    await _ok(await c.patch(f"/contracts/{done['contract']['id']}", json=publish, headers=_staff(cis, CHECKER)))
+    assert await admin.fetchval(
+        "SELECT count(*) FROM booking.supplier_contracts WHERE supplier_id = $1::uuid AND status = 'published'"
+        " AND id IN ($2::uuid, $3::uuid)",
+        lodge["b"],
+        k,
+        done["contract"]["id"],
+    ) == 2  # fmt: skip
+    room = lodge["room"]
+    assert await _availability(c, m2m, "ALLOT-RT-2", [_line(room, 2)]) == ["available"]
+    assert await _availability(c, m2m, "ALLOT-RT-3", [_line(room, 3)]) == ["on_request"]
+    assert set((await _note(admin, "ALLOT-RT-3"))["supply"]) == {"allotment_full"}
 
 
 def _edit_published(data: bytes, value: str) -> bytes:

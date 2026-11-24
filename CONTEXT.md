@@ -894,7 +894,8 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   Holds lock the departure rows (`FOR UPDATE`, id order) before counting, so two holds on the last seat run one after
   the other and exactly one wins. Line availability (quotes and holds): no departure = `on_request` (AA-1153
   part 2: a room line covered on every night by its DMC's allotment / free sale = `available`, re-checked at the hold
-  under a lock); a departure with
+  under a lock; per DMC and date only the terms of its newest published contract count, so a re-imported contract
+  replaces the terms it copies instead of doubling them); a departure with
   room that auto-confirms = `available`, that does not = `on_request`; full, cancelled or started = `sold_out`. A
   quote leaves out the seats of the live `active` hold of its own `(partner, proposal_ref, proposal_version)` (AA-950:
   the set a new quote of that version replaces, released by the caller before `POST /holds`; the hold still counts
