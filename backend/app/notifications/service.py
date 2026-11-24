@@ -7,6 +7,8 @@ addressed to them (``recipient_ref`` = their CIS user id, bk-005). Read state is
 here: they were the traveller's feed of the retired B2C half (AA-1046), kept as history; nothing writes one now.
 
 A notification is a row; these helpers send no e-mail (the staff "new inquiry" e-mail went with the inquiry intake).
+The feed never returns ``data.mail``, the contract expiry e-mail record of a ``contract.expiring`` row (staff keys of
+who was mailed, :mod:`app.supply.contract_expiry_mail`): every staff member reads the shared queue (S291).
 """
 
 from __future__ import annotations
@@ -152,7 +154,7 @@ async def list_feed(
     rows = await conn.fetch(
         f"""
         SELECT n.id::text AS id, n.type, n.title, n.message, n.entity_type, n.entity_id::text AS entity_id,
-               n.data::text AS data, n.created_at, {IS_READ} AS read
+               (n.data - 'mail')::text AS data, n.created_at, {IS_READ} AS read
         FROM booking.notifications n
         WHERE {" AND ".join(where)}
         ORDER BY n.created_at DESC, n.id DESC
