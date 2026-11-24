@@ -7,11 +7,14 @@ Where AA sends a supplier's money is the main payout fraud path, so a bank accou
   IBAN, SWIFT / BIC, bank code, bank address) are encrypted at once (:mod:`app.suppliers.bank_crypto`, a KMS envelope
   only the Booking task role can open); the row keeps the bank name, country, currency and the last 4 in clear.
 - **Approve** (``supplier_bank.approve``: admin) after a **call-back**: the approver calls the supplier on a number
-  AA already knew (not one given with the change) and writes who confirmed it (``callback_note``, required). Never the
-  person who entered it (403 ``maker_checker``), except the business owner, flagged ``owner_self_approved``
-  (:mod:`app.auth.self_approval`; the database checks the CIS marker again). The previous approved account becomes
-  ``superseded`` in the same transaction. **Reject** (``supplier_bank.approve``, not the person who entered it, a
-  reason) or **withdraw** (the person who entered it, a reason).
+  AA already knew (not one given with the change) and writes who confirmed it (``callback_note``, required). Tech lead
+  decision S289: only the **business owner** approves (her CIS ``is_business_owner`` marker), with the **tech lead**
+  (the platform owner marker ``is_owner``) as the fallback approver; any other administrator gets 403
+  ``bank_approver_not_allowed`` (:func:`approver_kind`, read server-side on every write, never from the request; bk-071
+  refuses the same in the database). Never the person who entered it (403 ``maker_checker``), except the business
+  owner, flagged ``owner_self_approved`` (:mod:`app.auth.self_approval`; the database checks the CIS marker again).
+  The previous approved account becomes ``superseded`` in the same transaction. **Reject** (``supplier_bank.approve``,
+  not the person who entered it, a reason) or **withdraw** (the person who entered it, a reason).
 - **Contact changes before a call-back** (review S289): the supplier's contacts (name, e-mail, phone, contacts by role)
   are edited without an approval while it is active, so one person could plant a number and then "confirm" a forged
   account on it. The approval is refused (409 ``contacts_recently_changed``) when the person who entered the account
@@ -40,7 +43,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.auth import self_approval
+from app.auth import custom_roles, self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.pricing import policy_values
@@ -48,6 +51,9 @@ from app.pricing.policy_params_security import BANK_LOCK_HOURS, CONTACT_CHANGE_D
 from app.suppliers import bank_crypto
 
 ACTIONS = ("approve", "reject", "withdraw")
+# Tech lead S289: who approves a bank account change (:func:`approver_kind`); anyone else is refused with this code.
+BUSINESS_OWNER, TECH_LEAD = "business_owner", "tech_lead"
+APPROVER_NOT_ALLOWED = "bank_approver_not_allowed"
 # The full details are read only while they may still be paid to (review S289): a withdrawn, rejected or superseded
 # row is evidence, its masked line is enough. row_out()'s ``actions.reveal`` and reveal() read this one tuple.
 REVEALABLE = ("pending", "approved")
@@ -161,20 +167,29 @@ def masked(last4: str) -> str:
 
 
 def row_out(
-    row: Any, staff: Staff, contacts_changed_by: frozenset[str] = frozenset(), *, self_ok: bool = False
+    row: Any,
+    staff: Staff,
+    contacts_changed_by: frozenset[str] = frozenset(),
+    *,
+    self_ok: bool = False,
+    approver_ok: bool = False,
 ) -> dict[str, Any]:
     """``contacts_changed_by``: who changed the supplier's contacts within the call-back window (pending rows only).
     ``self_ok``: the caller may approve their own work now (the business owner, :func:`_self_ok`); without it the
-    person who entered a row gets no Approve (the write would answer 403 ``maker_checker``)."""
+    person who entered a row gets no Approve (the write would answer 403 ``maker_checker``). ``approver_ok``: the
+    caller is the business owner or the tech lead (:func:`approver_kind`); without it no Approve at all."""
     out = dict(row)
     entered_by = out["entered_by"]
     for who in ("entered_by", "approved_by", "closed_by"):
         out[who] = _person(out[who], out.pop(f"{who}_name"))
     out["account_masked"] = masked(out["account_last4"])
     pending, mine = out["status"] == "pending", staff.cis_user_id == entered_by
+    can_approve = staff.can("supplier_bank.approve")
     blocked = pending and bool({entered_by, staff.cis_user_id} & contacts_changed_by)
     out["approve_blocked"] = "contacts_recently_changed" if blocked else None
-    may_approve = pending and staff.can("supplier_bank.approve") and (not mine or self_ok)
+    if pending and can_approve and not mine and not approver_ok:
+        out["approve_blocked"] = APPROVER_NOT_ALLOWED  # only the business owner (the tech lead as fallback) approves
+    may_approve = pending and can_approve and approver_ok and (not mine or self_ok)
     out["actions"] = {
         "reveal": staff.can("supplier_bank.read") and out["status"] in REVEALABLE,
         "approve": may_approve and not blocked,  # the write re-checks every rule
@@ -193,6 +208,28 @@ async def _self_ok(conn: asyncpg.Connection, staff: Staff, rows: Any) -> bool:
     if not any(r["status"] == "pending" and r["entered_by"] == staff.cis_user_id for r in rows):
         return False
     return await self_approval.may_self_approve(conn, staff)
+
+
+async def approver_kind(conn: asyncpg.Connection, staff: Staff) -> str | None:
+    """Who the caller is as an approver of a supplier bank account (tech lead decision S289): :data:`BUSINESS_OWNER`
+    (CIS ``is_business_owner``), else :data:`TECH_LEAD` (the platform owner marker ``is_owner``, the fallback approver),
+    else None. Needs ``supplier_bank.approve`` and a session that may ever approve as an owner
+    (:func:`app.auth.self_approval.eligible_session`: no Preview, no Dev-only E2E identity, the E2E owner included).
+    One uncached read of ``shared.v_staff_booking_grant``; fail closed (an unreadable view answers None); a view-as
+    session answers None."""
+    if not staff.can("supplier_bank.approve") or not self_approval.eligible_session(staff):
+        return None
+    is_owner, is_business_owner = await custom_roles.markers(conn, staff)
+    if is_business_owner:
+        return BUSINESS_OWNER
+    return TECH_LEAD if is_owner else None
+
+
+async def _approver_ok(conn: asyncpg.Connection, staff: Staff, rows: Any) -> bool:
+    """:func:`approver_kind` read only when it matters: a pending row and ``supplier_bank.approve``."""
+    if not staff.can("supplier_bank.approve") or not any(r["status"] == "pending" for r in rows):
+        return False
+    return await approver_kind(conn, staff) is not None
 
 
 async def _supplier(conn: asyncpg.Connection, ref: str, *, lock: bool = False) -> dict[str, Any]:
@@ -336,8 +373,8 @@ PENDING_ANY = (
 
 async def approvable_filter(conn: asyncpg.Connection, staff: Staff, where: list[str], add: Any) -> None:
     """``bank=pending&approvable=me``: suppliers whose pending bank account the caller may approve now (not entered by
-    them unless they may self-approve; none without ``supplier_bank.approve``)."""
-    if not staff.can("supplier_bank.approve"):
+    them unless they may self-approve; none unless the business owner or the tech lead, :func:`approver_kind`)."""
+    if await approver_kind(conn, staff) is None:
         where.append("false")
     elif await self_approval.may_self_approve(conn, staff):
         where.append(PENDING_ANY)
@@ -350,7 +387,7 @@ async def queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
     oldest."""
     args: list[Any] = []
     where = "a.status = 'pending'"
-    if not staff.can("supplier_bank.approve"):
+    if await approver_kind(conn, staff) is None:
         where += " AND false"
     elif not await self_approval.may_self_approve(conn, staff):
         args.append(staff.cis_user_id)
@@ -377,9 +414,10 @@ async def list_for(conn: asyncpg.Connection, staff: Staff, supplier_ref: str) ->
     pending = next((r for r in rows if r["status"] == "pending"), None)
     changes, changed_by = await _contact_window(conn, supplier["id"], pending, staff)
     self_ok = await _self_ok(conn, staff, rows)
+    approver_ok = await _approver_ok(conn, staff, rows)
     return {
         "supplier": supplier,
-        "items": [row_out(r, staff, changed_by, self_ok=self_ok) for r in rows],
+        "items": [row_out(r, staff, changed_by, self_ok=self_ok, approver_ok=approver_ok) for r in rows],
         "payout_lock": {**lock, "until": lock["until"].isoformat() if lock["until"] else None},
         "contact_changes": changes,
         "actions": {"enter": staff.can("supplier_bank.write") and pending is None},
@@ -476,7 +514,9 @@ async def enter(
 
 async def _one(conn: asyncpg.Connection, staff: Staff, account_id: str) -> dict[str, Any]:
     row = await conn.fetchrow(f"SELECT {COLUMNS} FROM {FROM} WHERE a.id = $1::uuid", account_id)  # noqa: S608
-    return row_out(row, staff, self_ok=await _self_ok(conn, staff, [row]))
+    return row_out(
+        row, staff, self_ok=await _self_ok(conn, staff, [row]), approver_ok=await _approver_ok(conn, staff, [row])
+    )
 
 
 def _note(text: str | None, code: str, minimum: int = 1, limit: int = 300) -> str:
@@ -540,6 +580,12 @@ async def _close(
 async def _approve(
     conn: asyncpg.Connection, staff: Staff, supplier: dict[str, Any], account: dict[str, Any], callback: str
 ) -> None:
+    kind = await approver_kind(conn, staff)
+    if kind is None:
+        raise Forbidden(
+            APPROVER_NOT_ALLOWED,
+            "only the business owner approves a supplier bank account change (the tech lead when she cannot)",
+        )
     flagged = await self_approval.check(
         conn,
         staff,
@@ -562,7 +608,7 @@ async def _approve(
             callback,
             flagged,
         )
-    except asyncpg.CheckViolationError as exc:  # the DB backstop of the maker-checker rule and the owner marker
+    except asyncpg.CheckViolationError as exc:  # the DB backstops: maker-checker, the owner marker, the approver
         raise Forbidden("maker_checker", "a supplier bank account is approved by a second person") from exc
     lock = await payout_lock(conn, supplier["id"])
     await _audit(
@@ -572,9 +618,11 @@ async def _approve(
         "approved",
         f"Approved bank account {masked(account['account_last4'])} after a call-back"
         + (f" (replaces {masked(old)})" if old else "")
-        + (" (business-owner self-approval)" if flagged else ""),
+        + (" (business-owner self-approval)" if flagged else "")
+        + (" by the tech lead (fallback approver)" if kind == TECH_LEAD else ""),
         {
             "bank_account_id": account["id"],
+            "approved_as": kind,
             "callback_note": callback,
             "superseded_last4": old,
             "payouts_open_at": lock["until"].isoformat() if lock.get("until") else None,

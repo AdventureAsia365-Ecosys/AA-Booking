@@ -11,7 +11,10 @@ tests/integration/test_bk067_schema.py, the HTTP flows tests/integration/test_aa
   tests/unit/test_aa1158_profile_options.py;
 - a contact change by the person who entered the account or by the approver blocks the approval (review S289);
 - fix pass 2 (review S289): a 422 on the entry / decision body never echoes a submitted value (nor logs it); the full
-  details only of a pending or approved row; no Approve for the person who entered a row unless business owner.
+  details only of a pending or approved row; no Approve for the person who entered a row unless business owner;
+- tech lead S289: only the business owner approves, the tech lead (platform owner marker) as the fallback; any other
+  administrator, a capped session and a view-as session get no Approve and 403 ``bank_approver_not_allowed``
+  (tests/unit/test_aa1158_bank_approver.py; the tests here stand every approver in as the tech lead).
 
 KMS is a fake key provider; all names and numbers are invented."""
 
@@ -72,6 +75,19 @@ class FakeKms:
             return self.master.decrypt(wrapped[:12], wrapped[12:], json.dumps(context, sort_keys=True).encode())
         except Exception as exc:  # noqa: BLE001 — like KMS: a context mismatch is a refusal
             raise bank_crypto.BankCryptoError("KMS Decrypt failed") from exc
+
+
+@pytest.fixture(autouse=True)
+def tech_lead_approves(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every holder of supplier_bank.approve stands in as the tech lead (the approver rule has its own tests below)."""
+    asked: list[str] = []
+
+    async def fake(_conn: Any, staff: Staff) -> str | None:
+        asked.append(staff.cis_user_id)
+        return bank_accounts.TECH_LEAD if staff.can("supplier_bank.approve") else None
+
+    monkeypatch.setattr(bank_accounts, "approver_kind", fake)
+    return asked
 
 
 # ── Envelope encryption ──────────────────────────────────────────────────────
@@ -234,21 +250,21 @@ def test_row_actions_by_caller() -> None:
         "reject": False,
         "withdraw": True,
     }
-    checker = bank_accounts.row_out(_row(), CHECKER)["actions"]
+    checker = bank_accounts.row_out(_row(), CHECKER, approver_ok=True)["actions"]
     assert checker["approve"] and checker["reject"] and checker["reveal"] and not checker["withdraw"]
     assert bank_accounts.row_out(_row(), FIN)["actions"]["reveal"] is True
     assert bank_accounts.row_out(_row(), SALES)["actions"] == {k: False for k in own["actions"]}
-    done = bank_accounts.row_out(_row(status="approved"), CHECKER)["actions"]
+    done = bank_accounts.row_out(_row(status="approved"), CHECKER, approver_ok=True)["actions"]
     assert not done["approve"] and not done["reject"]
 
 
 def test_a_recent_contact_change_blocks_the_approve_action() -> None:
-    by_enterer = bank_accounts.row_out(_row(), CHECKER, frozenset({ENTERER.cis_user_id}))
+    by_enterer = bank_accounts.row_out(_row(), CHECKER, frozenset({ENTERER.cis_user_id}), approver_ok=True)
     assert by_enterer["approve_blocked"] == "contacts_recently_changed"
     assert not by_enterer["actions"]["approve"] and by_enterer["actions"]["reject"]
-    by_me = bank_accounts.row_out(_row(), CHECKER, frozenset({CHECKER.cis_user_id}))
+    by_me = bank_accounts.row_out(_row(), CHECKER, frozenset({CHECKER.cis_user_id}), approver_ok=True)
     assert not by_me["actions"]["approve"]
-    someone_else = bank_accounts.row_out(_row(), CHECKER, frozenset({"it-1158p2-third"}))
+    someone_else = bank_accounts.row_out(_row(), CHECKER, frozenset({"it-1158p2-third"}), approver_ok=True)
     assert someone_else["actions"]["approve"] and someone_else["approve_blocked"] is None
     decided = bank_accounts.row_out(_row(status="approved"), CHECKER, frozenset({ENTERER.cis_user_id}))
     assert decided["approve_blocked"] is None
@@ -261,7 +277,7 @@ def test_no_approve_for_the_person_who_entered_unless_business_owner() -> None:
     row = _row(entered_by=ADMIN_ENTERER.cis_user_id)
     plain = bank_accounts.row_out(row, ADMIN_ENTERER)["actions"]
     assert not plain["approve"] and not plain["approve_self"] and not plain["reject"] and plain["withdraw"]
-    owner = bank_accounts.row_out(row, ADMIN_ENTERER, self_ok=True)["actions"]
+    owner = bank_accounts.row_out(row, ADMIN_ENTERER, self_ok=True, approver_ok=True)["actions"]
     assert owner["approve"] and owner["approve_self"]
     # A recent contact change still blocks the business owner's own approval.
     blocked = bank_accounts.row_out(row, ADMIN_ENTERER, frozenset({ADMIN_ENTERER.cis_user_id}), self_ok=True)

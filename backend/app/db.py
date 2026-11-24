@@ -85,6 +85,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-067",  # AA-1158 part 2: supplier profile, encrypted bank accounts, payout lock after a bank change; MIG-4
     "bk-068",  # AA-1151: add-on offers, their places, v_place_addons and two policy values (app.supply.addons); MIG-4
     "bk-069",  # AA-1153: hotel supplier links, aliases, seasons, child prices, rate-sheet log, link guards; MIG-4
+    "bk-071",  # AA-1158 S289: a bank account change is approved by the business owner or the tech lead; MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

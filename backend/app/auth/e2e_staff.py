@@ -55,6 +55,13 @@ agency payment recorded by one finance user and approved by another (maker-check
   (:data:`ACTIVITY_SHEET_IMPORT`, route check :func:`app.auth.e2e_staff_supply.check_activity_sheet`); the E2E owner
   (A10h) publishes the offers.
 
+- **Second DMC and a hotel quote (A10e-5, AA-1153 S289).** The maker links its synthetic hotel to a second synthetic
+  DMC (:data:`HOTEL_SUPPLIER_LINK`: the hotel from the path and the DMC from the body, both synthetic) and enters a desk
+  booking of room lines on a synthetic agency (:data:`DESK_ENTRY`: the agency synthetic in CIS, every room type on a
+  synthetic hotel all of whose DMCs are synthetic; ``b2b_desk.book`` for that request only, the maker's
+  ``contracting`` role lacks it). Both are checked in :mod:`app.auth.e2e_staff_supply` (:data:`RECORD_CHECKED`); the
+  body checks live in :mod:`app.auth.e2e_staff_bodies`.
+
 - **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
   (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
   so it proves the custom role with a real session: it reads what the role reads, makes a SYNTHETIC supplier (body
@@ -88,6 +95,9 @@ from typing import TYPE_CHECKING, Any
 
 import asyncpg
 from fastapi import HTTPException
+
+from app.auth import e2e_staff_bodies as bodies
+from app.auth.e2e_staff_bodies import BODY_TOUR_KEYS, SYNTHETIC_SUPPLY_MARK  # also read here by e2e_staff_supply
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -158,93 +168,29 @@ SERVICE_ACTIVATE = ("POST", "/booking/services/{service_ref}/activate")
 STOP_SALE_DECISION = ("POST", "/booking/supply/stop-sales/{restriction_id}/decision")
 # AA-1158 part 2: approve / reject of a supplier bank account (route gate supply.read, the service checks the approval).
 SUPPLIER_BANK_DECISION = ("POST", "/booking/supplier-bank-accounts/{account_id}/decision")
-# Every supplier, hotel and service name the maker creates starts with this (checked on the create body, and the
-# supplier keeps it: a renamed supplier is no longer synthetic).
-SYNTHETIC_SUPPLY_MARK = "SYNTHETIC"
+# A10e-5 (AA-1153 S289): a second synthetic DMC for the synthetic hotel, and the desk entry that quotes it.
+HOTEL_SUPPLIER_LINK = ("POST", "/booking/hotels/{hotel_ref}/suppliers")
+DESK_ENTRY = ("POST", "/booking/b2b-desk/entries")
 
 # Allowed writes whose body is fixed: anything else in the body is 403 e2e_read_only (no capacity, rule or status
 # change other than the cancel itself).
 BODY_RULES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
     {DEPARTURE_CANCEL: MappingProxyType({"status": "cancelled"})}
 )
-# A10e-2: the only workbench actions the pricing maker sends (switch sellable on and back off; never a provisional
-# price or a recompute).
-PRICING_WORKBENCH_ACTIONS = frozenset({"make_sellable", "make_not_sellable"})
-# The body field of a body-checked write that names the trip plans it touches (each one is checked synthetic).
-BODY_TOUR_KEYS = "tour_keys"
-
-
-def _workbench_body_ok(body: Any) -> bool:
-    """Exactly ``{"action": <a PRICING_WORKBENCH_ACTIONS value>, "tour_keys": [<tour key>, ...]}``, at least one key,
-    every key a string (the route's own model bounds the count; each key is then checked synthetic)."""
-    if not isinstance(body, dict) or set(body) != {"action", BODY_TOUR_KEYS}:
-        return False
-    keys = body[BODY_TOUR_KEYS]
-    return (
-        body["action"] in PRICING_WORKBENCH_ACTIONS
-        and isinstance(keys, list)
-        and len(keys) > 0
-        and all(isinstance(k, str) for k in keys)
-    )
-
-
-def _fields_ok(body: Any, required: frozenset[str], allowed: frozenset[str], marked: str | None = None) -> bool:
-    """A JSON object holding every ``required`` key and no key outside ``allowed``; ``marked``, when given, names a
-    text field that must start with :data:`SYNTHETIC_SUPPLY_MARK`."""
-    if not isinstance(body, dict) or not required <= set(body) or not set(body) <= allowed:
-        return False
-    return marked is None or (isinstance(body[marked], str) and body[marked].strip().startswith(SYNTHETIC_SUPPLY_MARK))
-
-
-# A10e-3 create bodies: the marked name and the facts the matcher and the cost sheet read; never a contact, address,
-# note, link or photo (no personal or free-text data is written by an E2E identity).
-_SUPPLIER_FIELDS = frozenset({"company_name", "categories", "country_code", "destination_id"})
-_HOTEL_FIELDS = frozenset({"supplier_id", "name", "destination_id", "country_code", "star_rating"})
-_SERVICE_FIELDS = frozenset(
-    {"supplier_id", "service_type", "title", "unit", "destination_id", "country_code", "source_id"}
-)
-_ROOM_TYPE_FIELDS = frozenset({"name", "max_occupancy", "bed_types"})
-# A contract moves only by its status, sent alone (publish by the checker; expire at cleanup).
-CONTRACT_STATUSES = frozenset({"published", "expired"})
-
-
-def _supplier_body_ok(body: Any) -> bool:
-    return _fields_ok(body, frozenset({"company_name", "categories"}), _SUPPLIER_FIELDS, "company_name")
-
-
-def _hotel_body_ok(body: Any) -> bool:
-    return _fields_ok(body, frozenset({"supplier_id", "name"}), _HOTEL_FIELDS, "name")
-
-
-def _service_body_ok(body: Any) -> bool:
-    return _fields_ok(body, frozenset({"supplier_id", "service_type", "title"}), _SERVICE_FIELDS, "title")
-
-
-def _room_type_body_ok(body: Any) -> bool:
-    return _fields_ok(body, frozenset({"name"}), _ROOM_TYPE_FIELDS)
-
-
-def _contract_body_ok(body: Any) -> bool:
-    return isinstance(body, dict) and set(body) == {"status"} and body["status"] in CONTRACT_STATUSES
-
-
-def _no_body(body: Any) -> bool:
-    """A deactivation carries no reason text (empty body or ``{}``)."""
-    return body is None or body == {}
-
-
 # Allowed writes whose body must pass a check (anything else is 403 e2e_read_only before any DB access).
 BODY_CHECKS: Mapping[tuple[str, str], Callable[[Any], bool]] = MappingProxyType(
     {
-        PRICE_WORKBENCH_ACTION: _workbench_body_ok,
-        SUPPLIER_CREATE: _supplier_body_ok,
-        HOTEL_CREATE: _hotel_body_ok,
-        SERVICE_CREATE: _service_body_ok,
-        ROOM_TYPE_CREATE: _room_type_body_ok,
-        CONTRACT_STATUS: _contract_body_ok,
-        SUPPLIER_DEACTIVATE: _no_body,
-        HOTEL_DEACTIVATE: _no_body,
-        SERVICE_DEACTIVATE: _no_body,
+        PRICE_WORKBENCH_ACTION: bodies.workbench_body_ok,
+        SUPPLIER_CREATE: bodies.supplier_body_ok,
+        HOTEL_CREATE: bodies.hotel_body_ok,
+        SERVICE_CREATE: bodies.service_body_ok,
+        ROOM_TYPE_CREATE: bodies.room_type_body_ok,
+        CONTRACT_STATUS: bodies.contract_body_ok,
+        SUPPLIER_DEACTIVATE: bodies.no_body,
+        HOTEL_DEACTIVATE: bodies.no_body,
+        SERVICE_DEACTIVATE: bodies.no_body,
+        HOTEL_SUPPLIER_LINK: bodies.link_body_ok,  # A10e-5
+        DESK_ENTRY: bodies.desk_entry_body_ok,  # A10e-5
     }
 )
 
@@ -318,8 +264,12 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
                     ROOM_TYPE_CREATE,
                     SERVICE_CREATE,
                     SERVICE_DEACTIVATE,
+                    HOTEL_SUPPLIER_LINK,  # A10e-5: both ends synthetic
+                    DESK_ENTRY,  # A10e-5: synthetic agency, room lines on synthetic hotels only
                 }
             ),
+            # A10e-5: entering a desk booking needs b2b_desk.book (admin, sales), held by this one request only.
+            MappingProxyType({DESK_ENTRY: frozenset({"b2b_desk.book"})}),
         ),
         # A10e-2 pricing checker: approves, rejects or withdraws (published: restores the superseded one) a version
         # the pricing maker made on a synthetic plan. A10e-3: publishes or expires a contract of the maker's synthetic
@@ -509,6 +459,8 @@ NEW_RECORD: frozenset[str] = frozenset({SUPPLIER_CREATE[1]})
 # Writes whose plans only the route knows (a workbook): the route calls check_import on the parsed file before it
 # writes or previews anything (app.routers.catalog.post_price_import).
 CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
+# A10e-5: writes checked by the path and the body together (app.auth.e2e_staff_supply.check_record).
+RECORD_CHECKED: frozenset[str] = frozenset({HOTEL_SUPPLIER_LINK[1], DESK_ENTRY[1]})
 _SUPPLY_BY_CODE_SQL = (SUPPLIER_BY_CODE_SQL, HOTEL_BY_CODE_SQL, SERVICE_BY_CODE_SQL)
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
@@ -733,6 +685,10 @@ async def is_synthetic_record(
     for :data:`BODY_SUPPLIER`, the supplier the body names) belongs to an agency CIS marks synthetic, or is a synthetic
     plan / an E2E maker's version of one / the E2E maker's synthetic supply. Fail closed: an unknown route, id or
     record, a record of no agency, a missing view column or any database error answer False."""
+    if route in RECORD_CHECKED:  # A10e-5; that module imports this one, so it is imported here
+        from app.auth import e2e_staff_supply
+
+        return await e2e_staff_supply.check_record(conn, route, params, body)
     field_name = BODY_SYNTHETIC.get(route)
     if field_name is not None:
         keys = body.get(field_name) if isinstance(body, dict) else None

@@ -727,8 +727,11 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   `maker_checker`); `payout.write` = admin (never on a bill they entered or last changed). The case cost vs billed panel also needs `pricing.read`. None of them is in the preview cap.
   Supplier bank accounts (AA-1158 part 2, bk-067): `supplier_bank.write` = admin, contracting, finance (entry, pending);
   `supplier_bank.read` = admin, finance (the full details of a pending or approved row, audited; approve class, so never
-  a custom role); `supplier_bank.approve` = admin (never the enterer, except the business owner flagged; the row's
-  `actions.approve` is false for the enterer otherwise). None is in the preview cap. A 422 on the entry or decision
+  a custom role); `supplier_bank.approve` = admin, and of the admins only the business owner (CIS `is_business_owner`)
+  or the tech lead as the fallback approver (the platform owner marker `is_owner`), tech lead decision S289 (others: 403
+  `bank_approver_not_allowed`, no Approve action, `approve_blocked` = `bank_approver_not_allowed`; they may still
+  reject); never the enterer, except the business owner flagged (the row's `actions.approve` is false for the enterer
+  otherwise). None is in the preview cap. A 422 on the entry or decision
   body names the fields and error types only, never a submitted value (`app.errors.redact_validation`).
   Agency billing (AA-1037, bk-041 / bk-042): `agency_billing.read` / `agency_billing.write` / `agency_payment.approve` /
   `billing_config.write` = admin, finance; approving or rejecting a payment is never its recorder's (403 `maker_checker`,
@@ -808,7 +811,11 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
 - **Supplier bank accounts (part 2, bk-067; `app/suppliers/bank_accounts.py`, `bank_crypto.py`)**: entered pending
   (`supplier_bank.write` = admin, contracting, finance and the content + operations role), approved by a second person
   with `supplier_bank.approve` (admin) after a call-back on a number AA already knew (`callback_note` required, 10-500
-  characters), never the person who entered it (403 `maker_checker` + CHECK), except the business owner, flagged; reject
+  characters). **Who approves** (tech lead S289, bk-071): only the business owner, the tech lead (`is_owner`) as the
+  fallback (`bank_accounts.approver_kind`, read server-side, uncached, fail closed; never a Preview, view-as or Dev-only
+  E2E session, the A10h E2E owner included); anyone else 403 `bank_approver_not_allowed`, and the database refuses the
+  same (`supplier_bank_account_approver_guard`); the audit row records `approved_as` (`business_owner` / `tech_lead`).
+  Never the person who entered it (403 `maker_checker` + CHECK), except the business owner, flagged; reject
   (not the enterer) or withdraw (the enterer); a newer approval supersedes the old account. The details (holder, number /
   IBAN, SWIFT / BIC, bank code, address) are AES-256-GCM ciphertext under a per-row data key that KMS wraps
   (`SUPPLIER_BANK_KMS_KEY_ID`, AA-CIS-Infra `booking_supplier_bank.tf`; context `{purpose: supplier_bank_account,
@@ -2699,6 +2706,14 @@ appends one column, `title` (AA's name of the service, `booking.services.title`;
 replay over it: the test re-runs of bk-068 drop the view first when a later column is there
 (`run_068_dropping_later_view`, `LATER_068_VIEW_COLUMNS` in the integration conftest; DB Migrate never re-runs a file).
 
+### `bk-071` (AA-1158 part 2 follow-up, who approves a supplier bank account — needs `bk-064`, `bk-067`)
+
+A **contract** file (a new trigger on an existing table; MIG-4, the code PR raises readiness to bk-071). Trigger
+`supplier_bank_account_approver_guard` (BEFORE INSERT OR UPDATE on `supplier_bank_account`): when `approved_by` is set
+or changes to someone other than the enterer, it must be an active `staff_users` row whose `cognito_sub` carries
+`is_business_owner` or `is_owner` in `shared.v_staff_booking_grant` and whose e-mail is not a Dev-only E2E address;
+else check_violation. Binds every role; an unchanged approval keeps passing after a marker moves. Tech lead S289.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
@@ -2964,6 +2979,14 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   or with inclusions text (`e2e_staff.check_activity_sheet`, 403 `e2e_read_only`). The checker publishes the contract
   (A10e-3); the A10h E2E owner, who wrote none of it, publishes the offers (the maker's own publish is 403
   `maker_checker`).
+  A10e-5 (AA-1153 S289, the hotel-contract live check): the maker links its synthetic hotel to a second synthetic DMC
+  (POST `/booking/hotels/{ref}/suppliers`; body `supplier_id`, optional `supplier_hotel_code` / `is_preferred`; the
+  hotel from the path and the DMC from the body both the maker's synthetic supply) and enters a desk booking of that
+  hotel's rooms (POST `/booking/b2b-desk/entries`: the agency reference starts `SYNTHETIC`, no price override, room
+  lines `rt:` only, no departure, no room's own room type; the agency synthetic in CIS and every room type on a
+  synthetic hotel all of whose DMC links are synthetic, one query `e2e_staff_supply.DESK_ENTRY_SYNTHETIC_SQL`). That one
+  request holds `b2b_desk.book` (its `contracting` role lacks it). Checks in `app/auth/e2e_staff_supply.py`
+  (`check_record`), body checks in `app/auth/e2e_staff_bodies.py`.
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

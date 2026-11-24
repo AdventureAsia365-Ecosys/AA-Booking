@@ -37,8 +37,9 @@ export interface SupplierBankAccount {
   closed_at: IsoDateTime | null;
   close_reason: string | null;
   actions: { reveal: boolean; approve: boolean; approve_self: boolean; reject: boolean; withdraw: boolean };
-  /** Review S289: why approving is closed (the enterer or the caller changed the supplier's contacts recently). */
-  approve_blocked?: "contacts_recently_changed" | null;
+  /** Review S289: why approving is closed (the enterer or the caller changed the supplier's contacts recently; or,
+   * tech lead S289, the caller is neither the business owner nor the tech lead). */
+  approve_blocked?: "contacts_recently_changed" | "bank_approver_not_allowed" | null;
 }
 
 /** One change of the supplier's contacts within the call-back window (never the values). */
