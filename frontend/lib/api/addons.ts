@@ -11,9 +11,10 @@
 //   POST  /booking/add-ons/{id}/publish | reopen | retire
 //   GET   /booking/activity-sheets/template                            the empty workbook
 //   POST  /booking/suppliers/{ref}/activity-sheets[?dry_run=true]      {data_base64, filename}
-//   GET   /booking/contracts/expiring                                  published contracts ending within the window
+//   GET   /booking/contracts/expiring[?supplier=]                      published contracts ending within the window
 
 import { BFF_BASE, bkGet, bkSend } from "./client";
+import type { SupplierCategory } from "./suppliers";
 import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
@@ -64,11 +65,18 @@ export interface AddonPage {
 export interface ExpiringContract {
   id: string;
   title: string;
+  reference: string | null;
+  supplier_id: string;
   supplier_code: string;
   supplier_name: string;
+  /** The supplier's categories = the contract's kind (hotel, transport, guide, activity, ...). AA-1177. */
+  supplier_categories: SupplierCategory[];
   valid_to: IsoDate;
   days_left: number;
+  /** The daily reminder posted the staff notification for this end date. */
   announced: boolean;
+  /** AA-1177: the daily reminder e-mailed the staff roles of Pricing > Policy for this end date. */
+  mailed: boolean;
 }
 
 export interface ActivitySheetProblem {
@@ -112,7 +120,9 @@ export const addonsApi = {
   publish: (id: string) => bkSend<AddonOffer>(`add-ons/${enc(id)}/publish`),
   reopen: (id: string) => bkSend<AddonOffer>(`add-ons/${enc(id)}/reopen`),
   retire: (id: string) => bkSend<AddonOffer>(`add-ons/${enc(id)}/retire`),
-  expiring: () => bkGet<{ window_days: number; items: ExpiringContract[] }>("contracts/expiring"),
+  /** AA-1177: `supplier` (UUID or code) narrows the list to one supplier's contracts. */
+  expiring: (supplier?: string) =>
+    bkGet<{ window_days: number; items: ExpiringContract[] }>("contracts/expiring", supplier ? { supplier } : {}),
   template,
   importSheet: (supplierRef: string, dataBase64: string, filename: string, dryRun: boolean) =>
     bkSend<ActivitySheetResult>(`suppliers/${enc(supplierRef)}/activity-sheets${dryRun ? "?dry_run=true" : ""}`, {

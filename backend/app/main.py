@@ -158,8 +158,9 @@ def create_app(
                 finance_orders.KIND: finance_orders.build_handler(settings),
                 # AA-1073 (bk-046): departure guarantee / at risk at the minimum, agency allotment release.
                 **departure_watch.HANDLERS,
-                # AA-1151 (bk-068): the daily "contract expiring" announcement for every supplier contract.
-                **contract_expiry.HANDLERS,
+                # AA-1151 (bk-068): the daily "contract expiring" announcement for every supplier contract;
+                # AA-1177 (bk-074): and its e-mail to the staff roles of contract_expiry_mail_roles.
+                contract_expiry.KIND: contract_expiry.build_handler(settings),
                 # AA-993 G4 proof: the Dev-only test kind, only with JOB_TEST_KINDS (empty otherwise).
                 **noop_sleep.build_handlers(settings.job_test_kinds),
             }

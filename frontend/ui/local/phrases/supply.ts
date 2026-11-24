@@ -42,6 +42,7 @@ import "@/app/(staff)/add-ons/_parts/AddonsView.messages";
 import "@/app/(staff)/suppliers/_parts/ContractDrawer.messages";
 import "@/app/(staff)/suppliers/_parts/DestinationPicker.messages";
 import "@/app/(staff)/suppliers/_parts/EditSupplierView.messages";
+import "@/app/(staff)/suppliers/_parts/ExpiringContracts.messages";
 import "@/app/(staff)/suppliers/_parts/RateDrawer.messages";
 import "@/app/(staff)/suppliers/_parts/RateReview.messages";
 import "@/app/(staff)/suppliers/_parts/InventoryTerms.messages";

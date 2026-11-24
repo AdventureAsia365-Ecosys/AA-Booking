@@ -2115,6 +2115,7 @@ const MY_WORK: MyWorkSummary = {
     { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-10-01", days: null },
     { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-10-24", days: 3 },
     { key: "agency_invoices_overdue", capability: "agency_billing.read", group: "work", filter: { status: "overdue" }, available: false, count: null, oldest_at: null, earliest_due: null, days: null },
+    { key: "contracts_ending_soon", capability: "supply.write", group: "work", filter: { contracts: "ending" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-12-31", days: 60 },
     { key: "supplier_bills_to_approve", capability: "bill.approve", group: "approve", filter: { bill_status: "received", approvable: "me" }, available: true, count: 5, oldest_at: "2026-10-15T09:30:00Z", earliest_due: null, days: null },
     { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved", approvable: "me" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-05", days: null },
     { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments", approvable: "me" }, available: true, count: 1, oldest_at: "2026-10-21T02:00:00Z", earliest_due: null, days: null },
@@ -2155,7 +2156,9 @@ function addonOffer(i: number): AddonOffer {
   };
 }
 const EXPIRING: ExpiringContract[] = [
-  { id: "c1151000-0000-4000-8000-000000000001", title: "2026 excursions", supplier_code: "SUP-000001", supplier_name: "Lotus Bay Travel", valid_to: "2026-12-31", days_left: 38, announced: true },
+  { id: "c1151000-0000-4000-8000-000000000001", title: "2026 excursions", reference: null, supplier_id: "51151000-0000-4000-8000-000000000001", supplier_code: "SUP-000001", supplier_name: "Lotus Bay Travel", supplier_categories: ["activity"], valid_to: "2026-12-31", days_left: 38, announced: true, mailed: true },
+  // AA-1177: a hotel contract with a long name (worst case for the row), announced but not e-mailed yet.
+  { id: "c1177000-0000-4000-8000-000000000002", title: "Riverside Garden Resort and Spa rooms 2026 (all room types, all boards)", reference: "RGR-2026-A", supplier_id: "51177000-0000-4000-8000-000000000002", supplier_code: "SUP-000002", supplier_name: "Mekong Riverside Co.", supplier_categories: ["hotel", "dmc"], valid_to: "2027-01-15", days_left: 53, announced: true, mailed: false },
 ];
 
 function stopSale(i: number): StopSale {

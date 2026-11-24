@@ -228,7 +228,14 @@ async def import_activity_sheet(
 
 
 @router.get("/contracts/expiring")
-async def expiring_contracts(_: CanReadSupply, pool: Pool) -> dict[str, Any]:
-    """Published supplier contracts that end within ``contract_expiry_alert_days`` (Pricing > Policy), soonest first."""
+async def expiring_contracts(
+    _: CanReadSupply,
+    pool: Pool,
+    supplier: Annotated[
+        str | None, Query(min_length=1, max_length=64, description="Only this supplier's contracts (UUID or code)")
+    ] = None,
+) -> dict[str, Any]:
+    """Published supplier contracts of every kind that end within ``contract_expiry_alert_days`` (Pricing > Policy),
+    soonest first, each saying whether it was announced and e-mailed."""
     async with pool.acquire() as conn:
-        return await contract_expiry.expiring(conn)
+        return await contract_expiry.expiring(conn, supplier=supplier)

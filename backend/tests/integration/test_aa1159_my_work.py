@@ -40,7 +40,8 @@ CIS_ROLE = {MAKER: "reviewer", CHECKER: "reviewer", ADMIN: "admin", FINANCE: "re
 Client = tuple[httpx.AsyncClient, LocalCis]
 
 WORK_TILES = ("my_open_cases", "trip_checks_overdue", "b2b_on_request", "supplier_bills_overdue",
-              "supplier_bills_due_soon", "agency_invoices_overdue")  # fmt: skip
+              "supplier_bills_due_soon", "agency_invoices_overdue",
+              "contracts_ending_soon")  # fmt: skip  # AA-1177
 APPROVE_TILES = (
     "supplier_bills_to_approve",
     "supplier_bills_to_pay",
@@ -216,6 +217,10 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
     if key == "agency_invoices_overdue":
         body = await _ok(await c.get("/agency-invoices", params={"status": f["status"], "limit": 1}, headers=headers))
         return body["total"]
+    if key == "contracts_ending_soon":  # AA-1177: the Suppliers page's "Contracts ending soon" list
+        assert f == {"contracts": "ending"}
+        body = await _ok(await c.get("/contracts/expiring", headers=headers))
+        return len(body["items"])
     if key == "agency_payments_to_approve":
         assert f == {"tab": "payments", "approvable": "me"}
         params = {"state": "recorded", "approvable": "me", "limit": 1}
@@ -266,6 +271,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
         "b2b_on_request",
         "supplier_bills_overdue",
         "supplier_bills_due_soon",
+        "contracts_ending_soon",  # AA-1177
         "supplier_bills_to_approve",
         "stop_sales_to_review",
         "suppliers_to_activate",

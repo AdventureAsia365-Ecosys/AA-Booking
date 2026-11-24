@@ -5,11 +5,14 @@
 // contracting add, edit and deactivate (supply.write); sales read. Suppliers are never deleted (08 conflict 4).
 // AA-910: fits the 1084 px frame at 1440 px (location under the name, text cells with a max width); the row menu
 // column stays pinned to the right when a narrower window makes the table scroll inside its frame.
+// AA-1177 (Jira PR-31): "Contracts ending soon" lists every kind of published contract ending within the Pricing >
+// Policy window (contract_expiry_alert_days); the My work tile of the same name opens it with ?contracts=ending.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { addonsApi } from "@/lib/api/addons";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Ban, Eye, ListChecks, Pencil, Plus, Power } from "lucide-react";
 import { SUPPLIER_CATEGORIES, suppliersApi, type Supplier } from "@/lib/api/suppliers";
@@ -19,6 +22,7 @@ import { useCountries } from "@/app/(staff)/cases/_parts/CountryPicker";
 import { CATEGORY_LABEL, CategoryChips, SupplierStatusBadge, locationText, supplierHref } from "./shared";
 import { useSupplierActions } from "./useSupplierActions";
 import { SupplierProfileChoices } from "./SupplierProfileChoices";
+import { ExpiringContracts } from "./ExpiringContracts";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./SuppliersListView.messages";
@@ -87,13 +91,9 @@ export function SuppliersListView() {
         <KpiTile label={t("Total suppliers")} value={s?.total} hint={s ? t("Across {0} {1}", s.countries, s.countries === 1 ? t("country") : t("countries")) : undefined} />
         <KpiTile label={t("Active")} value={s?.active} hintTone="success" hint={s ? t("Can take new contracts") : undefined} />
         <KpiTile label={t("Inactive")} value={s?.inactive} hint={s ? t("Kept on record, no new contracts") : undefined} />
-        <KpiTile
-          label={t("Contracts ending in 30 days")}
-          value={s?.contracts_ending_30d}
-          hintTone={s && s.contracts_ending_30d > 0 ? "warning" : "neutral"}
-          hint={s ? (s.contracts_ending_30d > 0 ? t("Renew or plan new terms") : t("Nothing ending soon")) : undefined}
-        />
+        <EndingKpi />
       </div>
+      <ExpiringContracts focus={get("contracts") === "ending"} showEmpty={get("contracts") === "ending"} />
       <Section>
         <div className="bk-dt-sticky-end">
           <DataTable<Supplier>
@@ -223,6 +223,22 @@ const COLUMNS: ColumnDef<Supplier, unknown>[] = [
 /** AA-1158 My work "Suppliers to activate": `approvable=me` lists the pending ones the caller may activate now. */
 function approvableParam(value: string): "me" | undefined {
   return value === "me" ? "me" : undefined;
+}
+
+/** AA-1177: the contracts ending within the Pricing > Policy window (the panel's list; was a fixed 30 days). */
+function EndingKpi() {
+  const t = useT(MSG);
+  const canSupply = useCan("supply.read");
+  const q = useQuery({ queryKey: ["contracts-expiring", "all"], queryFn: () => addonsApi.expiring(), enabled: canSupply });
+  const n = q.data?.items.length;
+  return (
+    <KpiTile
+      label={q.data ? t("Contracts ending within {0} days", q.data.window_days) : t("Contracts ending soon")}
+      value={n}
+      hintTone={n ? "warning" : "neutral"}
+      hint={q.data ? (n ? t("Renew or plan new terms") : t("Nothing ending soon")) : undefined}
+    />
+  );
 }
 
 /** AA-1158 part 2 My work: `bank=pending` (with `approvable=me`) lists the suppliers whose bank account change waits. */

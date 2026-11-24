@@ -3,7 +3,8 @@
 // real sign-in). Checks: the band shows the two groups with the fixture's tiles; each tile links to its list with the
 // API's filter as the query string; an unavailable tile reads "Not available yet"; "CIS: My work" points at the CIS
 // half; Refresh reloads the summary; Vietnamese labels when VI is picked; the page never scrolls sideways at 390; the
-// stop-sale tile's list (/stop-sales?review=me) leaves out what the viewer entered.
+// stop-sale tile's list (/stop-sales?review=me) leaves out what the viewer entered; AA-1177: the "Contracts ending
+// soon" tile's list on Suppliers (every contract kind, the e-mail state) and a supplier's own list fit 390 px.
 // Screenshots (1440 light / dark, 390 light / dark) land in $LAYOUT_SHOTS_DIR/my-work-*.png.
 
 import path from "node:path";
@@ -63,6 +64,9 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(tile(page, "agency_payments_to_approve")).toHaveAttribute("href", "/agency-billing?tab=payments&approvable=me");
       await expect(tile(page, "supplier_bills_to_approve")).toHaveAttribute("href", "/billing?bill_status=received&approvable=me");
       await expect(tile(page, "stop_sales_to_review")).toHaveAttribute("href", "/stop-sales?review=me");
+      // AA-1177: the contracts ending within the policy window open the Suppliers list of them.
+      await expect(tile(page, "contracts_ending_soon")).toHaveAttribute("href", "/suppliers?contracts=ending");
+      await expect(tile(page, "contracts_ending_soon")).toContainText("Within 60 days, first due");
       await expect(tile(page, "agency_invoices_overdue")).toContainText("Not available yet");
       await expect(tile(page, "b2b_on_request")).toContainText("Nothing waits for an answer");
       await expect(tile(page, "supplier_bills_due_soon")).toContainText("Within 3 days, first due");
@@ -111,5 +115,24 @@ test("the stop-sale tile's list: only what the viewer may decide, phone width wi
   await page.setViewportSize({ width: 390, height: 844 });
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+  expect(errors).toEqual([]);
+});
+
+test("the contracts ending soon list: every kind on Suppliers, phone width without sideways scroll", async ({ page, baseURL }) => {
+  const { errors } = await prepare(page, baseURL!);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/suppliers?contracts=ending", { waitUntil: "domcontentloaded" });
+  const panel = page.getByTestId("contracts-expiring");
+  await expect(panel).toContainText("end within 60 days");
+  await expect(page.getByTestId("contracts-expiring-row")).toHaveCount(2);
+  await expect(panel).toContainText("Mekong Riverside Co.");
+  await expect(panel).toContainText("E-mailed");
+  await expect(panel).toContainText("Notified");
+  await expect(page.getByText("Contracts ending within 60 days")).toBeVisible();
+  await page.screenshot({ path: path.join(OUT, "suppliers-contracts-ending-1440-light.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: path.join(OUT, "suppliers-contracts-ending-390-light.png"), fullPage: true });
   expect(errors).toEqual([]);
 });

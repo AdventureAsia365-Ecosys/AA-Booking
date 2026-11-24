@@ -23572,8 +23572,30 @@
     },
     "/booking/contracts/expiring": {
       "get": {
-        "description": "Published supplier contracts that end within ``contract_expiry_alert_days`` (Pricing > Policy), soonest first.",
+        "description": "Published supplier contracts of every kind that end within ``contract_expiry_alert_days`` (Pricing > Policy),\nsoonest first, each saying whether it was announced and e-mailed.",
         "operationId": "expiring_contracts_booking_contracts_expiring_get",
+        "parameters": [
+          {
+            "description": "Only this supplier's contracts (UUID or code)",
+            "in": "query",
+            "name": "supplier",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this supplier's contracts (UUID or code)",
+              "title": "Supplier"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -23586,6 +23608,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
