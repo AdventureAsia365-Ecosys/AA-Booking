@@ -45,29 +45,35 @@ export function ExpiringContracts({
     return <ErrorState message={t("The list of contracts ending soon could not load. {0}", (list.error as Error).message)} onRetry={() => list.refetch()} />;
   }
   if (!list.data || (list.data.items.length === 0 && !showEmpty)) return null;
-  const days = list.data.window_days;
   return (
     <div ref={ref} className="scroll-mt-4">
-      <Section
-        testId="contracts-expiring"
-        title={t("Contracts ending soon")}
-        description={
-          supplier
-            ? t("This supplier's published contracts that end within {0} days (Pricing > Policy). Enter the next contract before then.", days)
-            : t("Published supplier contracts of every kind that end within {0} days (Pricing > Policy). Enter the next contract before then.", days)
-        }
-      >
-        {list.data.items.length === 0 ? (
-          <p className="text-[13px] text-muted">{t("No published contract ends within {0} days.", days)}</p>
-        ) : (
-          <ul className="flex flex-col gap-2 text-[13px]" data-testid="contracts-expiring-list">
-            {list.data.items.map((k) => (
-              <ExpiringRow key={k.id} k={k} withSupplier={!supplier} />
-            ))}
-          </ul>
-        )}
-      </Section>
+      <ExpiringSection days={list.data.window_days} items={list.data.items} supplier={supplier} />
     </div>
+  );
+}
+
+function ExpiringSection({ days, items, supplier }: { days: number; items: ExpiringContract[]; supplier?: string }) {
+  const t = useT(MSG);
+  return (
+    <Section
+      testId="contracts-expiring"
+      title={t("Contracts ending soon")}
+      description={
+        supplier
+          ? t("This supplier's published contracts that end within {0} days (Pricing > Policy). Enter the next contract before then.", days)
+          : t("Published supplier contracts of every kind that end within {0} days (Pricing > Policy). Enter the next contract before then.", days)
+      }
+    >
+      {items.length === 0 ? (
+        <p className="text-[13px] text-muted">{t("No published contract ends within {0} days.", days)}</p>
+      ) : (
+        <ul className="flex flex-col gap-2 text-[13px]" data-testid="contracts-expiring-list">
+          {items.map((k) => (
+            <ExpiringRow key={k.id} k={k} withSupplier={!supplier} />
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 
