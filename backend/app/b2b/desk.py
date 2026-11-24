@@ -147,7 +147,7 @@ l.answer_due_at, l.answered_at, l.decline_code, l.answered_by, s.name AS answere
 h.confirmed_at, h.trip_case_id::text AS trip_case_id, c.code AS trip_case_code, h.proposal_ref,
 p.id::text AS partner_id, p.agency_name, p.tenant_id::text AS tenant_id,
 q.component_id, q.component_kind, q.service_date, q.nights, q.pax_adult, q.pax_child, q.pax_infant,
-d.start_date AS departure_start,
+d.start_date AS departure_start, rs.id::text AS rate_supplier_id, rs.company_name AS rate_supplier,
 (SELECT sb.code FROM booking.supplier_bookings sb WHERE sb.b2b_hold_id = l.hold_id AND sb.b2b_line_ref = l.line_ref
    AND sb.status IN ('pending', 'requested', 'confirmed')) AS supplier_booking
 """
@@ -159,6 +159,9 @@ JOIN booking.b2b_partners p ON p.id = h.partner_id
 JOIN booking.b2b_quote_lines q ON q.quote_id = h.quote_id AND q.line_no = l.line_no
 LEFT JOIN booking.departures d ON d.id = l.departure_id
 LEFT JOIN booking.staff_users s ON s.cis_user_id = l.answered_by
+LEFT JOIN booking.supplier_rates rr ON rr.id = q.supplier_rate_ids[1] AND q.component_id NOT LIKE 'tp:%'
+LEFT JOIN booking.supplier_contracts rk ON rk.id = rr.supplier_contract_id
+LEFT JOIN booking.suppliers rs ON rs.id = rk.supplier_id
 """
 STATE_WHERE = {
     "open": "l.held_as = 'on_request' AND l.status = 'on_request'",
@@ -231,6 +234,14 @@ async def tour_titles(conn: asyncpg.Connection, source_ids: list[str]) -> dict[s
     return {r["source_id"]: r["title"] for r in rows}
 
 
+def line_supplier(row: Any, label: dict[str, Any]) -> dict[str, Any] | None:
+    """AA-1153: the supplier whose rate priced the line (a hotel may be sold by several DMCs: the booking goes to the
+    DMC of the price used), else the component's own supplier (the hotel's first DMC, the service's supplier)."""
+    if row.get("rate_supplier_id"):
+        return {"id": row["rate_supplier_id"], "name": row["rate_supplier"]}
+    return {"id": label["supplier_id"], "name": label["supplier"]} if label.get("supplier_id") else None
+
+
 def line_out(row: Any, labels: dict[str, dict[str, Any]], now: datetime, due_soon_hours: int) -> dict[str, Any]:
     label = labels.get(row["component_id"]) or {}
     return {
@@ -252,7 +263,7 @@ def line_out(row: Any, labels: dict[str, dict[str, Any]], now: datetime, due_soo
             "id": row["component_id"],
             "kind": row["component_kind"],
             "label": label.get("label"),
-            "supplier": ({"id": label["supplier_id"], "name": label["supplier"]} if label.get("supplier_id") else None),
+            "supplier": line_supplier(row, label),
         },
         "service_date": row["service_date"],
         "nights": row["nights"],

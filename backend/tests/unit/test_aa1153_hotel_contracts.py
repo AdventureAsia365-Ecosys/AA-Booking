@@ -382,29 +382,27 @@ def test_rate_choice_sorts_across_dmcs_in_usd() -> None:
     assert "'BB'" not in sql and "coalesce(a.meal_plan, $8::text)" in sql
 
 
-def test_seasons_and_child_rows_count_against_the_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 4)
+def test_seasons_and_child_rows_count_against_the_row_limit() -> None:
     contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
     rate = [("HB-LOTUS", "Deluxe", None, "2027-01-01", "2027-12-31", "BB", None, None, "50", None)]
     seasons = [(f"S{i}", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 6)]
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, season_rows=seasons))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, season_rows=seasons), max_rows=4)
     assert err.value.code == "rate_sheet_too_many_rows"
     children = [("HB-LOTUS", i, i, "sharing", None, "5") for i in range(5)]
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children), max_rows=4)
     assert err.value.code == "rate_sheet_too_many_rows"
 
 
-def test_a_season_label_expanded_past_the_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 6)
+def test_a_season_label_expanded_past_the_limit_is_refused() -> None:
     contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
     rows = [("HB-LOTUS", "Deluxe", "High", None, None, "BB", None, None, "50", None)] * 2
     seasons = [("High", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 4)]  # 2 rows x 3 ranges = 6: fine
-    assert len(rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons)).rows) == 6
+    assert len(rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons), 6).rows) == 6
     seasons.append(("High", "2027-05-01", "2027-05-02"))  # 2 x 4 = 8 > 6 (and 2 + 4 rows read is within 6)
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons), 6)
     assert err.value.code == "rate_sheet_too_many_rows"
 
 

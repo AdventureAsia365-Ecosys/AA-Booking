@@ -80,7 +80,6 @@
   "supply/media.py:S3_TOTAL_ATTEMPTS",
   "supply/rate_sheet.py:MAX_BYTES",
   "supply/rate_sheet.py:MAX_ERRORS",
-  "supply/rate_sheet.py:MAX_ROWS",
   "supply/rates.py:MAX_NOTE",
   "supply/records.py:MAX_OPTIONS",
   "trip_cases/cis_readback.py:TITLE_MAX",

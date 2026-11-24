@@ -297,6 +297,26 @@ export interface RateSheetResult {
   /** AA-1153: the business checks of the sheet and the diff against the supplier's previous contract. */
   checks?: RateCheck[];
   diff?: RateDiff;
+  /** AA-1153 part 2: the Inventory sheet's terms (allotment, free sale, on request) the import writes. */
+  inventory?: InventoryPreviewRow[];
+}
+
+/** AA-1153 part 2: one Inventory row of a rate sheet as the import will write it. */
+export interface InventoryPreviewRow {
+  row: number;
+  component_id: string;
+  hotel_code: string | null;
+  room_type: string | null;
+  service_code: string | null;
+  inventory_kind: "allotment" | "free_sale" | "on_request";
+  date_from: IsoDate;
+  date_to: IsoDate;
+  units: number | null;
+  release_days: number | null;
+  /** true when the row gave no release days and the pricing policy default fills them */
+  release_days_default: boolean;
+  max_pax: number | null;
+  note: string | null;
 }
 
 /** AA-1153: one business check of a rate sheet (an error blocks the import, a warning is acknowledged at publish). */
@@ -344,6 +364,17 @@ async function rateSheetTemplate(): Promise<Blob> {
   return res.blob();
 }
 
+/** AA-1153 part 2: a contract exported as a filled rate sheet (edit it, then import it back as a new draft). */
+async function contractRateSheet(id: string): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(`${BFF_BASE}/contracts/${enc(id)}/rate-sheet`, { cache: "no-store" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(body?.message ?? "The rate sheet could not be downloaded.");
+  }
+  const named = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "");
+  return { blob: await res.blob(), filename: named?.[1] ?? "aa-rate-sheet.xlsx" };
+}
+
 export const suppliersApi = {
   list: (q: { q?: string; status?: string; category?: string; country?: string; sort?: string; limit?: number; offset?: number; approvable?: "me"; bank?: "pending" } = {}) =>
     bkGet<SupplierList>("suppliers", q),
@@ -360,6 +391,7 @@ export const suppliersApi = {
     bkSend<Changed<SupplierContract>>(`contracts/${enc(id)}`, { method: "PATCH", body }),
   places: (q: { q?: string; country?: string; limit?: number }) => bkGet<{ items: CatalogPlace[] }>("catalog/destinations", q),
   rateSheetTemplate,
+  contractRateSheet,
   /** AA-1153: the checks and diff of a draft before a second person publishes it. */
   review: (id: string) => bkGet<ContractReview>(`contracts/${enc(id)}/review`),
   /** AA-1029: check (dryRun) or import a filled rate sheet into a draft contract of this supplier. */

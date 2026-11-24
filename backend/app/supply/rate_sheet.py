@@ -27,6 +27,12 @@ AA-1153 part 1 (bk-069; S285 advisory r2 hotels T8, T10, B7): a DMC rate sheet f
   (``supplier_contract_seasons``). A rate row naming a season with no dates becomes one rate per range of that season.
 - optional sheet ``Hotel children`` (Hotel code, Age min, Age max, Basis = sharing | extra bed, Meal plan, Net): the
   DMC's child price per night for the hotel (``hotel_child_policies``).
+- optional sheet ``Inventory`` (AA-1153 part 2, :mod:`app.supply.rate_sheet_inventory`): the contract's allotment,
+  free-sale and on-request terms per room type or service and dates (an allotment without release days takes the
+  policy default), written under the draft with its rates.
+- **Two-way** (AA-1153 part 2): ``GET /booking/contracts/{id}/rate-sheet`` exports a contract in this template
+  (:mod:`app.supply.rate_sheet_export`); edited and imported back it becomes a new draft, with the checks and the
+  diff against the supplier's previous contract.
 - **Business checks** (:mod:`app.supply.rate_checks`): seasons that overlap (an error: nothing is imported), contract
   days no season covers, a board cheaper than one with fewer meals, a price at least ``rate_sheet_jump_warn_pct`` %
   above the same rate of the supplier's previous contract (warnings). The dry run lists them with the **diff** against
@@ -40,8 +46,9 @@ a rate sheet only prices them. Every problem is reported per sheet, row and colu
 written** while one is left; ``dry_run`` validates and previews without writing, and adds the sheet's ``impact``
 (``app.catalog.price_readiness.impact``: the trip plans whose components use the sheet's items, whether each would
 have a rate for every component once the draft is published, and how many would move to priced; a read only).
-Bounded: at most :data:`MAX_BYTES` (and :data:`MAX_UNPACKED_BYTES` once unzipped) and :data:`MAX_ROWS` rows, counted
-over the rate sheets, ``Seasons`` and ``Hotel children`` together and again after a season label is expanded into its
+Bounded: at most :data:`MAX_BYTES` (and :data:`MAX_UNPACKED_BYTES` once unzipped) and the pricing policy
+``rate_sheet_max_rows`` rows (AA-1153 part 2, bk-072; was a code constant), counted over the rate sheets, ``Seasons``,
+``Hotel children`` and ``Inventory`` together and again after a season label is expanded into its
 ranges (422 ``rate_sheet_too_many_rows``; AA-1153 review: one upload must not hold the API worker). The workbook is read
 with openpyxl in read-only, values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content
 type and openpyxl never executes VBA).
@@ -55,8 +62,7 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from datetime import date
 from typing import Any
 
 import asyncpg
@@ -65,11 +71,27 @@ from openpyxl import Workbook, load_workbook
 from app.auth.staff import Staff
 from app.catalog import cost_sheet, price_readiness
 from app.errors import Invalid
+from app.pricing import policy_values
+from app.pricing.policy_params_hotels import SHEET_MAX_ROWS
 from app.suppliers import service as suppliers
-from app.supply import rate_checks, rate_review, rate_sheet_match, rates
+from app.supply import rate_checks, rate_review, rate_sheet_inventory, rate_sheet_match, rates, restrictions
+from app.supply.rate_sheet_cells import (  # noqa: F401 — re-exported: activity_import reads the cell helpers here
+    AGE_MAX,
+    PAX_TYPES,
+    Budget,
+    Problem,
+    _age,
+    _amount,
+    _date,
+    _int,
+    _key,
+    _pax_type,
+    _pct,
+    _table,
+    _text,
+)
 
 MAX_BYTES = 2 * 1024 * 1024
-MAX_ROWS = 2000
 MAX_UNPACKED_BYTES = 40 * 1024 * 1024  # technical-constant: zip bomb guard (a 2 MB sheet of 2000 rows unzips far below)
 CONTRACT_SHEET = "Contract"
 HOTEL_SHEET = "Hotel"
@@ -125,21 +147,7 @@ SERVICE_COLUMNS = (
 )
 # A rate row needs a Net or the Published + Commission % pair (B7); the columns themselves are optional.
 REQUIRED = {HOTEL_SHEET: ("Hotel code", "Room type"), "service": ("Service code",)}
-PAX_TYPES = ("adult", "child", "infant")
-AGE_MAX = 17  # technical-constant: the bk-060 CHECK bound (a child or infant is under 18)
 MAX_ERRORS = 200
-
-
-@dataclass
-class Problem:
-    sheet: str
-    row: int | None
-    column: str | None
-    code: str
-    message: str
-
-    def out(self) -> dict[str, Any]:
-        return {"sheet": self.sheet, "row": self.row, "column": self.column, "code": self.code, "message": self.message}
 
 
 @dataclass
@@ -160,92 +168,7 @@ class Sheet:
     ignored_sheets: list[str]
     seasons: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: {name, date_from, date_to, sheet, row}
     children: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: hotel child prices as read
-
-
-# ── Cell values ──────────────────────────────────────────────────────────────
-
-
-def _key(text: Any) -> str:
-    return " ".join(str(text or "").split()).lower()
-
-
-def _text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = " ".join(str(value).split())
-    return text or None
-
-
-def _date(value: Any) -> date | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    text = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y"):
-        try:
-            return datetime.strptime(text, fmt).date()  # noqa: DTZ007 — a calendar date, no time zone
-        except ValueError:
-            continue
-    raise ValueError("use a date (YYYY-MM-DD)")
-
-
-def _amount(value: Any) -> Decimal | None:
-    if value is None or value == "":
-        return None
-    if isinstance(value, bool):
-        raise ValueError("a number is expected")
-    try:
-        number = Decimal(str(value).replace(",", "").strip())
-    except InvalidOperation:
-        raise ValueError("a number is expected") from None
-    if not number.is_finite() or number < 0:
-        raise ValueError("a zero or positive number is expected")
-    if number != number.quantize(Decimal("0.01")):
-        raise ValueError("at most 2 decimals")
-    return number
-
-
-def _pct(value: Any) -> Decimal | None:
-    number = _amount(value)
-    if number is not None and number >= 100:
-        raise ValueError("a commission below 100 % is expected")
-    return number
-
-
-def _age(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        number = Decimal(str(value).strip())
-    except InvalidOperation:
-        raise ValueError("a whole number is expected") from None
-    if number != number.to_integral_value() or not 0 <= number <= AGE_MAX:
-        raise ValueError(f"a whole number from 0 to {AGE_MAX} is expected")
-    return int(number)
-
-
-def _pax_type(value: Any) -> str | None:
-    text = (_text(value) or "").lower()
-    if not text:
-        return None
-    if text not in PAX_TYPES:
-        raise ValueError(f"one of {', '.join(PAX_TYPES)} is expected")
-    return text
-
-
-def _int(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        number = Decimal(str(value).strip())
-    except InvalidOperation:
-        raise ValueError("a whole number is expected") from None
-    if number != number.to_integral_value() or not 1 <= number <= 999:
-        raise ValueError("a whole number from 1 to 999 is expected")
-    return int(number)
+    inventory: list[dict[str, Any]] = field(default_factory=list)  # AA-1153 part 2: allotment / free sale / on request
 
 
 # ── Parsing (no database) ────────────────────────────────────────────────────
@@ -305,14 +228,7 @@ def _applies(label: str, sheet: str) -> bool:
     return sheet != HOTEL_SHEET or label not in ("Pax type", "Age min", "Age max")
 
 
-def _take(budget: list[int], n: int = 1) -> None:
-    """Count ``n`` rows against the workbook's :data:`MAX_ROWS` (rate rows, seasons, child prices, expanded rates)."""
-    budget[0] += n
-    if budget[0] > MAX_ROWS:
-        raise Invalid("rate_sheet_too_many_rows", f"a rate sheet has at most {MAX_ROWS} rows")
-
-
-def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> list[RateRow]:
+def _rows(ws: Any, sheet: str, problems: list[Problem], budget: Budget) -> list[RateRow]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
     if header is None:
@@ -334,7 +250,7 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
     for n, row in enumerate(rows, start=2):
         if row is None or all(v is None or str(v).strip() == "" for v in row):
             continue
-        _take(budget)
+        budget.take()
         rate = RateRow(sheet=sheet, row=n)
         if sheet == HOTEL_SHEET:
             rate.hotel_code = (_text(cell(row, "Hotel code")) or "").upper() or None
@@ -413,8 +329,9 @@ def _commission(rate: RateRow, problems: list[Problem]) -> None:
     rate.values["net_amount"] = net
 
 
-def parse(data: bytes) -> Sheet:
-    """Read the workbook; shape problems are collected (never raised), except a file that is not a workbook."""
+def parse(data: bytes, max_rows: int | None = None) -> Sheet:
+    """Read the workbook; shape problems are collected (never raised), except a file that is not a workbook.
+    ``max_rows``: the pricing policy ``rate_sheet_max_rows`` the import passes (None: no row cap)."""
     wb = _open(data)
     problems: list[Problem] = []
     ignored: list[str] = []
@@ -422,7 +339,8 @@ def parse(data: bytes) -> Sheet:
     rows: list[RateRow] = []
     seasons: list[dict[str, Any]] = []
     children: list[dict[str, Any]] = []
-    budget = [0]
+    budget = Budget(max_rows)
+    inventory: list[dict[str, Any]] = []
     names = {_key(n): n for n in wb.sheetnames}
     if _key(CONTRACT_SHEET) not in names:
         problems.append(Problem(CONTRACT_SHEET, None, None, "missing_sheet", "the Contract sheet is missing"))
@@ -437,6 +355,8 @@ def parse(data: bytes) -> Sheet:
                 seasons = _seasons(ws, problems, budget)
             elif key == _key(CHILDREN_SHEET):
                 children = _children(ws, problems, budget)
+            elif key == _key(rate_sheet_inventory.SHEET):
+                inventory = rate_sheet_inventory.read(ws, problems, budget)
             elif sheet := next((s for s in SERVICE_SHEETS if _key(s) == key), None):
                 rows += _rows(ws, sheet, problems, budget)
             else:
@@ -445,36 +365,11 @@ def parse(data: bytes) -> Sheet:
         wb.close()
     if not rows and not any(p.code == "missing_column" for p in problems):
         problems.append(Problem(HOTEL_SHEET, None, None, "no_rates", "the workbook holds no rate rows"))
-    rows = _expand_seasons(rows, seasons, problems)
-    return Sheet(contract, rows, problems, ignored, seasons, children)
+    rows = _expand_seasons(rows, seasons, problems, max_rows)
+    return Sheet(contract, rows, problems, ignored, seasons, children, inventory)
 
 
-def _table(
-    ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem], budget: list[int]
-) -> list[tuple[int, dict[str, Any]]]:
-    """The rows of a small sheet as ``(row number, {column: raw value})``; every column is required. Each row counts
-    against the workbook's :data:`MAX_ROWS`."""
-    rows = ws.iter_rows(values_only=True)
-    header = next(rows, None)
-    if header is None:
-        return []
-    index = {_key(h): i for i, h in enumerate(header) if h is not None}
-    missing = [c for c in columns if _key(c) not in index]
-    if missing:
-        problems.append(
-            Problem(sheet, 1, ", ".join(missing), "missing_column", f"missing column(s): {', '.join(missing)}")
-        )
-        return []
-    out = []
-    for n, row in enumerate(rows, start=2):
-        if row is None or all(v is None or str(v).strip() == "" for v in row):
-            continue
-        _take(budget)
-        out.append((n, {c: row[index[_key(c)]] if index[_key(c)] < len(row) else None for c in columns}))
-    return out
-
-
-def _seasons(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
+def _seasons(ws: Any, problems: list[Problem], budget: Budget) -> list[dict[str, Any]]:
     out = []
     seen: set[tuple[str, date]] = set()
     for n, cells in _table(ws, SEASONS_SHEET, SEASON_COLUMNS, problems, budget):
@@ -496,7 +391,7 @@ def _seasons(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[s
     return out
 
 
-def _children(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
+def _children(ws: Any, problems: list[Problem], budget: Budget) -> list[dict[str, Any]]:
     out = []
     seen: set[tuple[str, str | None, str, int]] = set()
     for n, cells in _table(ws, CHILDREN_SHEET, CHILDREN_COLUMNS, problems, budget):
@@ -543,9 +438,11 @@ def _children(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[
     return out
 
 
-def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems: list[Problem]) -> list[RateRow]:
+def _expand_seasons(
+    rows: list[RateRow], seasons: list[dict[str, Any]], problems: list[Problem], max_rows: int | None
+) -> list[RateRow]:
     """A rate row naming a season of the Seasons sheet, with no dates, becomes one rate per range of that season (at
-    most :data:`MAX_ROWS` rates once expanded: 422 ``rate_sheet_too_many_rows`` as soon as the list passes it)."""
+    most ``max_rows`` rates once expanded: 422 ``rate_sheet_too_many_rows`` as soon as the list passes it)."""
     if not seasons:
         return rows
     by_name: dict[str, list[dict[str, Any]]] = {}
@@ -563,10 +460,10 @@ def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems
                 Problem(rate.sheet, rate.row, "Season", "unknown_season", f"'{name}' is not on the Seasons sheet")
             )
             continue
-        if len(out) + len(ranges) > MAX_ROWS:
+        if max_rows is not None and len(out) + len(ranges) > max_rows:
             raise Invalid(
                 "rate_sheet_too_many_rows",
-                f"a rate sheet has at most {MAX_ROWS} rates once its seasons are expanded into their date ranges",
+                f"a rate sheet has at most {max_rows} rates once its seasons are expanded into their date ranges",
             )
         for r in ranges:
             values = {**rate.values, "season": r["name"], "valid_from": r["date_from"], "valid_to": r["date_to"]}
@@ -650,6 +547,12 @@ def _children_matched(sheet: Sheet, hotels: dict[str, str]) -> list[dict[str, An
     return out
 
 
+async def max_rows(conn: asyncpg.Connection) -> int:
+    """``rate_sheet_max_rows`` in force today (bk-072; 503 ``policy_unavailable`` without it; never a literal)."""
+    policy = await policy_values.require_staff(conn, await policy_values.today_utc(conn), SHEET_MAX_ROWS)
+    return policy.integer(SHEET_MAX_ROWS)
+
+
 async def import_sheet(
     conn: asyncpg.Connection,
     staff: Staff,
@@ -662,10 +565,11 @@ async def import_sheet(
     """Validate the workbook against the supplier's items; unless ``dry_run``, create the draft contract and its rates
     (call inside a transaction: any refusal rolls every row back). 422 ``rate_sheet_invalid`` lists every problem."""
     supplier = await suppliers.resolve_supplier(conn, supplier_ref)
-    sheet = parse(data)
+    sheet = parse(data, await max_rows(conn))
     matched = await _match(conn, supplier["id"], sheet) if sheet.rows else []
     hotels = (await rate_sheet_match.load(conn, supplier["id"])).hotel if sheet.children else {}
     children = _children_matched(sheet, hotels)
+    terms = await rate_sheet_inventory.match(conn, supplier["id"], sheet.contract, sheet.inventory, sheet.problems)
     findings: list[dict[str, Any]] = []
     diff: dict[str, Any] = {}
     previous = None
@@ -694,6 +598,9 @@ async def import_sheet(
         "checks": findings,
         "diff": diff,
         "ignored_sheets": sheet.ignored_sheets,
+        "inventory": rate_sheet_inventory.preview(terms, await restrictions.default_release_days(conn))
+        if terms
+        else [],
     }
     if dry_run:
         # A child or infant rate never prices a trip plan component (bk-060): the impact counts adult rates only.
@@ -730,6 +637,7 @@ async def import_sheet(
         json.dumps(rate_review.json_ready(diff)),
         staff.cis_user_id,
     )
+    await rate_sheet_inventory.write(conn, staff, contract["id"], terms)
     out["contract"] = {"id": contract["id"], "status": contract["status"], "title": contract["title"]}
     out["imported"] = len(matched)
     return out
@@ -754,9 +662,11 @@ def build_workbook(
     service_rows: dict[str, list[tuple[Any, ...]]] | None = None,
     season_rows: list[tuple[Any, ...]] | None = None,
     child_rows: list[tuple[Any, ...]] | None = None,
+    inventory_rows: list[tuple[Any, ...]] | None = None,
 ) -> bytes:
-    """An AA rate-sheet workbook: the empty template, or (tests, fixtures) one filled with the given rows (AA-1153:
-    with the Seasons and Hotel children sheets)."""
+    """An AA rate-sheet workbook: the empty template, or one filled with the given rows (tests, fixtures, and the
+    export of a contract, :mod:`app.supply.rate_sheet_export`; AA-1153: with the Seasons, Hotel children and
+    Inventory sheets)."""
     wb = Workbook()
     ws = wb.active
     ws.title = CONTRACT_SHEET
@@ -775,6 +685,7 @@ def build_workbook(
     for title, columns, extra in (
         (SEASONS_SHEET, SEASON_COLUMNS, season_rows),
         (CHILDREN_SHEET, CHILDREN_COLUMNS, child_rows),
+        (rate_sheet_inventory.SHEET, rate_sheet_inventory.COLUMNS, inventory_rows),
     ):
         sheet = wb.create_sheet(title)
         sheet.append(list(columns))

@@ -16,6 +16,8 @@
 //   GET   /booking/{hotels|services}/{ref}/media?include_removed=   photos + presigned preview URLs (supply.read)
 //   POST  /booking/{hotels|services}/{ref}/media   {content_type, data_base64, usage_rights, filename}  (supply.write)
 //   PATCH /booking/media/{id}   {usage_rights} | {status: "removed"} (removed is final)                  (supply.write)
+//   GET   /booking/supply/restrictions?contract_id=&kind=   a contract's terms (AA-1145; AA-1153 part 2 inventory)
+//   POST  /booking/contracts/{id}/restrictions · DELETE /booking/supply/restrictions/{id}   draft only (supply.write)
 
 import { bkGet, bkSend } from "./client";
 import type { SupplierActivity, SupplierPlace } from "./suppliers";
@@ -369,4 +371,46 @@ export const supplyApi = {
 
   options: (q: { q?: string; kind?: string; supplier_id?: string; limit?: number }) =>
     bkGet<{ items: SupplyOption[] }>("supply/options", q),
+
+  // AA-1153 part 2 (B8): a contract's inventory terms (allotment / free sale / on request; stop-sales have their page).
+  contractTerms: (contractId: string, kind: InventoryKind) =>
+    bkGet<{ items: InventoryTerm[]; total: number }>("supply/restrictions", { contract_id: contractId, kind, limit: 100 }),
+  createTerm: (contractId: string, body: InventoryTermBody) =>
+    bkSend<InventoryTerm>(`contracts/${enc(contractId)}/restrictions`, { body }),
+  deleteTerm: (id: string) => bkSend<void>(`supply/restrictions/${enc(id)}`, { method: "DELETE" }),
 };
+
+export const INVENTORY_KINDS = ["allotment", "free_sale", "on_request"] as const;
+export type InventoryKind = (typeof INVENTORY_KINDS)[number];
+
+/** One allotment / free-sale / on-request term of a contract (booking.supply_restrictions). */
+export interface InventoryTerm {
+  id: string;
+  contract_id: string;
+  component_id: string;
+  hotel_code: string | null;
+  hotel_name: string | null;
+  room_type_name: string | null;
+  service_code: string | null;
+  service_title: string | null;
+  inventory_kind: InventoryKind;
+  date_from: IsoDate;
+  date_to: IsoDate;
+  units: number | null;
+  release_days: number | null;
+  max_pax: number | null;
+  note: string | null;
+  in_effect: boolean;
+}
+
+export interface InventoryTermBody {
+  component_id: string;
+  inventory_kind: InventoryKind;
+  date_from: IsoDate;
+  date_to: IsoDate;
+  units?: number | null;
+  /** empty = the pricing policy default (allotment only) */
+  release_days?: number | null;
+  max_pax?: number | null;
+  note?: string | null;
+}

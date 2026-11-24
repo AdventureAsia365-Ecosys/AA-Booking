@@ -136,7 +136,8 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
       width={560}
     >
       <p className="text-[13px] text-muted">
-        {t("One sheet per service type (Hotel, Transport, Guide, Entrance, Activity, Meal) and a Contract sheet. Items are matched by their hotel code and room type, or their service code. The import creates a draft contract; a second person publishes it.")}
+        {t("One sheet per service type (Hotel, Transport, Guide, Entrance, Activity, Meal) and a Contract sheet. Items are matched by their hotel code and room type, or their service code. The import creates a draft contract; a second person publishes it.")}{" "}
+        {t("Optional sheets: Seasons, Hotel children and Inventory (allotment, free sale, on request). To change a contract, download it from the Rates tab (Excel), edit it and import it here.")}
       </p>
       <LinkButton className="self-start" onClick={downloadTemplate}>
         <Download size={14} /> {t("Download the template")}
@@ -181,6 +182,14 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
             ))}
             {preview.rates.length > 12 && <li>{t("… and {0} more", preview.rates.length - 12)}</li>}
           </ul>
+          {(preview.inventory?.length ?? 0) > 0 && (
+            <p className="text-muted" data-testid="rate-sheet-inventory">
+              {t("Inventory: {0} term(s)", preview.inventory?.length ?? 0)}
+              {preview.inventory?.some((r) => r.release_days_default)
+                ? t(" · release days from the Pricing policy ({0}) where the sheet gives none", preview.inventory.find((r) => r.release_days_default)?.release_days ?? "")
+                : ""}
+            </p>
+          )}
           {preview.ignored_sheets.length > 0 && <p className="text-muted">{t("Not read:")} {preview.ignored_sheets.join(", ")}</p>}
         </div>
       )}

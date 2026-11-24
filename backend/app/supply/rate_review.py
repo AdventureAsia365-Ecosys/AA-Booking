@@ -21,9 +21,11 @@ from app.supply import rate_checks
 
 SEASONS = "Seasons"  # the workbook sheet names (app.supply.rate_sheet reads them from here)
 CHILDREN = "Hotel children"
+# AA-1153 part 2: a published contract starting the same day counts too (an exported sheet edited and imported back
+# replaces it, and its diff is against it); the draft itself is excluded ($3).
 PREVIOUS_SQL = """
 SELECT k.id::text AS id, k.title, k.valid_from, k.valid_to FROM booking.supplier_contracts k
-WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from < $2::date
+WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from <= $2::date
   AND ($3::uuid IS NULL OR k.id <> $3::uuid)
 ORDER BY k.valid_from DESC, k.published_at DESC NULLS LAST LIMIT 1
 """
