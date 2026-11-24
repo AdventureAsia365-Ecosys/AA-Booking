@@ -265,6 +265,8 @@ export interface SeasonSync {
   no_destination: number;
   timed_out: number;
   not_tried: number;
+  /** S291 (bk-075): tours without a calendar left out because their last check is recent (absent on older runs). */
+  deferred?: number;
   /** Why the step did not run ("TimeoutError", "policy_unavailable", ...); null when it ran. */
   skipped: string | null;
   /** Skipped, or a catalog read was cut: the run did not try its whole batch. */

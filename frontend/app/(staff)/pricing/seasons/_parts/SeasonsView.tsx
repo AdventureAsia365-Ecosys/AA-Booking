@@ -480,6 +480,13 @@ function NewCalendarDrawer({ onClose, onMade }: { onClose: () => void; onMade: (
 }
 
 /** AA-1128 B1: what the last catalog sync did with season calendars, so a run that assigns nothing is never silent. */
+/** S291 (bk-075): tours left out of the last run because their last check is recent. */
+function SyncDeferred({ count }: { count: number | undefined }) {
+  const t = useT(S);
+  if (!count) return null;
+  return <span className="text-muted">{t("syncDeferred", count)}</span>;
+}
+
 function SyncPanel({ sync }: { sync: SeasonSync | null }) {
   const t = useT(S);
   const { formatDay } = useBookingFormat();
@@ -502,6 +509,7 @@ function SyncPanel({ sync }: { sync: SeasonSync | null }) {
           <span>{t("syncLine", when, sync.assigned, sync.picked)}</span>
           <span className="text-muted">{t("syncRest", sync.no_tour, sync.no_destination)}</span>
           {sync.timed_out > 0 && <span>{t("syncCut", sync.timed_out, sync.not_tried)}</span>}
+          <SyncDeferred count={sync.deferred} />
         </>
       )}
       <span className="text-xs text-muted">{t("syncPolicy")}</span>
