@@ -77,7 +77,8 @@ async def held(
             on = r["service_date"] + timedelta(days=n)
             ask = SupplyAsk(r["room_type_id"], None, on, max(int(r["party"]), 1), int(r["rooms"]), r["supplier_id"])
             asks.append((int(r["line_no"]), ask))
-    verdicts = await availability.many(conn, [a for _, a in asks], today=today)
+    # S291: one group per line: a line held on request takes no room from the lines after it.
+    verdicts = await availability.many(conn, [a for _, a in asks], today=today, groups=[n for n, _ in asks])
     fits: dict[int, bool] = {}
     for (line_no, _), verdict in zip(asks, verdicts, strict=True):
         fits[line_no] = fits.get(line_no, True) and verdict.status == departures.AVAILABLE

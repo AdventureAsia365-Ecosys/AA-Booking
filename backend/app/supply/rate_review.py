@@ -17,20 +17,37 @@ from app.errors import Conflict, Invalid
 from app.pricing import policy_values
 from app.pricing.policy_params_hotels import JUMP_WARN_PCT
 from app.suppliers import service as suppliers
-from app.supply import rate_checks
+from app.supply import inventory_diff, rate_checks
 from app.supply.newest_contract import NEWEST_CONTRACT_FIRST
 
 SEASONS = "Seasons"  # the workbook sheet names (app.supply.rate_sheet reads them from here)
 CHILDREN = "Hotel children"
 # AA-1153 part 2: a published contract starting the same day counts too (an exported sheet edited and imported back
-# replaces it, and its diff is against it); the draft itself is excluded ($3). Same start: the newest published first,
-# the order the rate choice and the allotment terms use (app.supply.newest_contract).
+# replaces it, and its diff is against it); the draft itself is excluded ($3). S291: every contract of the latest start
+# comes back (newest published first, the order of app.supply.newest_contract) and :func:`previous_of` picks the one
+# the draft replaces among them: a DMC may hold two contracts starting the same day (hotels in one, transfers in the
+# other), and the newest of them is not always the one a sheet was exported from.
 PREVIOUS_SQL = f"""
-SELECT k.id::text AS id, k.title, k.valid_from, k.valid_to FROM booking.supplier_contracts k
+SELECT k.id::text AS id, k.title, k.reference, k.valid_from, k.valid_to FROM booking.supplier_contracts k
 WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from <= $2::date
   AND ($3::uuid IS NULL OR k.id <> $3::uuid)
-ORDER BY k.valid_from DESC, {NEWEST_CONTRACT_FIRST} LIMIT 1
+  AND k.valid_from = (SELECT max(m.valid_from) FROM booking.supplier_contracts m
+                      WHERE m.supplier_id = $1::uuid AND m.status IN ('published', 'expired')
+                        AND m.valid_from <= $2::date AND ($3::uuid IS NULL OR m.id <> $3::uuid))
+ORDER BY {NEWEST_CONTRACT_FIRST}
 """  # noqa: S608 — constant fragment
+CONTRACT_SQL = (
+    "SELECT k.id::text AS id, k.title, k.reference, k.valid_from, k.valid_to FROM booking.supplier_contracts k"
+)
+BY_ID_SQL = CONTRACT_SQL + " WHERE k.id = $1::uuid"
+# S291: the contract's allotment, free-sale and on-request terms (stop-sales have their own approval: not compared).
+TERMS_SQL = """
+SELECT CASE WHEN r.hotel_room_type_id IS NOT NULL THEN 'rt:' || r.hotel_room_type_id::text
+            ELSE 'sv:' || r.service_id::text END AS component_id,
+       r.inventory_kind AS kind, r.date_from, r.date_to, r.units, r.release_days, r.max_pax
+FROM booking.supply_restrictions r
+WHERE r.supplier_contract_id = $1::uuid AND r.inventory_kind <> 'stop_sale'
+"""
 CONTRACT_RATES_SQL = """
 SELECT x.id::text AS id, x.hotel_room_type_id::text AS hotel_room_type_id, x.service_id::text AS service_id,
        x.meal_plan, x.pax_type, x.pax_min, x.pax_max, x.season, x.valid_from, x.valid_to, x.net_amount
@@ -64,6 +81,44 @@ async def labels(conn: asyncpg.Connection, rates_: list[dict[str, Any]]) -> dict
     return {r["id"]: r["label"] for r in await conn.fetch(LABELS_SQL, ids)} if ids else {}
 
 
+def _same_reference(a: Any, b: Any) -> bool:
+    return bool(a and b and " ".join(str(a).split()).casefold() == " ".join(str(b).split()).casefold())
+
+
+def _targets(rates_: list[dict[str, Any]]) -> set[str]:
+    return {t for r in rates_ if (t := rate_checks.target(r))}
+
+
+async def previous_of(
+    conn: asyncpg.Connection,
+    supplier_id: str,
+    contract: dict[str, Any],
+    rates_: list[dict[str, Any]],
+    *,
+    exclude: str | None = None,
+    previous_id: str | None = None,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """The contract the draft replaces and its rates (S291, deterministic). ``previous_id`` (the contract an import
+    stored) wins while it exists. Else, among the supplier's published or expired contracts of the latest start on or
+    before the draft's: the one with the draft's reference, then the one sharing the most rate items (room types and
+    services) with the draft, then the newest published (the SQL order)."""
+    if previous_id is not None and (row := await conn.fetchrow(BY_ID_SQL, previous_id)) is not None:
+        return row, [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, previous_id)]
+    candidates = await conn.fetch(PREVIOUS_SQL, supplier_id, contract.get("valid_from"), exclude)
+    if not candidates:
+        return None, []
+    if len(candidates) == 1:
+        return candidates[0], [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, candidates[0]["id"])]
+    mine = _targets(rates_)
+    scored = []
+    for k in candidates:
+        theirs = [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, k["id"])]
+        same = _same_reference(contract.get("reference"), k["reference"])
+        scored.append(((same, len(mine & _targets(theirs))), k, theirs))
+    _, best, before = max(scored, key=lambda item: item[0])  # max keeps the first best: the SQL order breaks ties
+    return best, before
+
+
 async def checks(
     conn: asyncpg.Connection,
     supplier_id: str,
@@ -72,11 +127,16 @@ async def checks(
     seasons: list[dict[str, Any]],
     *,
     exclude: str | None = None,
+    terms: list[dict[str, Any]] | None = None,
+    previous_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any] | None]:
-    """The business checks and the diff of ``rates_`` against the supplier's previous published contract."""
-    previous = await conn.fetchrow(PREVIOUS_SQL, supplier_id, contract.get("valid_from"), exclude)
-    before = [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, previous["id"])] if previous else []
-    names = await labels(conn, [*rates_, *before])
+    """The business checks and the diff of ``rates_`` (and, S291, of the Inventory ``terms``) against the contract the
+    draft replaces (:func:`previous_of`)."""
+    previous, before = await previous_of(conn, supplier_id, contract, rates_, exclude=exclude, previous_id=previous_id)
+    old_terms = [dict(r) for r in await conn.fetch(TERMS_SQL, previous["id"])] if previous else []
+    new_terms = terms or []
+    term_ids = [{"hotel_room_type_id": t["component_id"][3:]} for t in (*new_terms, *old_terms)]
+    names = await labels(conn, [*rates_, *before, *term_ids])
     findings = rate_checks.run(
         rates_,
         seasons=seasons,
@@ -86,7 +146,11 @@ async def checks(
         jump_pct=await jump_pct(conn),
         names=names,
     )
-    diff = {**rate_checks.diff(rates_, before, names), "previous_contract": contract_ref(previous)}
+    diff = {
+        **rate_checks.diff(rates_, before, names),
+        "inventory": inventory_diff.diff(new_terms, old_terms, names),
+        "previous_contract": contract_ref(previous),
+    }
     return findings, diff, contract_ref(previous)
 
 
@@ -168,10 +232,19 @@ async def review(conn: asyncpg.Connection, contract_id: str) -> dict[str, Any]:
     contract = await suppliers.get_contract(conn, contract_id)
     current = [dict(r) for r in await conn.fetch(CONTRACT_RATES_SQL, contract["id"])]
     seasons = [dict(r) for r in await conn.fetch(SEASONS_OF_SQL, contract["id"])]
-    findings, diff, previous = await checks(
-        conn, contract["supplier_id"], contract, current, seasons, exclude=contract["id"]
-    )
+    terms = [dict(r) for r in await conn.fetch(TERMS_SQL, contract["id"])]
     row = await conn.fetchrow(IMPORT_SQL, contract["id"])
+    # S291: a draft made by an import is reviewed against the contract that import chose (stored with it).
+    findings, diff, previous = await checks(
+        conn,
+        contract["supplier_id"],
+        contract,
+        current,
+        seasons,
+        exclude=contract["id"],
+        terms=terms,
+        previous_id=row["previous_contract_id"] if row is not None else None,
+    )
     imported = None
     if row is not None:
         imported = {**dict(row), "checks": json.loads(row["checks"]), "diff": json.loads(row["diff"])}

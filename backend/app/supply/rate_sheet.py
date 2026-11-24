@@ -571,12 +571,14 @@ async def import_sheet(
     hotels = (await rate_sheet_match.load(conn, supplier["id"])).hotel if sheet.children else {}
     children = _children_matched(sheet, hotels)
     terms = await rate_sheet_inventory.match(conn, supplier["id"], sheet.contract, sheet.inventory, sheet.problems)
+    inventory = rate_sheet_inventory.preview(terms, await restrictions.default_release_days(conn)) if terms else []
     findings: list[dict[str, Any]] = []
     diff: dict[str, Any] = {}
     previous = None
     if not sheet.problems:
-        # AA-1153: the business checks and the diff against the previous contract (an error blocks the import).
-        found = await rate_review.checks(conn, supplier["id"], sheet.contract, matched, sheet.seasons)
+        # AA-1153: the business checks and the diff against the previous contract (an error blocks the import);
+        # S291: the Inventory terms are compared too (an allotment cut from 5 rooms to 2 is listed).
+        found = await rate_review.checks(conn, supplier["id"], sheet.contract, matched, sheet.seasons, terms=inventory)
         findings, diff, previous = found
         for f in rate_checks.errors(findings):
             sheet.problems.append(Problem(f.get("sheet") or SEASONS_SHEET, f.get("row"), None, f["code"], f["message"]))
@@ -599,9 +601,7 @@ async def import_sheet(
         "checks": findings,
         "diff": diff,
         "ignored_sheets": sheet.ignored_sheets,
-        "inventory": rate_sheet_inventory.preview(terms, await restrictions.default_release_days(conn))
-        if terms
-        else [],
+        "inventory": inventory,
     }
     if dry_run:
         # A child or infant rate never prices a trip plan component (bk-060): the impact counts adult rates only.
