@@ -730,7 +730,7 @@ async def search_options(
     limit: int = 20,
 ) -> dict[str, Any]:
     """Active room types (of active hotels) and active services a version item can book (or a rate can price),
-    optionally of one supplier."""
+    optionally of one supplier (AA-1153: a hotel the supplier is linked to as a DMC counts as its own)."""
     if kind is not None and kind not in OPTION_KINDS:
         raise Invalid("unknown_kind", f"kind must be one of {', '.join(OPTION_KINDS)}")
     supplier = as_uuid(supplier_id, "supplier_not_found", "supplier") if supplier_id else None
@@ -746,7 +746,9 @@ async def search_options(
             JOIN booking.suppliers sp ON sp.id = h.supplier_id
             WHERE t.status = 'active' AND h.status = 'active'
               AND ($1::text IS NULL OR h.name ILIKE $1 OR t.name ILIKE $1 OR h.code ILIKE $1)
-              AND ($4::uuid IS NULL OR h.supplier_id = $4::uuid)
+              AND ($4::uuid IS NULL OR h.supplier_id = $4::uuid OR EXISTS (
+                  SELECT 1 FROM booking.hotel_supplier_links l
+                  WHERE l.hotel_id = h.id AND l.supplier_id = $4::uuid AND l.status = 'active'))
             UNION ALL
             SELECT 'service', s.id::text, s.code, s.title, sp.company_name, s.destination_id::text,
                    s.country_code::text, s.unit

@@ -10,7 +10,11 @@ Section "hotels" of Pricing > Policy, approved by the pricing group. :mod:`app.p
   :mod:`app.supply.rate_sheet` (the import and the review before publishing);
 - the default board of a hotel night (T9): the board a room night is priced on when neither the quote line nor the
   tour night names one, read by :mod:`app.supply.rates` (every rate lookup: B2B quotes and tariffs, version item
-  defaults, the cost sheet, the staff rate lookup).
+  defaults, the cost sheet, the staff rate lookup);
+- AA-1153 part 2 (bk-072, B8 / T10): the release days an allotment term gets when it names none, read by
+  :mod:`app.supply.restrictions` (the term form) and :mod:`app.supply.rate_sheet_inventory` (the Inventory sheet);
+  the most rows of one rate-sheet workbook, read by :mod:`app.supply.rate_sheet` (import) and
+  :mod:`app.supply.rate_sheet_export` (export: a bigger contract is refused, so an exported sheet always imports back).
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ MATCH_WARN_M = "hotel_match_warn_m"
 FACTS_RECONFIRM_DAYS = "hotel_facts_reconfirm_days"
 JUMP_WARN_PCT = "rate_sheet_jump_warn_pct"
 DEFAULT_BOARD = "hotel_default_board"
+RELEASE_DAYS_DEFAULT = "allotment_release_days_default"
+SHEET_MAX_ROWS = "rate_sheet_max_rows"
 BOARDS = ("RO", "BB", "HB", "FB", "AI")  # = app.supply.rates.MEAL_PLANS (a unit test keeps them equal)
 MATCH_KEYS = (MATCH_BLOCK_PCT, MATCH_BLOCK_M, MATCH_WARN_PCT, MATCH_WARN_M)
 
@@ -123,5 +129,33 @@ SPECS: tuple[dict[str, Any], ...] = (
         "used_by": "app.supply.rates",
         "section": "hotels",
         "choices": BOARDS,
+    },
+    {
+        "key": RELEASE_DAYS_DEFAULT,
+        "type": "integer",
+        "unit": "days",
+        "question": "S285",
+        "group": "pricing",
+        "label": "Allotment: release days when the contract gives none",
+        "help": "Rooms or seats of an allotment not sold this many days before the date go back to the supplier, "
+        "when the allotment term or the rate sheet names no release days.",
+        "used_by": "app.supply.restrictions",
+        "section": "hotels",
+        "minimum": Decimal("0"),
+        "maximum": Decimal("120"),
+    },
+    {
+        "key": SHEET_MAX_ROWS,
+        "type": "integer",
+        "unit": "rows",
+        "question": "S285",
+        "group": "pricing",
+        "label": "Rate sheet: most rows in one workbook",
+        "help": "The most rows one rate-sheet workbook may hold on import (rates, seasons, hotel children and "
+        "inventory together) and on export.",
+        "used_by": "app.supply.rate_sheet",
+        "section": "hotels",
+        "minimum": Decimal("100"),
+        "maximum": Decimal("5000"),
     },
 )

@@ -13,6 +13,7 @@ import { supplyApi, type SupplierRate } from "@/lib/api/supply";
 import { Select, Button, ConfirmDialog, EmptyState, Section, useToast, RowMenu } from "@/ui";
 import { RatesTable, amountText, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
+import { ContractExcelButton, ContractInventory } from "./InventoryTerms";
 import { RateDrawer } from "./RateDrawer";
 import { ContractPhaseBadge } from "./shared";
 import { useLang, useT } from "@/ui/core/useI18n";
@@ -55,6 +56,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
   }
   const editable = canWrite && contract?.status === "draft";
   return (
+    <>
     <Section
       padded={false}
       className="p-4"
@@ -77,6 +79,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
             ))}
           </Select>
           {contract && <ContractPhaseBadge phase={contract.phase} />}
+          <ContractExcelButton contract={contract} />
           {editable && s.status === "active" && (
             <Button variant="primary" onClick={() => setDrawer({})}>
               <Plus size={15} /> {t("Add rate")}
@@ -131,5 +134,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
         }
       />
     </Section>
+    <ContractInventory supplier={s} contract={contract} canWrite={canWrite} />
+    </>
   );
 }

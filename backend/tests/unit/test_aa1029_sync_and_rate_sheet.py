@@ -129,10 +129,10 @@ def test_parse_refuses_what_is_not_a_workbook_and_bounds_size_and_rows() -> None
     with pytest.raises(Invalid) as exc:
         rs.parse(b"x" * (rs.MAX_BYTES + 1))
     assert exc.value.code == "rate_sheet_too_large"
-    many = rs.build_workbook(CONTRACT, service_rows={"Guide": [("SVC-1", None, None, None, None, None, 1, None)]
-                                                     * (rs.MAX_ROWS + 1)})  # fmt: skip
+    many = rs.build_workbook(CONTRACT, service_rows={"Guide": [("SVC-1", None, None, None, None, None, 1, None)] * 21})
+    assert len(rs.parse(many).rows) == 21  # no cap outside an import
     with pytest.raises(Invalid) as exc:
-        rs.parse(many)
+        rs.parse(many, max_rows=20)  # AA-1153 part 2: the import passes the policy rate_sheet_max_rows
     assert exc.value.code == "rate_sheet_too_many_rows"
 
 

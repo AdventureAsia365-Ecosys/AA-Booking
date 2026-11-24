@@ -148,4 +148,46 @@ HOTELS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu BB (phòng kèm ăn sáng).",
         ),
     ),
+    "allotment_release_days_default": _g(
+        (
+            "The release days an allotment term gets when the contract form or the rate sheet's Inventory sheet gives "
+            "none: the rooms (or seats) of an allotment not sold this many days before a date go back to the "
+            "supplier, and a quote for that date is then on request.",
+            "Allotment rooms go back to the supplier earlier: late bookings are asked of the supplier more often.",
+            "AA keeps allotment rooms closer to the date: more late bookings confirm at once, and AA must tell the "
+            "supplier in time when rooms stay unsold.",
+            "Set it to what most DMC contracts say; a contract that names its own release days is never changed by it.",
+            "Starting value 7 days.",
+        ),
+        (
+            "Số ngày nhả phòng mà một dòng allotment nhận khi biểu mẫu hợp đồng hay sheet Inventory của bảng giá không "
+            "ghi: phòng (hay chỗ) của allotment chưa bán trước một ngày từng ấy ngày thì trả lại nhà cung cấp, và báo "
+            "giá cho ngày đó thành on request.",
+            "Phòng allotment trả lại nhà cung cấp sớm hơn: đặt muộn phải hỏi nhà cung cấp thường hơn.",
+            "AA giữ phòng allotment sát ngày hơn: nhiều đặt muộn được xác nhận ngay hơn, và AA phải báo nhà cung cấp "
+            "kịp khi phòng không bán được.",
+            "Đặt theo mức phần lớn hợp đồng DMC ghi; hợp đồng đã ghi số ngày nhả phòng riêng thì không bị ảnh hưởng.",
+            "Giá trị ban đầu 7 ngày.",
+        ),
+    ),
+    "rate_sheet_max_rows": _g(
+        (
+            "The most rows one rate-sheet workbook may hold: on import the rate rows, the Seasons, Hotel children and "
+            "Inventory rows together (and again once a season is expanded into its date ranges); on export a "
+            "contract with more rows is refused, so a downloaded sheet always imports back.",
+            "Bigger sheets are refused: a large DMC sheet must be split into several contracts.",
+            "Bigger sheets are accepted: one import holds the API longer while it checks every row.",
+            "Raise it when real DMC sheets are refused for their size; lower it when imports become slow.",
+            "Starting value 2000 rows.",
+        ),
+        (
+            "Số dòng tối đa của một file bảng giá: khi nhập là các dòng giá, Seasons, Hotel children và Inventory cộng "
+            "lại (và tính lại sau khi một mùa được tách thành các khoảng ngày); khi xuất, hợp đồng nhiều dòng hơn bị "
+            "từ chối, để file tải về luôn nhập lại được.",
+            "File lớn hơn bị từ chối: bảng giá DMC lớn phải tách thành nhiều hợp đồng.",
+            "File lớn hơn được nhận: một lần nhập giữ API lâu hơn trong lúc kiểm từng dòng.",
+            "Tăng khi bảng giá DMC thật bị từ chối vì kích thước; giảm khi việc nhập trở nên chậm.",
+            "Giá trị ban đầu 2000 dòng.",
+        ),
+    ),
 }

@@ -283,10 +283,11 @@ def test_a_season_row_becomes_one_rate_per_range_and_children_are_read() -> None
 # ── Policy parameters ────────────────────────────────────────────────────────
 
 
-def test_the_seven_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
+def test_the_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
     keys = {s["key"] for s in policy_params_hotels.SPECS}
     assert keys == {*policy_params_hotels.MATCH_KEYS, policy_params_hotels.FACTS_RECONFIRM_DAYS,
-                    policy_params_hotels.JUMP_WARN_PCT, policy_params_hotels.DEFAULT_BOARD}  # fmt: skip
+                    policy_params_hotels.JUMP_WARN_PCT, policy_params_hotels.DEFAULT_BOARD,
+                    policy_params_hotels.RELEASE_DAYS_DEFAULT, policy_params_hotels.SHEET_MAX_ROWS}  # fmt: skip
     board = policy_params.PARAMS[policy_params_hotels.DEFAULT_BOARD]
     assert (board.section, board.group, board.type, board.used_by) == ("hotels", "pricing", "code", "app.supply.rates")
     assert board.choices == policy_params_hotels.BOARDS == rates.MEAL_PLANS
@@ -381,29 +382,27 @@ def test_rate_choice_sorts_across_dmcs_in_usd() -> None:
     assert "'BB'" not in sql and "coalesce(a.meal_plan, $8::text)" in sql
 
 
-def test_seasons_and_child_rows_count_against_the_row_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 4)
+def test_seasons_and_child_rows_count_against_the_row_limit() -> None:
     contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
     rate = [("HB-LOTUS", "Deluxe", None, "2027-01-01", "2027-12-31", "BB", None, None, "50", None)]
     seasons = [(f"S{i}", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 6)]
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, season_rows=seasons))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, season_rows=seasons), max_rows=4)
     assert err.value.code == "rate_sheet_too_many_rows"
     children = [("HB-LOTUS", i, i, "sharing", None, "5") for i in range(5)]
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rate, child_rows=children), max_rows=4)
     assert err.value.code == "rate_sheet_too_many_rows"
 
 
-def test_a_season_label_expanded_past_the_limit_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(rate_sheet, "MAX_ROWS", 6)
+def test_a_season_label_expanded_past_the_limit_is_refused() -> None:
     contract = {"Title": "Harbour 2027", "Valid from": "2027-01-01", "Valid to": "2027-12-31", "Currency": "USD"}
     rows = [("HB-LOTUS", "Deluxe", "High", None, None, "BB", None, None, "50", None)] * 2
     seasons = [("High", f"2027-0{i}-01", f"2027-0{i}-02") for i in range(1, 4)]  # 2 rows x 3 ranges = 6: fine
-    assert len(rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons)).rows) == 6
+    assert len(rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons), 6).rows) == 6
     seasons.append(("High", "2027-05-01", "2027-05-02"))  # 2 x 4 = 8 > 6 (and 2 + 4 rows read is within 6)
     with pytest.raises(Invalid) as err:
-        rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons))
+        rate_sheet.parse(rate_sheet.build_workbook(contract, rows, season_rows=seasons), 6)
     assert err.value.code == "rate_sheet_too_many_rows"
 
 
