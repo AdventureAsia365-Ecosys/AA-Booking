@@ -686,7 +686,9 @@ async def create_contract(conn: asyncpg.Connection, staff: Staff, ref: str, data
 async def update_contract(
     conn: asyncpg.Connection, staff: Staff, contract_id: str, changes: dict[str, Any]
 ) -> dict[str, Any]:
-    """Edit a draft's terms, or move its status (``published`` / ``expired``); not both in one call."""
+    """Edit a draft's terms, or move its status (``published`` / ``expired``); not both in one call. AA-1153: a draft
+    made by a rate-sheet import whose review has warnings is published only with ``acknowledge_checks``."""
+    acknowledged = bool(changes.pop("acknowledge_checks", None))
     status = changes.pop("status", None)
     unknown = sorted(set(changes) - set(CONTRACT_EDITABLE))
     if unknown:
@@ -701,6 +703,10 @@ async def update_contract(
     # same lock) then either sees this publish or makes it answer 409 supplier_inactive.
     supplier = await resolve_supplier(conn, current["supplier_id"], lock=True)
     if status is not None:
+        if status == "published" and current["status"] == "draft":
+            from app.supply import rate_review  # noqa: PLC0415 — rate_review imports this module
+
+            await rate_review.require_acknowledged(conn, current["id"], acknowledged)
         return await _move(conn, staff, current, supplier, status)
     if current["status"] != "draft":
         raise Conflict("contract_locked", f"a {current['status']} contract is fixed; create a new contract instead")

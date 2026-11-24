@@ -43,6 +43,11 @@ export const MSG = phrasebook(
     "Extranet | https://…": "Extranet | https://…",
     "Internal notes": "Internal notes",
     "Staff only.": "Staff only.",
+    "This is the same hotel as one already in Booking. Open it and link this supplier to it instead.": "This is the same hotel as one already in Booking. Open it and link this supplier to it instead.",
+    "A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.": "A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.",
+    "Why it is a different hotel": "Why it is a different hotel",
+    "10 to 300 characters; kept in the activity log.": "10 to 300 characters; kept in the activity log.",
+    "{0} % alike": (...a: unknown[]) => `${a[0]} % alike`,
   },
   {
     "Place not readable now": "Hiện không đọc được địa điểm",
@@ -81,6 +86,11 @@ export const MSG = phrasebook(
     "Extranet | https://…": "Extranet | https://…",
     "Internal notes": "Ghi chú nội bộ",
     "Staff only.": "Chỉ nhân viên.",
+    "This is the same hotel as one already in Booking. Open it and link this supplier to it instead.": "Đây là cùng một khách sạn đã có trong Booking. Hãy mở khách sạn đó và gắn nhà cung cấp này vào.",
+    "A hotel with a similar name is close by. Check it; if this is a different hotel, say why and save again.": "Có một khách sạn tên gần giống ở gần đây. Hãy kiểm tra; nếu đây là khách sạn khác, ghi lý do rồi lưu lại.",
+    "Why it is a different hotel": "Vì sao đây là khách sạn khác",
+    "10 to 300 characters; kept in the activity log.": "Từ 10 đến 300 ký tự; được lưu trong nhật ký hoạt động.",
+    "{0} % alike": (...a: unknown[]) => `giống ${a[0]} %`,
   },
   ),
 );

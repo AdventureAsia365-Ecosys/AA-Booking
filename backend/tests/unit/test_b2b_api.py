@@ -61,7 +61,7 @@ def _rate(rid: str, unit: str, amount: str, currency: str) -> dict[str, Any]:
 def _rates(per_ask: Any) -> Any:
     """Script the batched rate query: ``per_ask(room, service, on, pax)`` → a rate dict or None, for each ask."""
 
-    def answer(rooms: list, services: list, days: list, paxes: list, pax_types: list) -> list[dict[str, Any]]:
+    def answer(rooms: list, services: list, days: list, paxes: list, pax_types: list, *_board: list) -> list[dict]:
         out = []
         assert set(pax_types) <= {"adult"}  # bk-060: an adults-only line asks the adult rates only
         for n, ask in enumerate(zip(rooms, services, days, paxes, strict=True), start=1):
@@ -322,7 +322,8 @@ def test_quote_refusals() -> None:
     no_rule = _conn().on("FROM booking.pricing_rules", None)
     resp = _client(no_rule, m2m).post("/booking/b2b/v1/quotes", json=_quote_body(), headers=_headers(token))
     _problem(resp, 503, "unavailable")
-    no_fx = _conn().on("FROM booking.fx_rates", [])
+    # The quote's FX read (app.pricing.repository.FX_SQL; the rate choice reads fx_rates too, AA-1153, alias p).
+    no_fx = _conn().on("FROM booking.fx_rates f JOIN booking.policy_approvals a", [])
     resp = _client(no_fx, m2m).post("/booking/b2b/v1/quotes", json=_quote_body(), headers=_headers(token))
     _problem(resp, 503, "unavailable")
     assert "VND" in resp.json()["message"]

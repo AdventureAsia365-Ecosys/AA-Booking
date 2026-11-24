@@ -5,7 +5,8 @@ what ``GET /booking/b2b/v1/products`` lists and what a ``tp:`` quote line prices
 plan in one transaction (delete + insert; role ``booking`` has SELECT, INSERT, DELETE), touches the plan's
 ``updated_at`` (the products feed's change signal, also when the set is emptied) and writes one audit row when it
 changed. The plan must already have its commercial row (``PUT …/commercial``); every item must exist and be active.
-Ids only: no content is copied (O7).
+Ids only: no content is copied (O7). AA-1153 (T9, bk-069): a hotel night may name its board (``meal_plan``: RO, BB, HB,
+FB, AI; empty = the default BB; a quote line may ask another); a service never has one.
 """
 
 from __future__ import annotations
@@ -19,11 +20,12 @@ from app import audit
 from app.auth.staff import Staff
 from app.b2b.components import KIND_ROOM, PREFIX_ROOM, PREFIX_SERVICE, component_id
 from app.errors import Invalid, NotFound
+from app.supply.rates import MEAL_PLANS
 
 MAX_COMPONENTS = 200
 
 LIST_SQL = """
-SELECT c.day_no, c.hotel_room_type_id::text AS room_type_id, c.service_id::text AS service_id,
+SELECT c.day_no, c.hotel_room_type_id::text AS room_type_id, c.service_id::text AS service_id, c.meal_plan,
        rt.name AS room_type_name, h.code AS hotel_code, h.name AS hotel_name, rt.status AS room_type_status,
        s.code AS service_code, s.title AS service_title, s.service_type, s.status AS service_status
 FROM booking.trip_plan_components c
@@ -53,6 +55,7 @@ def _shape(row: Any) -> dict[str, Any]:
             "service_id": None,
             "label": f"{row['hotel_code']} {row['hotel_name']} · {row['room_type_name']}",
             "active": row["room_type_status"] == "active",
+            "meal_plan": row["meal_plan"],
         }
     return {
         "component_id": component_id(PREFIX_SERVICE, row["service_id"]),
@@ -62,6 +65,7 @@ def _shape(row: Any) -> dict[str, Any]:
         "service_id": row["service_id"],
         "label": f"{row['service_code']} {row['service_title']}",
         "active": row["service_status"] == "active",
+        "meal_plan": None,
     }
 
 
@@ -73,6 +77,11 @@ async def list_components(conn: asyncpg.Connection, source_id: str) -> dict[str,
 
 def _key(item: dict[str, Any]) -> tuple[int, str, str]:
     return (int(item["day_no"]), item.get("hotel_room_type_id") or "", item.get("service_id") or "")
+
+
+def _state(item: dict[str, Any]) -> tuple[int, str, str, str]:
+    """What a replace compares: the key and the board (AA-1153: a board change is a change)."""
+    return (*_key(item), item.get("meal_plan") or "")
 
 
 async def _check_items(conn: asyncpg.Connection, items: list[dict[str, Any]]) -> None:
@@ -108,11 +117,15 @@ async def replace_components(
         room, service = item.get("hotel_room_type_id"), item.get("service_id")
         if bool(room) == bool(service):
             raise Invalid("invalid_component", "each component names exactly one of hotel_room_type_id, service_id")
+        board = (item.get("meal_plan") or "").strip().upper() or None
+        if board is not None and (service or board not in MEAL_PLANS):
+            raise Invalid("invalid_meal_plan", f"a hotel night's board is one of {', '.join(MEAL_PLANS)}")
         norm.append(
             {
                 "day_no": int(item["day_no"]),
                 "hotel_room_type_id": str(uuid.UUID(str(room))) if room else None,
                 "service_id": str(uuid.UUID(str(service))) if service else None,
+                "meal_plan": board,
             }
         )
     if len({_key(i) for i in norm}) != len(norm):
@@ -120,21 +133,24 @@ async def replace_components(
     plan_id = await _plan_id(conn, source_id, lock=True)
     await _check_items(conn, norm)
     before = sorted(
-        _key(dict(r))
+        _state(dict(r))
         for r in await conn.fetch(
-            "SELECT day_no, hotel_room_type_id::text AS hotel_room_type_id, service_id::text AS service_id"
+            "SELECT day_no, hotel_room_type_id::text AS hotel_room_type_id, service_id::text AS service_id, meal_plan"
             " FROM booking.trip_plan_components WHERE trip_plan_id = $1::uuid",
             plan_id,
         )
     )
-    after = sorted(_key(i) for i in norm)
+    after = sorted(_state(i) for i in norm)
     if before != after:
         await conn.execute("DELETE FROM booking.trip_plan_components WHERE trip_plan_id = $1::uuid", plan_id)
         await conn.executemany(
             "INSERT INTO booking.trip_plan_components"
-            " (trip_plan_id, day_no, hotel_room_type_id, service_id, created_by)"
-            " VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5)",
-            [(plan_id, i["day_no"], i["hotel_room_type_id"], i["service_id"], staff.cis_user_id) for i in norm],
+            " (trip_plan_id, day_no, hotel_room_type_id, service_id, created_by, meal_plan)"
+            " VALUES ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6)",
+            [
+                (plan_id, i["day_no"], i["hotel_room_type_id"], i["service_id"], staff.cis_user_id, i["meal_plan"])
+                for i in norm
+            ],
         )
         # The plan's updated_at is the products feed's change signal (an emptied set leaves no component row).
         await conn.execute("UPDATE booking.trip_plans SET updated_at = now() WHERE id = $1::uuid", plan_id)

@@ -14,6 +14,7 @@ Value shapes, as stored in ``pricing_policy.value`` (jsonb) and as the staff API
 - ``boolean``: ``true`` / ``false``;
 - ``month_day``: ``"MM-DD"`` (``"11-01"``); ``month_days``: a sorted list of those;
 - ``codes``: a sorted list of codes from ``choices`` (``["fx", "tax"]``);
+- ``code``: one code from ``choices`` (``"BB"``; AA-1153 the default board of a hotel night);
 - ``currency_map``: ``{"<ISO country>" | "*": "<ISO currency>"}`` with a ``"*"`` (every other country) entry;
 - ``integers``: a sorted list of distinct whole numbers, each inside the range (``[1, 7, 14]``);
 - ``amount_map``: ``{"<ISO currency>": "<decimal>"}`` with exactly the currencies of ``choices``, each amount inside
@@ -42,7 +43,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.pricing import pax_bands, policy_params_ops, policy_params_security
+from app.pricing import pax_bands, policy_params_hotels, policy_params_ops, policy_params_security
 from app.pricing import policy_cross_checks as cross
 from app.pricing.policy_shapes import PolicyValueError as PolicyValueError
 from app.pricing.policy_shapes import currency_map
@@ -53,11 +54,12 @@ BOOLEAN = "boolean"
 MONTH_DAY = "month_day"
 MONTH_DAYS = "month_days"
 CODES = "codes"
+CODE = "code"  # AA-1153 (bk-069): one code from choices
 CURRENCY_MAP = "currency_map"
 INTEGERS = "integers"
 AMOUNT_MAP = "amount_map"
 PAX_BANDS = pax_bands.TYPE
-TYPES = (INTEGER, DECIMAL, BOOLEAN, MONTH_DAY, MONTH_DAYS, CODES, CURRENCY_MAP, INTEGERS, AMOUNT_MAP, PAX_BANDS)
+TYPES = (INTEGER, DECIMAL, BOOLEAN, MONTH_DAY, MONTH_DAYS, CODES, CODE, CURRENCY_MAP, INTEGERS, AMOUNT_MAP, PAX_BANDS)
 
 PRICING = "pricing"
 FINANCE = "finance"
@@ -85,6 +87,7 @@ SECTIONS = (
     "retention",
     "security",
     "ops",  # AA-1171 (policy_params_ops.py)
+    "hotels",  # AA-1153 (policy_params_hotels.py)
 )
 # The selling currencies a rounding increment is required for (= app.pricing.engine.SELLING_CURRENCIES, by a test).
 ROUNDING_CURRENCIES = ("AUD", "EUR", "GBP", "SGD", "USD")
@@ -689,6 +692,7 @@ PARAMS: dict[str, Param] = {
         ),
         # AA-1158 security, AA-1171 ops, AA-1175 the group-size bands (pax_bands.py)
         *(Param(**spec) for spec in (*policy_params_security.SPECS, *policy_params_ops.SPECS, *pax_bands.SPECS)),
+        *(Param(**spec) for spec in policy_params_hotels.SPECS),  # AA-1153 (bk-069): hotel contracting
     )
 }
 
@@ -760,6 +764,10 @@ def normalise(key: str, value: Any, current: Mapping[str, Any] | None = None) ->
         if unknown:
             raise PolicyValueError(f"{key}: unknown code(s) {', '.join(unknown)} (allowed: {', '.join(param.choices)})")
         out = sorted(set(value))
+    elif param.type == CODE:
+        if not isinstance(value, str) or value not in param.choices:
+            raise PolicyValueError(f"{key}: one of {', '.join(param.choices)} is required")
+        out = value
     elif param.type == CURRENCY_MAP:
         out = currency_map(value, key, MAX_LIST)
     elif param.type == PAX_BANDS:

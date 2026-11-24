@@ -85,6 +85,43 @@ export interface RoomType {
   internal_notes: string | null;
   status: RecordStatus;
   rates_in_force: number;
+  /** AA-1153: the names DMCs use for this room type (the rate-sheet import matches them); detail only. */
+  aliases?: RoomTypeAlias[];
+}
+
+export interface RoomTypeAlias {
+  id: string;
+  room_type_id: string;
+  supplier_id: string | null;
+  supplier_code: string | null;
+  alias: string;
+}
+
+/** AA-1153 (bk-069): a DMC that sells the hotel to AA, its own code for it, and whether it is the preferred one. */
+export interface HotelSupplierLink {
+  supplier_id: string;
+  supplier_code: string;
+  supplier_name: string;
+  supplier_status: string;
+  supplier_hotel_code: string | null;
+  is_preferred: boolean;
+  status: RecordStatus;
+  first_listed: boolean;
+  published_contracts: number;
+}
+
+export type FactsSource = "dmc_sheet" | "hotel_website" | "site_visit";
+
+/** AA-1153: a hotel a new or edited one may duplicate (``block`` refuses, ``warn`` asks for a reason). */
+export interface HotelCandidate {
+  id: string;
+  code: string;
+  name: string;
+  status: RecordStatus;
+  similarity: number;
+  distance_m: number | null;
+  same_place: boolean;
+  verdict: "block" | "warn";
 }
 
 /** CIS content status (CIS owns it); `none` = CIS holds nothing for this record yet. */
@@ -105,6 +142,14 @@ export interface SupplyContent {
 
 export interface HotelDetail extends Hotel {
   room_types: RoomType[];
+  /** AA-1153 (bk-069): the DMCs that sell the hotel, the facts confirmation and the codes of other systems. */
+  suppliers?: HotelSupplierLink[];
+  external_codes?: Record<string, string>;
+  facts_source?: FactsSource | null;
+  facts_source_supplier_id?: string | null;
+  facts_confirmed_on?: string | null;
+  facts_confirmed_by?: string | null;
+  facts_reconfirm_due?: string | null;
   recent_activity: SupplierActivity[];
   /** null: the CIS read-back is off (CIS 278 not served yet, or unreadable right now). */
   content?: SupplyContent | null;
@@ -184,6 +229,8 @@ export interface HotelBody {
   amenities?: string[];
   links?: { label?: string | null; url: string }[];
   internal_notes?: string | null;
+  /** AA-1153: why a hotel that looks like another one nearby is a different hotel (10-300 characters, audited). */
+  not_duplicate_reason?: string | null;
 }
 
 export interface ServiceBody {
@@ -285,6 +332,19 @@ export const supplyApi = {
   createRoomType: (hotelRef: string, body: RoomTypeBody) => bkSend<RoomType>(`hotels/${enc(hotelRef)}/room-types`, { body }),
   updateRoomType: (id: string, body: RoomTypeBody) => bkSend<Changed<RoomType>>(`room-types/${enc(id)}`, { method: "PATCH", body }),
   hotelRates: (ref: string) => bkGet<{ items: SupplierRate[] }>(`hotels/${enc(ref)}/rates`),
+  // AA-1153: the property master (DMC links, facts confirmation, room type aliases, duplicates).
+  linkSupplier: (ref: string, body: { supplier_id: string; supplier_hotel_code?: string | null; is_preferred?: boolean }) =>
+    bkSend<{ items: HotelSupplierLink[] }>(`hotels/${enc(ref)}/suppliers`, { body }),
+  updateSupplierLink: (
+    ref: string,
+    supplierId: string,
+    body: { supplier_hotel_code?: string | null; is_preferred?: boolean; status?: RecordStatus },
+  ) => bkSend<{ items: HotelSupplierLink[] }>(`hotels/${enc(ref)}/suppliers/${enc(supplierId)}`, { method: "PATCH", body }),
+  confirmFacts: (ref: string, body: { source: FactsSource; supplier_id?: string | null; confirmed_on?: string | null }) =>
+    bkSend<HotelDetail>(`hotels/${enc(ref)}/facts-confirmation`, { body }),
+  addAlias: (roomTypeId: string, body: { alias: string; supplier_id?: string | null }) =>
+    bkSend<{ items: RoomTypeAlias[] }>(`room-types/${enc(roomTypeId)}/aliases`, { body }),
+  removeAlias: (id: string) => bkSend<void>(`room-type-aliases/${enc(id)}`, { method: "DELETE" }),
 
   services: (q: ListQuery & { type?: string } = {}) => bkGet<Page<Service>>("services", q),
   service: (ref: string) => bkGet<ServiceDetail>(`services/${enc(ref)}`),

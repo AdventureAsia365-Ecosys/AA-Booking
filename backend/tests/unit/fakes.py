@@ -84,6 +84,14 @@ POLICY_SEED: dict[str, str] = {
     "contract_expiry_alert_days": "60",
     # AA-1175 (bk-066): v2, the business owner's bands
     "price_pax_bands": "[[1, 1], [2, 2], [3, 3], [4, 4], [5, 7], [8, 10], [11, null]]",
+    # AA-1153 (bk-069)
+    "hotel_match_block_pct": "85",
+    "hotel_match_block_m": "300",
+    "hotel_match_warn_pct": "60",
+    "hotel_match_warn_m": "1000",
+    "hotel_facts_reconfirm_days": "180",
+    "rate_sheet_jump_warn_pct": "60",
+    "hotel_default_board": '"BB"',
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure

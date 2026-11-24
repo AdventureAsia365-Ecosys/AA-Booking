@@ -18,6 +18,7 @@ import { Button, Code, ConfirmDialog, DataTable, PageFrame, DateText, EmptyState
 import { DetailHeader, DetailSkeleton, Fact, FactGrid, MetaItem, useDetailTab } from "@/app/(staff)/_parts/DetailHeader";
 import { ContractDrawer } from "./ContractDrawer";
 import { RateSheetDrawer } from "./RateSheetDrawer";
+import { ContractPublishReview } from "./RateReview";
 import { RatesTab } from "./RatesTab";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
 import { SupplierBankTab } from "./SupplierBankTab";
@@ -268,6 +269,11 @@ function StatusButton({ s, actions }: { s: SupplierDetail; actions: ReturnType<t
   );
 }
 
+/** The PATCH body of a publish (AA-1153: with the publisher's acknowledgement of the rate review warnings) or expiry. */
+function moveBody(kind: "publish" | "expire", acknowledged: boolean) {
+  return kind === "publish" ? { status: "published" as const, acknowledge_checks: acknowledged || undefined } : { status: "expired" as const };
+}
+
 function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const t = useT(MSG);
   const tx = useTx();
@@ -279,10 +285,10 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
   const [drawer, setDrawer] = useState<{ contract?: SupplierContract } | null>(null);
   const [importing, setImporting] = useState(false);
   const [move, setMove] = useState<Move>(null);
+  const [acknowledged, setAcknowledged] = useState(false); // AA-1153: the publisher checked the rate review warnings
 
   const run = useMutation({
-    mutationFn: (m: NonNullable<Move>) =>
-      suppliersApi.updateContract(m.contract.id, { status: m.kind === "publish" ? "published" : "expired" }),
+    mutationFn: (m: NonNullable<Move>) => suppliersApi.updateContract(m.contract.id, moveBody(m.kind, acknowledged)),
     onSuccess: (k, m) => {
       qc.invalidateQueries({ queryKey: ["supplier"] });
       qc.invalidateQueries({ queryKey: ["suppliers"] });
@@ -293,6 +299,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
 
   function ask(m: NonNullable<Move>) {
     run.reset();
+    setAcknowledged(false);
     setMove(m);
   }
 
@@ -452,6 +459,7 @@ function Contracts({ s, canWrite }: { s: SupplierDetail; canWrite: boolean }) {
           move?.kind === "publish" ? (
             <>
               {t("Publish")} <strong className="text-ink">{tx(k?.title)}</strong> ({k?.currency}{t(")? You confirm you checked the terms entered by {0}. Once published the contract is fixed.", k?.updated_by_name ?? k?.created_by_name ?? t("another staff member"))}
+              <ContractPublishReview contract={k} acknowledged={acknowledged} onAcknowledge={setAcknowledged} />
             </>
           ) : (
             <>

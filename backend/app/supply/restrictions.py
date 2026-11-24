@@ -471,11 +471,13 @@ async def _component(
     conn: asyncpg.Connection, component_id: str, contract: dict[str, Any]
 ) -> tuple[str | None, str | None]:
     room, service = parse_component(component_id)
-    if room:
+    if room:  # AA-1153 (bk-069): the contract's supplier when the hotel is linked (active) to it
         owner = await conn.fetchval(
-            "SELECT h.supplier_id::text FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id"
-            " WHERE t.id = $1::uuid",
+            "SELECT coalesce(l.supplier_id, h.supplier_id)::text FROM booking.hotel_room_types t"
+            " JOIN booking.hotels h ON h.id = t.hotel_id LEFT JOIN booking.hotel_supplier_links l"
+            " ON l.hotel_id = h.id AND l.supplier_id = $2::uuid AND l.status = 'active' WHERE t.id = $1::uuid",
             room,
+            contract["supplier_id"],
         )
     else:
         owner = await conn.fetchval("SELECT supplier_id::text FROM booking.services WHERE id = $1::uuid", service)

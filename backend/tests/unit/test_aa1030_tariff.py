@@ -106,8 +106,9 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """price_lines: 82 USD net per traveller (a sell of 100 USD each), except where ``refuse`` names the party."""
     state: dict[str, Any] = {"refuse": set(), "calls": 0, "terms": agency_pricing.NO_TERMS, "served": None}
 
-    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+    async def price_lines(conn: Any, asks: list[LineAsk], **kw: Any) -> list[LineCost]:
         state["calls"] += 1
+        state["board"] = kw.get("default_board")  # AA-1153: the policy's default board, read once per tariff
         for ask in asks:
             if ask.adult in state["refuse"]:
                 raise B2BError("invalid", f"line {ask.line_ref}: no rate in force on {ask.service_date} for 1 per room")
@@ -126,7 +127,11 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         state["basis_kw"] = kw
         return _basis(state["terms"], kw["currency"])
 
+    async def default_board_b2b(conn: Any, on: Any = None) -> str:
+        return "BB"
+
     monkeypatch.setattr(tariff, "price_lines", price_lines)
+    monkeypatch.setattr(tariff, "default_board_b2b", default_board_b2b)
     monkeypatch.setattr(liveness, "states", states)
     monkeypatch.setattr(quotes, "price_basis", price_basis)
     return state
@@ -141,6 +146,7 @@ async def test_every_band_is_priced_by_the_quote_formula_with_the_partner_discou
 
     assert wired["basis_kw"]["require_all"] is False and wired["basis_kw"]["cost_currencies"] == {"USD"}
     assert wired["calls"] == 1  # one price_lines call for the whole grid (within the lookup budget)
+    assert wired["board"] == "BB"  # AA-1153: the policy board, passed to every call
     got = [(i["tour"]["source_id"], i["priced_for_pax"], i["price"]["amount"], i["agency_discount_pct"]) for i in
            out["items"]]  # fmt: skip
     # 100 USD a traveller x party, less the plan card (10 %) on tour-a, less the tier (3 %) on tour-b.
@@ -184,7 +190,7 @@ async def test_rows_that_cannot_be_quoted_are_listed_with_the_reason(wired: dict
 async def test_a_missing_cost_fx_rate_leaves_only_that_row_unpriced(
     wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+    async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
         return [LineCost(kind="trip_plan", costs=[(D("82"), "THB" if a.adult == 1 else "USD")]) for a in asks]
 
     monkeypatch.setattr(tariff, "price_lines", price_lines)
@@ -347,7 +353,7 @@ async def test_a_hand_window_over_a_rate_change_is_cut_there_and_each_piece_is_p
     net = {date(2027, 1, 1): D("82"), date(2027, 6, 1): D("164"), date(2027, 8, 31): D("164")}
     asked: list[date] = []
 
-    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+    async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
         asked.extend(a.service_date for a in asks)
         for a in asks:
             if a.service_date not in net:
@@ -386,7 +392,7 @@ async def test_a_hand_window_over_a_rate_change_is_cut_there_and_each_piece_is_p
 async def test_a_piece_that_cannot_be_quoted_is_listed_alone_and_the_cells_are_capped(
     wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+    async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
         for a in asks:
             if a.service_date >= date(2027, 6, 1):
                 raise B2BError("invalid", f"line {a.line_ref}: no rate in force on {a.service_date}")
@@ -476,7 +482,7 @@ async def test_without_child_or_infant_rule_a_child_pays_like_an_adult_and_an_in
 async def test_a_single_room_without_a_rate_empties_only_the_supplement(
     wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def price_lines(conn: Any, asks: list[LineAsk]) -> list[LineCost]:
+    async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
         if any(ask.rooms for ask in asks):
             raise B2BError("invalid", f"line {asks[0].line_ref}: no rate in force for 1 per room")
         return [LineCost(kind="trip_plan", costs=[(D("82") * ask.adult, "USD")]) for ask in asks]
