@@ -61,7 +61,11 @@ those files changes in this slice.
 - `app/supply/availability.py` (`groups`, `_Taken`), `app/b2b/quotes.py` and `app/b2b/room_hold.py` pass one group
   per line.
 - Frontend: `RateReview.tsx` shows the Inventory part of the diff (warning pill when terms sell less), the Suppliers tab
-  label, the policy label of the new parameter.
+  label, the policy label of the new parameter, and the Seasons page's sync panel says how many tours wait for the
+  recheck (`deferred`; `SyncDeferred` split out of `SyncPanel` for the complexity ratchet).
+- The local integration run of every touched module (500 tests) had 16 failures in `test_bk027_schema`,
+  `test_bk045_schema`, `test_bk069_schema`; each file passes alone (the order-on-one-database issue the AA-1153 notes
+  already record on origin/main).
 
 ## Tradeoffs
 
