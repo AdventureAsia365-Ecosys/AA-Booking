@@ -189,6 +189,9 @@ async def test_cis_app_reads_the_contract_views_and_nothing_else(admin: asyncpg.
         # bk-062 (AA-1155): the key-only custom role view (CIS roles matrix); the base tables staff_role and
         # staff_role_capability stay closed (test_bk062_schema.py).
         ("v_staff_role_capability", "SELECT"),
+        # bk-073 (AA-1148): supply.supplier.v1, supplier identity for the CIS content workspace
+        # (test_bk073_supplier_dmc_cis_view.py).
+        ("v_supply_suppliers", "SELECT"),
     }
     assert await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'USAGE')")
     assert not await admin.fetchval("SELECT has_schema_privilege('cis_app', 'booking', 'CREATE')")

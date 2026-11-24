@@ -2749,6 +2749,17 @@ or changes to someone other than the enterer, it must be an active `staff_users`
 `is_business_owner` or `is_owner` in `shared.v_staff_booking_grant` and whose e-mail is not a Dev-only E2E address;
 else check_violation. Binds every role; an unchanged approval keeps passing after a marker moves. Tech lead S289.
 
+### `bk-073` (AA-1148 supplier category `dmc` and the CIS supplier list — needs `bk-008`, `bk-017`)
+
+A **contract** file (a replaced CHECK on `suppliers` and a cross-owner grant; MIG-4). `suppliers_categories_chk` allows
+`dmc` (destination management company: the DMC that runs a whole program) next to the six service categories, 1 to 7
+of them. The view `booking.v_supply_suppliers` (security barrier; contract `supply.supplier.v1`, root
+`docs/contracts/supply.supplier.v1.md`) lists the identity of every supplier (id, code, company name, categories,
+country, status, updated_at) and nothing else: no contact, notes, legal / tax / payment detail, bank account or price.
+SELECT to `booking` and `cis_app` (AA-CIS-Infra `db/owners.yaml` consumer grant, expected from `bk-073`): the CIS content
+workspace links a source tour to the supplier it comes from (`raw_tours.supplier_id`, a soft key, CIS 478). The Booking
+code PR that accepts `dmc` in the supplier forms raises readiness to `bk-073`.
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices

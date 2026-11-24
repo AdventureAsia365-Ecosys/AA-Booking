@@ -180,8 +180,11 @@ async def test_cis_app_reads_the_four_views_only(admin: asyncpg.Connection) -> N
         " WHERE c.relnamespace = 'booking'::regnamespace AND a.grantee = 'cis_app'::regrole"
         " AND c.relname LIKE 'v\\_supply\\_%'"
     )
-    assert sorted((r["relname"], r["privilege_type"]) for r in grants) == sorted((v, "SELECT") for v in VIEWS)
-    for table in ("hotels", "hotel_room_types", "services", "entity_media", "outbox", "supplier_rates"):
+    # bk-073 (AA-1148) adds a fifth supply view, the supplier identity list supply.supplier.v1
+    # (test_bk073_supplier_dmc_cis_view.py); the base supplier table stays closed.
+    expected = (*VIEWS, "v_supply_suppliers")
+    assert sorted((r["relname"], r["privilege_type"]) for r in grants) == sorted((v, "SELECT") for v in expected)
+    for table in ("hotels", "hotel_room_types", "services", "entity_media", "outbox", "supplier_rates", "suppliers"):
         assert not await admin.fetchval("SELECT has_table_privilege('cis_app', $1, 'SELECT')", f"booking.{table}")
 
 
