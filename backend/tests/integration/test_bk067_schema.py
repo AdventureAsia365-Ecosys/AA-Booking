@@ -13,7 +13,9 @@ no-op, the seeds, grants, and the database rules:
   order and active editable by the app role.
 
 The business owner is a ``staff_users`` row with a Cognito identity and a ``shared.staff_booking_grant_stub`` row with
-``is_business_owner``. All names are invented; the "ciphertext" is filler bytes (the database never decrypts)."""
+``is_business_owner``. bk-071 (S289): a second person's approval needs the business owner or the tech lead, so the
+checker and the payer here carry the platform owner marker ``is_owner`` (tests/integration/test_bk071_schema.py covers
+the rule). All names are invented; the "ciphertext" is filler bytes (the database never decrypts)."""
 
 from __future__ import annotations
 
@@ -33,6 +35,11 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 MIGRATION = Path(__file__).resolve().parents[3] / "migrations" / "067_supplier_bank_accounts.sql"
 ISS = "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_it1158b"
 OWNER_SUB = "b1158000-0000-4000-8000-0000000000b1"
+# bk-071: the checker and the payer approve bank accounts, so each has a Cognito identity with is_owner (tech lead).
+LEAD_SUBS = {
+    "it-1158b-checker": "b1158000-0000-4000-8000-0000000000c1",
+    "it-1158b-payer": "b1158000-0000-4000-8000-0000000000c2",
+}
 OWNER = f"cog:{OWNER_SUB}"
 MAKER, CHECKER, PAYER = "it-1158b-maker", "it-1158b-checker", "it-1158b-payer"
 FILLER = b"\x01" * 48
@@ -69,7 +76,10 @@ async def _purge(admin: asyncpg.Connection) -> None:
                             " (SELECT id FROM booking.suppliers WHERE company_name LIKE 'it-1158b%')")  # fmt: skip
         await admin.execute("DELETE FROM booking.suppliers WHERE company_name LIKE 'it-1158b%'")
         await admin.execute("DELETE FROM booking.supplier_profile_option WHERE created_by LIKE 'it-1158b%'")
-    await admin.execute("DELETE FROM shared.staff_booking_grant_stub WHERE cognito_sub = $1", OWNER_SUB)
+    await admin.execute(
+        "DELETE FROM shared.staff_booking_grant_stub WHERE cognito_sub = ANY($1::text[])",
+        [OWNER_SUB, *LEAD_SUBS.values()],
+    )
 
 
 @pytest_asyncio.fixture
@@ -89,6 +99,18 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
         " VALUES ($1, NULL, true) ON CONFLICT (cognito_sub) DO UPDATE SET is_business_owner = true",
         OWNER_SUB,
     )
+    for staff_id, sub in LEAD_SUBS.items():
+        await conn.execute(
+            "UPDATE booking.staff_users SET cognito_iss = $2, cognito_sub = $3 WHERE cis_user_id = $1",
+            staff_id,
+            ISS,
+            sub,
+        )
+        await conn.execute(
+            "INSERT INTO shared.staff_booking_grant_stub (cognito_sub, booking_role_code, is_owner)"
+            " VALUES ($1, NULL, true) ON CONFLICT (cognito_sub) DO UPDATE SET is_owner = true",
+            sub,
+        )
     try:
         yield conn
     finally:
