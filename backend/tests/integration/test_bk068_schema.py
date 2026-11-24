@@ -23,6 +23,7 @@ import pytest
 import pytest_asyncio
 
 from tests.integration import ops
+from tests.integration.conftest import apply_migrations, run_068_dropping_later_view
 from tests.integration.supply import purge_supply
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -174,9 +175,11 @@ async def test_registered_once_and_rerun_is_a_no_op(admin: asyncpg.Connection) -
     before = sorted((str(r["id"]), r["param_key"], r["value"]) for r in await admin.fetch(policy))
     await admin.execute("SET ROLE bk_owner")
     try:
-        await admin.execute(MIGRATION.read_text(encoding="utf-8"))
+        # bk-070 appended v_place_addons.title: the re-run drops the view first, bk-070 puts the column back below
+        await run_068_dropping_later_view(admin, MIGRATION.read_text(encoding="utf-8"))
     finally:
         await admin.execute("RESET ROLE")
+    await apply_migrations(admin, only=range(69, 1000))
     assert sorted((str(r["id"]), r["param_key"], r["value"]) for r in await admin.fetch(policy)) == before
     assert await admin.fetchval("SELECT count(*) FROM shared.schema_versions WHERE version = 'bk-068'") == 1
 
