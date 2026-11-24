@@ -7806,11 +7806,12 @@
                 "guide",
                 "entrance",
                 "activity",
-                "meal"
+                "meal",
+                "dmc"
               ],
               "type": "string"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "minItems": 1,
             "title": "Categories",
             "type": "array"
@@ -11442,11 +11443,12 @@
                     "guide",
                     "entrance",
                     "activity",
-                    "meal"
+                    "meal",
+                    "dmc"
                   ],
                   "type": "string"
                 },
-                "maxItems": 6,
+                "maxItems": 7,
                 "type": "array"
               },
               {

@@ -34,7 +34,8 @@ Pool = Annotated[asyncpg.Pool, Depends(get_pool)]
 CanRead = Annotated[Staff, Depends(require("supply.read"))]
 CanWrite = Annotated[Staff, Depends(require("supply.write"))]
 
-Category = Literal["hotel", "transport", "guide", "entrance", "activity", "meal"]
+# AA-1148 (bk-073): dmc = a destination management company that runs whole programs for AA.
+Category = Literal["hotel", "transport", "guide", "entrance", "activity", "meal", "dmc"]
 Website = Annotated[str, Field(max_length=500, pattern=r"^\s*(https?://\S+)?\s*$")]
 Country = Annotated[str, Field(pattern=r"^\s*([A-Za-z]{2})?\s*$")]
 Currency = Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")]
@@ -68,7 +69,7 @@ class SupplierFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     company_name: str | None = Field(default=None, max_length=200)
-    categories: list[Category] | None = Field(default=None, max_length=6)
+    categories: list[Category] | None = Field(default=None, max_length=7)
     website: Website | None = None
     internal_notes: str | None = Field(default=None, max_length=5000)
     contact_name: str | None = Field(default=None, max_length=200)
@@ -89,7 +90,7 @@ class SupplierFields(BaseModel):
 
 class NewSupplier(SupplierFields):
     company_name: str = Field(min_length=1, max_length=200)
-    categories: list[Category] = Field(min_length=1, max_length=6)
+    categories: list[Category] = Field(min_length=1, max_length=7)
 
 
 class StatusNote(BaseModel):

@@ -1,5 +1,5 @@
 // app/(staff)/suppliers/_parts/shared.tsx — labels, badges and error copy shared by the supplier pages (AA-822).
-// Categories are the six rate types of ADR 0005 (Q20); record status pending / active / inactive is UI spec §1.3
+// Categories are the six rate types of ADR 0005 (Q20) and dmc (bk-073, AA-1148: a destination management company); record status pending / active / inactive is UI spec §1.3
 // ("Record" row); contract phases are computed by the API on the UTC day.
 
 import { ApiError } from "@/lib/api/client";
@@ -15,6 +15,7 @@ export const CATEGORY_LABEL: Record<SupplierCategory, string> = {
   entrance: "Entrance",
   activity: "Activity",
   meal: "Meal",
+  dmc: "DMC (runs whole programs)",
 };
 
 const STATUS_META: Record<SupplierStatus, { label: string; tone: BookingTone }> = {

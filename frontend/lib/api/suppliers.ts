@@ -23,7 +23,8 @@ import type { IsoDate, IsoDateTime } from "./types";
 
 const enc = encodeURIComponent;
 
-export const SUPPLIER_CATEGORIES = ["hotel", "transport", "guide", "entrance", "activity", "meal"] as const;
+// AA-1148 (bk-073): dmc = a destination management company that runs whole programs for AA.
+export const SUPPLIER_CATEGORIES = ["hotel", "transport", "guide", "entrance", "activity", "meal", "dmc"] as const;
 export type SupplierCategory = (typeof SUPPLIER_CATEGORIES)[number];
 /** AA-1158: every new supplier starts `pending`; a second person activates it. */
 export type SupplierStatus = "pending" | "active" | "inactive";
