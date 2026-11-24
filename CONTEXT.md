@@ -1578,8 +1578,11 @@ DMCs, each under its own AA supplier contract. Part 2 (bk-072): allotment / free
   (`{"<system>": "<code>"}`, a DMC code or a GIATA id later; no paid code). None of them is a `supply.hotel.v1` fact.
 - **Rates**: a room rate is written (and counted) under a contract whose supplier has an **active link** to the hotel
   (the bk-069 guards `supplier_rate_guard` / `supply_restriction_guard`, `rates.create_rate`, `restrictions`). One rate
-  choice for every caller (`rates.RATES_MANY_SQL`): per supplier as before (newest validity, pax band, lowest net)
-  with the asked board first; across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
+  choice for every caller (`rates.RATES_MANY_SQL`): per supplier the asked board first, then the supplier's newest
+  published contract with a matching rate (`published_at`, then contract id: `supply.newest_contract`, the same order
+  the allotment terms use, so a re-imported contract's new price applies on its dates and the older contract prices
+  only the dates, boards or bands it alone covers; hotel child prices follow the room rate's contract), then as before
+  (newest validity, pax band, lowest net); across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
   net at the approved FX rate in force on the night, `booking.fx_rates`; a currency without one sorts last). Each found
   rate names its `supplier_id`. **One DMC per room**: every night and occupancy of one room type on one B2B line (and
   every night of a version item) is priced by the DMC of the first night; a unit another DMC was cheaper for is asked

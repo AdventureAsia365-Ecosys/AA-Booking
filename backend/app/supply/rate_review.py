@@ -18,17 +18,19 @@ from app.pricing import policy_values
 from app.pricing.policy_params_hotels import JUMP_WARN_PCT
 from app.suppliers import service as suppliers
 from app.supply import rate_checks
+from app.supply.newest_contract import NEWEST_CONTRACT_FIRST
 
 SEASONS = "Seasons"  # the workbook sheet names (app.supply.rate_sheet reads them from here)
 CHILDREN = "Hotel children"
 # AA-1153 part 2: a published contract starting the same day counts too (an exported sheet edited and imported back
-# replaces it, and its diff is against it); the draft itself is excluded ($3).
-PREVIOUS_SQL = """
+# replaces it, and its diff is against it); the draft itself is excluded ($3). Same start: the newest published first,
+# the order the rate choice and the allotment terms use (app.supply.newest_contract).
+PREVIOUS_SQL = f"""
 SELECT k.id::text AS id, k.title, k.valid_from, k.valid_to FROM booking.supplier_contracts k
 WHERE k.supplier_id = $1::uuid AND k.status IN ('published', 'expired') AND k.valid_from <= $2::date
   AND ($3::uuid IS NULL OR k.id <> $3::uuid)
-ORDER BY k.valid_from DESC, k.published_at DESC NULLS LAST LIMIT 1
-"""
+ORDER BY k.valid_from DESC, {NEWEST_CONTRACT_FIRST} LIMIT 1
+"""  # noqa: S608 — constant fragment
 CONTRACT_RATES_SQL = """
 SELECT x.id::text AS id, x.hotel_room_type_id::text AS hotel_room_type_id, x.service_id::text AS service_id,
        x.meal_plan, x.pax_type, x.pax_min, x.pax_max, x.season, x.valid_from, x.valid_to, x.net_amount

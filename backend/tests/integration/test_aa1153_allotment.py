@@ -8,7 +8,9 @@
   hotel is not counted against this allotment;
 - the B2B desk on-request list names the DMC whose rate priced the line, not the hotel's first DMC;
 - the contract exports as a rate sheet (rates with both B7 source numbers, seasons, child prices, inventory) that,
-  edited, imports back as a new draft with the diff against the published contract.
+  edited, imports back as a new draft with the diff against the published contract;
+- published, that re-imported contract prices the dates it covers with its new price and child price (the newest
+  published contract of the DMC, as for the allotment terms), the older contract still prices the other dates.
 
 Reuses the AA-973 fixtures (``admin``, ``client``, ``plan``) and the AA-1153 part 1 ``lodge``. Names are invented."""
 
@@ -16,7 +18,8 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import timedelta
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -224,15 +227,69 @@ async def test_contract_exports_and_imports_back_as_a_new_draft(
     assert set((await _note(admin, "ALLOT-RT-3"))["supply"]) == {"allotment_full"}
 
 
-def _edit_published(data: bytes, value: str) -> bytes:
+def _edit_published(data: bytes, value: str, *, valid_to: date | None = None, child_net: str | None = None) -> bytes:
+    """The exported sheet with a new Published price on the rate row (its Net cleared: derived again); optionally the
+    rate row's Valid to and the child price's Net changed too."""
     wb = load_workbook(io.BytesIO(data))
     ws = wb["Hotel"]
     header = [cell.value for cell in ws[1]]
     ws.cell(row=2, column=header.index("Published") + 1, value=value)
     ws.cell(row=2, column=header.index("Net") + 1).value = None  # cell(value=None) would leave it as it is
+    if valid_to is not None:
+        ws.cell(row=2, column=header.index("Valid to") + 1, value=valid_to)
+    if child_net is not None:
+        children = wb[rate_sheet.CHILDREN_SHEET]
+        names = [cell.value for cell in children[1]]
+        children.cell(row=2, column=names.index("Net") + 1, value=child_net)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+async def _line_cost(admin: asyncpg.Connection, ref: str) -> tuple[Decimal, list[str]]:
+    """The net of a quote's only line and the contracts of the rates that priced it."""
+    row = await admin.fetchrow(
+        "SELECT l.net_cost_usd, ARRAY(SELECT DISTINCT x.supplier_contract_id::text FROM booking.supplier_rates x"
+        "   WHERE x.id::text = ANY(l.supplier_rate_ids::text[])) AS contracts"
+        " FROM booking.b2b_quote_lines l JOIN booking.b2b_quotes q ON q.id = l.quote_id WHERE q.proposal_ref = $1",
+        ref,
+    )
+    return row["net_cost_usd"], list(row["contracts"])
+
+
+async def test_a_republished_contract_prices_its_dates_and_the_older_one_the_rest(
+    client: Client,
+    admin: asyncpg.Connection,  # noqa: F811
+    lodge: dict[str, str],  # noqa: F811
+) -> None:
+    """Re-review finding: contract A (net 56) exported, edited to Published 75 (net 60) on fewer dates and a child
+    price 18, imported back and published as contract B of the same DMC. B prices its dates (never the lower net of
+    the two), with its own child price; a date only A covers still prices from A."""
+    c, cis, m2m, _ = client
+    a = await _allotment_contract(c, cis, admin, lodge)
+    response = await c.get(f"/contracts/{a}/rate-sheet", headers=_staff(cis, SALES))
+    assert response.status_code == 200, response.text
+    b_to = DAY1_DATE + timedelta(days=20)
+    edited = _edit_published(response.content, "75", valid_to=b_to, child_net="18")
+    url = f"/suppliers/{lodge['b']}/rate-sheets"
+    done = await _ok(await c.post(url, json=_upload(edited, "export.xlsx"), headers=_staff(cis, MAKER)))
+    b = done["contract"]["id"]
+    publish = {"status": "published", "acknowledge_checks": True}
+    await _ok(await c.patch(f"/contracts/{b}", json=publish, headers=_staff(cis, CHECKER)))
+    stored = await admin.fetchrow(
+        "SELECT net_amount, valid_to FROM booking.supplier_rates WHERE supplier_contract_id = $1::uuid", b
+    )
+    assert (stored["net_amount"], stored["valid_to"]) == (Decimal("60.00"), b_to)
+
+    # 2 adults and a 7-year-old in one double, 2 nights HB: the child is charged the DMC's child price per night.
+    family = {"pax": {"adult": 2, "child": 1}, "child_ages": [7]}
+    only_a = (DAY1_DATE + timedelta(days=40)).isoformat()
+    for ref, day, contract, net in (
+        ("REPRICE-B", DAY1, b, Decimal("156.0000")),  # 2 x (60 + 18): contract B, published last
+        ("REPRICE-A", only_a, a, Decimal("142.0000")),  # 2 x (56 + 15): B does not cover the date, A still does
+    ):
+        await _ok(await _quote(c, m2m, ref, [{**_line(lodge["room"], 1, day=day), **family}]), 201)
+        assert await _line_cost(admin, ref) == (net, [contract])
 
 
 async def test_export_is_refused_past_the_row_cap(

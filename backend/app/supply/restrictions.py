@@ -52,6 +52,7 @@ from app.pricing import policy_values
 from app.pricing.policy_params_hotels import RELEASE_DAYS_DEFAULT
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
+from app.supply.newest_contract import contract_rank
 from app.supply.records import as_uuid
 
 AVAILABLE, ON_REQUEST = "available", "on_request"
@@ -109,8 +110,8 @@ class Verdict:
 
 
 def _contract_rank(row: Restriction) -> tuple[bool, float, str]:
-    published = row.published_at
-    return (published is not None, published.timestamp() if published else 0.0, row.contract_id or "")
+    """The row's contract by :func:`app.supply.newest_contract.contract_rank` (the order the rate choice uses too)."""
+    return contract_rank(row.published_at, row.contract_id)
 
 
 def current_terms(live: list[Restriction]) -> list[Restriction]:

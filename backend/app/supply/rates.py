@@ -9,7 +9,11 @@ currency.
 - **A rate write makes the writer the contract's maker** (``updated_by``), so the maker-checker rule of bk-008 also
   covers the rates: whoever adds or changes a rate cannot publish that contract.
 - **In force** on a day = contract published and both validities cover the day. Per supplier, when several rates
-  match (seasons, pax bands), the newest ``valid_from`` wins, then a rate with a pax band, then the lowest net.
+  match, the supplier's newest published contract among those with a matching rate wins (``published_at``, then the
+  contract id: :mod:`app.supply.newest_contract`, the same rule that picks the allotment terms, so a re-imported
+  contract's raised price applies on its dates while the older contract still prices the dates it alone covers); inside
+  it (seasons, pax bands) the newest ``valid_from`` wins, then a rate with a pax band, then the lowest net. Hotel child
+  prices follow the contract of the room rate chosen.
 - **Board basis** (AA-1153 T9, bk-069): a lookup asks a board (``meal_plan``) or none. None = the pricing policy's
   default board (``hotel_default_board``, seeded BB; :func:`default_board`): an exact rate on that board first, then a
   rate with no board, then any other board (old data keeps pricing). An asked board takes that board or a rate with no
@@ -54,6 +58,7 @@ from app.pricing.engine import BASE_CURRENCY
 from app.pricing.policy_params_hotels import DEFAULT_BOARD
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
+from app.supply.newest_contract import NEWEST_CONTRACT_FIRST
 from app.supply.records import RATE_IN_FORCE_ON, RATE_IN_FORCE_TODAY, as_uuid
 
 MEAL_PLANS = ("RO", "BB", "HB", "FB", "AI")
@@ -102,10 +107,14 @@ RATE_FROM = """
     LEFT JOIN booking.hotels h ON h.id = t.hotel_id
     LEFT JOIN booking.services s ON s.id = x.service_id
 """
+# Inside one contract: the newest rate validity, then a rate with a pax band, then the lowest net.
 RATE_ORDER = "x.valid_from DESC, (x.pax_min IS NOT NULL OR x.pax_max IS NOT NULL) DESC, x.net_amount ASC, x.id"
-# Batched lookups (bk-060): among child / infant rates of several age bands, the band reaching the oldest age first (a
-# quote asks without ages, so the oldest child pays its band's price, never a younger band's); adult rates have no band.
-RATE_ORDER_MANY = f"x.age_max DESC NULLS FIRST, {RATE_ORDER}"
+# Per supplier (after the board rank): the supplier's newest published contract with a matching rate first, the same
+# order the availability side keeps terms by (app.supply.newest_contract, AA-1153: a re-imported contract's new price
+# replaces the older contract's on the dates it covers, never "the lower net of the two"); then (bk-060) among child /
+# infant rates of several age bands, the band reaching the oldest age first (a quote asks without ages, so the oldest
+# child pays its band's price, never a younger band's; adult rates have no band); then RATE_ORDER.
+RATE_ORDER_MANY = f"{NEWEST_CONTRACT_FIRST}, x.age_max DESC NULLS FIRST, {RATE_ORDER}"
 
 
 def target_label(rate: dict[str, Any]) -> str:
@@ -197,11 +206,11 @@ async def staff_default_board(conn: asyncpg.Connection) -> str:
 
 
 # The same choice for every caller (one ask or many): in force on the day, pax band, pax type; per supplier the asked
-# board ($8 = the policy's default board when none is asked), then RATE_ORDER_MANY; across suppliers the asked board,
-# the hotel's preferred DMC, the lowest net in USD at the approved FX rate in force on the day (FX_SQL of
-# app.pricing.repository, per night), then the lowest net (bk-069). A room rate counts only while its hotel has an
-# active link to the contract's supplier. One round trip for many asks (AA-972 review: a B2B quote must not run one
-# query per night or component).
+# board ($8 = the policy's default board when none is asked), then RATE_ORDER_MANY (newest published contract first);
+# across suppliers the asked board, the hotel's preferred DMC, the lowest net in USD at the approved FX rate in force on
+# the day (FX_SQL of app.pricing.repository, per night), then the lowest net (bk-069). A room rate counts only while
+# its hotel has an active link to the contract's supplier. One round trip for many asks (AA-972 review: a B2B quote
+# must not run one query per night or component).
 RATES_MANY_SQL = f"""
 SELECT a.n, r.id, r.unit, r.net_amount, r.currency, r.season, r.contract_id, r.age_max, r.supplier_id, r.meal_plan
 FROM unnest($1::uuid[], $2::uuid[], $3::date[], $4::int[], $5::text[], $6::text[], $7::uuid[]) WITH ORDINALITY
