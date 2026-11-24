@@ -147,7 +147,14 @@ async def test_one_mail_per_person_and_contract_then_nothing_on_the_next_run() -
     }
     assert sorted(m.to for m in ses.sent) == ["lead@example.test", "rates@example.test"]
     assert conn.sql("FROM booking.staff_users")[0] == (["admin", "contracting"], "supply.read")
-    (record,) = _records(conn)
+    # S291: one write after each message, then the closing write that marks the record done.
+    records = _records(conn)
+    assert [(r["sent"], r["done"]) for r in records] == [
+        (["cog:a1"], False),
+        (["cog:a1", "cog:c1"], False),
+        (["cog:a1", "cog:c1"], True),
+    ]
+    record = records[-1]
     assert record["sent"] == ["cog:a1", "cog:c1"] and record["done"] is True and record["refused"] == []
     # The SQL leaves out a done record; a record that is done is never mailed again even if it were read.
     again = await _run(_conn([]), _mail(ses))
@@ -174,17 +181,53 @@ async def test_a_refused_address_is_final_a_throttled_one_is_retried() -> None:
     conn = _conn([_row()])
     result = await _run(conn, _mail(ses))
     assert result["refused"] == 1 and result["failed"] == 1 and result["contracts_done"] == 0
-    (record,) = _records(conn)
+    record = _records(conn)[-1]
     assert record["refused"] == ["cog:a1"] and record["sent"] == [] and record["done"] is False
     with pytest.raises(contract_expiry_mail.MailFailed):
         contract_expiry_mail.raise_if_failed(result)
 
 
 @pytest.mark.asyncio
+async def test_a_run_that_stops_part_way_resends_only_the_people_not_mailed() -> None:
+    """S291: the record is written after every send, so a run that dies after the first message (a crash, a deploy,
+    a sending pause) leaves that person recorded; the next run mails only the others, and a run after that none."""
+
+    class Crash(RuntimeError):
+        pass
+
+    ses = FakeSes()
+
+    async def dies_on_the_second(message: mailer.Message) -> str:
+        if ses.sent:
+            raise Crash("the task stopped")
+        return await ses(message)
+
+    conn = _conn([_row()])
+    with pytest.raises(Crash):
+        await _run(conn, Mailer(dies_on_the_second, "dev", "https://booking.example.test"))
+    assert [m.to for m in ses.sent] == ["lead@example.test"]
+    left = _records(conn)[-1]
+    assert left["sent"] == ["cog:a1"] and left["done"] is False
+
+    # The next run reads that record (the row is still pending): only the person not mailed yet gets one.
+    retry = _conn([_row(mail=left)])
+    out = await _run(retry, _mail(ses))
+    assert out["sent"] == 1 and [m.to for m in ses.sent] == ["lead@example.test", "rates@example.test"]
+    done = _records(retry)[-1]
+    assert done["sent"] == ["cog:a1", "cog:c1"] and done["done"] is True
+    # Done: the pending query leaves the row out, and even a done record read again sends nobody.
+    again = await _run(_conn([_row(mail=done)]), _mail(ses))
+    assert again["sent"] == 0 and len(ses.sent) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_paused_account_stops_the_run() -> None:
-    ses = FakeSes({"lead@example.test": mailer.MailError("SendingPausedException", "paused", permanent=True)})
+    ses = FakeSes({"rates@example.test": mailer.MailError("SendingPausedException", "paused", permanent=True)})
+    conn = _conn([_row()])
     with pytest.raises(PermanentError):
-        await _run(_conn([_row()]), _mail(ses))
+        await _run(conn, _mail(ses))
+    # the message SES took before the pause is recorded (S291): the retry after the pause does not resend it
+    assert [m.to for m in ses.sent] == ["lead@example.test"] and _records(conn)[-1]["sent"] == ["cog:a1"]
 
 
 @pytest.mark.asyncio

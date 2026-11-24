@@ -146,4 +146,25 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
             "Giá trị ban đầu: admin và contracting (Sản phẩm và vận hành).",
         ),
     ),
+    "season_sync_recheck_days": _g(
+        (
+            "How many days the catalog sync waits before it reads the CIS catalog again for a trip plan it could not "
+            "give a season calendar (its tour is not in the catalog, or its first day names no destination). A CIS "
+            "change of the tour's status (retired, restored, paused, replaced) makes it read the plan at the next run.",
+            "The catalog is read less often; a destination added in CIS reaches the plan's season calendar later.",
+            "A destination added in CIS reaches the plan sooner; each run reads the catalog for more plans.",
+            "Lower it while CIS is linking many first-day places to destinations; raise it when the catalog sync runs "
+            "slow.",
+            "Starting value 7 days.",
+        ),
+        (
+            "Đồng bộ danh mục chờ bao nhiêu ngày rồi mới đọc lại danh mục CIS cho một kế hoạch tour chưa gán được lịch "
+            "mùa (tour không có trong danh mục, hoặc ngày đầu không có điểm đến). Khi CIS đổi trạng thái tour (ngừng, "
+            "mở lại, tạm dừng, thay thế) thì kế hoạch được đọc lại ở lần chạy kế tiếp.",
+            "Danh mục được đọc ít hơn; điểm đến mới thêm trong CIS tới lịch mùa của kế hoạch chậm hơn.",
+            "Điểm đến mới thêm trong CIS tới kế hoạch sớm hơn; mỗi lần chạy đọc danh mục cho nhiều kế hoạch hơn.",
+            "Giảm khi CIS đang gắn nhiều nơi của ngày đầu vào điểm đến; tăng khi lần đồng bộ danh mục chạy chậm.",
+            "Giá trị ban đầu 7 ngày.",
+        ),
+    ),
 }

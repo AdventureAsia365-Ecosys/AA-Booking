@@ -784,6 +784,7 @@ async def test_list_calendars_reports_the_last_sync_and_the_plans_waiting() -> N
         "no_destination": 0,
         "timed_out": 1,
         "not_tried": 2,
+        "deferred": 0,  # S291 (bk-075): a run before it has no deferred count
         "skipped": None,
         "degraded": True,
     }

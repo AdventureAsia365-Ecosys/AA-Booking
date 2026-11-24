@@ -16,9 +16,12 @@ contract_expiry`).
   e-mail. Each person gets their own message (no address sees another). A person without an e-mail address is
   skipped. Someone given the role after a contract was mailed does not get that contract's e-mail.
 - **The record** ``data.mail``: ``sent`` / ``refused`` (the staff keys handled, never an address), ``done`` and
-  ``at``. ``refused`` = SES refused that address for good (``MessageRejected`` and the like: a retry cannot help).
-  A throttled or failed send leaves ``done`` false: the others are kept, the job raises at the end and the runner
-  retries, sending only to the people not handled yet. Delivery is at least once, like the agency reminders.
+  ``at``, written after each message (S291), so a run that stops part way (a crash, a deploy, a sending pause) does
+  not mail the people it already mailed again. It is server-side only: the staff notifications API leaves ``mail``
+  out of ``data`` (:mod:`app.notifications.service`). ``refused`` = SES refused that address for good
+  (``MessageRejected`` and the like: a retry cannot help). A throttled or failed send leaves ``done`` false: the others
+  are kept, the job raises at the end and the runner retries, sending only to the people not handled yet. Delivery is
+  at least once (a stop between SES accepting a message and its record being written), like the agency reminders.
 - **Not configured** (no ``SES_FROM_ADDRESS``): skipped with the reason, nothing written, so the contracts still in
   the window are mailed once mail is configured.
 - **Body**: English, then Vietnamese. Business facts only (supplier, contract, end date, the link to the supplier's
@@ -255,15 +258,27 @@ async def _send_one(mail: Mailer, row: Any, person: Recipient, record: Record, c
     return True
 
 
+async def _record(pool: asyncpg.Pool, row: Any, record: Record) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(RECORD_SQL, row["notification_id"], record.dump(datetime.now(UTC)))
+
+
 async def _mail_contract(
     pool: asyncpg.Pool, mail: Mailer, row: Any, people: list[Recipient], counts: dict[str, Any]
 ) -> None:
+    """S291: the record is written after every message SES accepted or refused for good, not once per contract, so
+    a run that stops part way (a sending pause, a crash, a deploy) resends nothing already sent: the next run mails
+    only the people not handled yet."""
     record = Record.load(row["mail"])
     todo = [p for p in people if p.ref not in record.handled()]
-    delivered = [await _send_one(mail, row, p, record, counts) for p in todo]
-    record.done = all(delivered)
-    async with pool.acquire() as conn:
-        await conn.execute(RECORD_SQL, row["notification_id"], record.dump(datetime.now(UTC)))
+    delivered = True
+    for person in todo:
+        if await _send_one(mail, row, person, record, counts):
+            await _record(pool, row, record)
+        else:
+            delivered = False
+    record.done = delivered
+    await _record(pool, row, record)
     counts["contracts_done"] += int(record.done)
 
 

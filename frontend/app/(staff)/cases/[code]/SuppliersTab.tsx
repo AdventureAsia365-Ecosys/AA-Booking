@@ -59,6 +59,7 @@ import { prepareUpload } from "../../_parts/SupplyContent";
 import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { MSG } from "./SuppliersTab.messages";
+import { bookingOrigin } from "@/ui/booking/supplierBookingOrigin";
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
 const fieldCls = "w-full";
@@ -164,6 +165,12 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
     return items;
   };
 
+  // S291: a booking generated from a sold tour says so ("from the tour, day 2"), not "extra item".
+  const originLabel = (b: SupplierBooking) => {
+    const o = bookingOrigin(b);
+    return t(o.key, ...o.args);
+  };
+
   const columns: ColumnDef<SupplierBooking, unknown>[] = [
     {
       id: "item",
@@ -178,7 +185,7 @@ export function SuppliersTab({ c }: { c: TripCaseDetail }) {
             </span>
             <span className="text-xs text-muted">
               {b.code}
-              {b.item_position ? t(" · item {0}", b.item_position) : t(" · extra item")}
+              {originLabel(b)}
             </span>
           </span>
         );

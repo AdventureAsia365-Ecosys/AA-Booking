@@ -25,7 +25,9 @@ export const S = defineMessages(
     syncCut: (cut: number, rest: number) =>
       `A catalog read took longer than the read timeout (${cut}); ${rest} ${rest === 1 ? "tour was" : "tours were"} left for the next run.`,
     syncSkipped: (why: string) => `The step did not run (${why}).`,
-    syncPolicy: "Batch size and read timeout: Pricing › Policy, Operations.",
+    syncDeferred: (n: number) =>
+      `${n} ${n === 1 ? "tour waits" : "tours wait"} for the recheck interval (checked recently, no destination or not in the catalog).`,
+    syncPolicy: "Batch size, read timeout and recheck interval: Pricing › Policy, Operations.",
     colName: "Calendar",
     colOwner: "For",
     colDefault: "Other dates",
@@ -143,7 +145,8 @@ export const S = defineMessages(
     syncCut: (cut: number, rest: number) =>
       `Một lần đọc danh mục vượt thời gian chờ (${cut}); ${rest} tour để lại cho lần chạy sau.`,
     syncSkipped: (why: string) => `Bước này không chạy (${why}).`,
-    syncPolicy: "Kích thước lô và thời gian chờ đọc: Giá › Chính sách, mục Vận hành.",
+    syncDeferred: (n: number) => `${n} tour chờ tới hạn đọc lại (vừa kiểm, chưa có điểm đến hoặc không có trong danh mục).`,
+    syncPolicy: "Kích thước lô, thời gian chờ đọc và hạn đọc lại: Giá › Chính sách, mục Vận hành.",
     colName: "Lịch",
     colOwner: "Dùng cho",
     colDefault: "Các ngày khác",

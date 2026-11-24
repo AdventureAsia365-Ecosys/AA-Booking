@@ -573,7 +573,10 @@ async def quote_in(
     own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
     # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip;
     # AA-1153 B8: per DMC; an allotment counts rooms held by others and by earlier lines (app.supply.availability).
-    verdicts = iter(await supply.many(conn, [a for lc in costs for a in lc.supply], today=on, exclude_hold=own_hold))
+    # S291: one group per line (a line answered on request takes no allotment from the lines after it).
+    groups = [n for n, lc in enumerate(costs) for _ in lc.supply]
+    asks = [a for lc in costs for a in lc.supply]
+    verdicts = iter(await supply.many(conn, asks, today=on, exclude_hold=own_hold, groups=groups))
     supply_by_line = [[next(verdicts) for _ in lc.supply] for lc in costs]
     seats = await departures.availability(
         conn,

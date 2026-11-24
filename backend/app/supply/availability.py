@@ -22,7 +22,10 @@ terms count, so a round trip never doubles an allotment.
 - rooms of B2B ``rt:`` lines held ``available`` (from an allotment or free-sale term) on a live hold (``active`` and
   not expired, or ``confirmed`` and the line not cancelled or declined): the quote line's room mix (the rooms asked,
   else the default mix ``party // 2`` doubles plus one single), per night, under the DMC of its first rate;
-- inside one call, every earlier ask an allotment answered (two lines of one quote share the allotment).
+- inside one call, every earlier ask an allotment answered (two lines of one quote share the allotment). With
+  ``groups`` (one key per ask, a quote or hold line; S291), an earlier line's asks count only when the whole line was
+  available: a line with one night on request is held on request and takes no room, so the next line of the same
+  quote must not see its other nights as taken (it did before, a conservative miscount).
 
 ``exclude_hold``: a hold left out of the count (a new quote of the same proposal version replaces it, as the
 departure seats of ``app.b2b.departures`` do).
@@ -38,7 +41,7 @@ re-checks it under a per-room-type lock (:mod:`app.b2b.room_hold`).
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -48,6 +51,7 @@ from app.errors import Invalid
 from app.supply.restrictions import (
     AVAILABLE,
     ON_REQUEST,
+    R_ALLOTMENT,
     R_FULL,
     R_OVER,
     R_RELEASED,
@@ -182,10 +186,18 @@ async def _usage(
 
 
 async def many(
-    conn: asyncpg.Connection, asks: Sequence[SupplyAsk], *, today: date, exclude_hold: str | None = None
+    conn: asyncpg.Connection,
+    asks: Sequence[SupplyAsk],
+    *,
+    today: date,
+    exclude_hold: str | None = None,
+    groups: Sequence[Hashable] | None = None,
 ) -> list[Verdict]:
     """The engine's verdict for every ask (same order). An allotment answer takes its units, so a later ask of the same
-    component, supplier and date sees fewer left."""
+    component, supplier and date sees fewer left. ``groups`` (one key per ask, the asks of a group consecutive: the
+    nights and room units of one quote or hold line) makes a group's units count for the later groups only when every
+    ask of the group is available (a line on request takes nothing); within the group they count at once. None = each
+    ask its own group."""
     if not asks:
         return []
     rooms = sorted({a.room_type_id for a in asks if a.room_type_id})
@@ -200,17 +212,44 @@ async def many(
         used = await _usage(
             conn, [c for c in rooms if c in allot], [c for c in services if c in allot], span, exclude_hold
         )
-    taken: dict[Key, int] = {}
+    taken = _Taken()
     out: list[Verdict] = []
-    for a in asks:
+    for n, a in enumerate(asks):
+        taken.start(groups[n] if groups is not None else n)
         rows = [r for r in by_component.get(a.component, ()) if a.supplier_id is None or r.supplier_id == a.supplier_id]
         key = (a.component, a.supplier_id, a.on)
-        prior = _used(used, a.component, a.supplier_id, a.on) + taken.get(key, 0)
+        prior = _used(used, a.component, a.supplier_id, a.on) + taken.get(key)
         verdict = evaluate(rows, a.on, pax=a.pax, units=a.units, used=prior, today=today)
-        if verdict.reason == "allotment":
-            taken[key] = taken.get(key, 0) + a.units
+        taken.add(key, a.units if verdict.reason == R_ALLOTMENT else 0, verdict.status == AVAILABLE)
         out.append(verdict)
     return out
+
+
+class _Taken:
+    """Allotment units the earlier asks of one :func:`many` call took: a group's own takes count inside it at once,
+    and for the later groups once the whole group was available (kept when the next group starts)."""
+
+    def __init__(self) -> None:
+        self.kept: dict[Key, int] = {}
+        self.group: dict[Key, int] = {}
+        self.group_ok = True
+        self.current: Hashable = object()
+
+    def start(self, group: Hashable) -> None:
+        if group == self.current:
+            return
+        if self.group_ok:
+            for key, units in self.group.items():
+                self.kept[key] = self.kept.get(key, 0) + units
+        self.group, self.group_ok, self.current = {}, True, group
+
+    def get(self, key: Key) -> int:
+        return self.kept.get(key, 0) + self.group.get(key, 0)
+
+    def add(self, key: Key, units: int, available: bool) -> None:
+        if units:
+            self.group[key] = self.group.get(key, 0) + units
+        self.group_ok = self.group_ok and available
 
 
 async def check(

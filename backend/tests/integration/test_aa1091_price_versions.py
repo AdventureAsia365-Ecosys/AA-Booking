@@ -80,9 +80,15 @@ def _row(valid_from: date, valid_to: date, amount: str, **over: object) -> dict[
 
 @pytest_asyncio.fixture
 async def seasons_clean(admin: asyncpg.Connection) -> AsyncIterator[None]:  # noqa: F811
+    # S291 (bk-075): a plan an earlier module's catalog sync could not give a calendar waits for the recheck
+    # interval; each test here starts with no remembered check, so its own run reads the catalog for every plan.
+    async with admin.transaction():
+        await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("DELETE FROM booking.season_sync_checks")
     yield
     async with admin.transaction():
         await admin.execute("SET LOCAL ROLE bk_owner")
+        await admin.execute("DELETE FROM booking.season_sync_checks")
         await admin.execute(
             "UPDATE booking.trip_plans SET season_calendar_id = NULL, pending_season_calendar_id = NULL,"
             " season_calendar_requested_by = NULL, season_calendar_requested_at = NULL,"

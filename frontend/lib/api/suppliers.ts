@@ -340,10 +340,46 @@ export interface RateDiffRow {
   change_pct?: string | null;
 }
 
+/** S291: the kind and numbers of one allotment / free-sale / on-request term in a rate review's diff. */
+export interface InventoryTermValues {
+  kind: "allotment" | "free_sale" | "on_request" | string;
+  units: number | null;
+  release_days: number | null;
+  max_pax: number | null;
+}
+
+export interface InventoryDiffRow extends InventoryTermValues {
+  label: string | null;
+  component_id: string;
+  date_from: IsoDate;
+  date_to: IsoDate;
+}
+
+export interface InventoryDiffChange {
+  label: string | null;
+  component_id: string;
+  date_from: IsoDate;
+  date_to: IsoDate;
+  old: InventoryTermValues;
+  new: InventoryTermValues;
+  /** The new term sells less (fewer rooms, released sooner, on request, a lower max pax). */
+  narrowed: boolean;
+}
+
+/** S291: the Inventory terms against the contract the draft replaces; `narrowed` = changes that sell less + removed. */
+export interface InventoryDiff {
+  added: InventoryDiffRow[];
+  changed: InventoryDiffChange[];
+  removed: InventoryDiffRow[];
+  narrowed: number;
+}
+
 export interface RateDiff {
   added: RateDiffRow[];
   changed: RateDiffRow[];
   removed: RateDiffRow[];
+  /** S291: absent on a diff stored before the Inventory part existed. */
+  inventory?: InventoryDiff;
   previous_contract?: { id: string; title: string; valid_from: IsoDate; valid_to: IsoDate | null } | null;
 }
 

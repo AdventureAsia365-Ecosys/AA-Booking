@@ -17,6 +17,10 @@ AA-1177 (bk-074): which built-in staff roles the same job e-mails about an expir
 (AA-1155) is mailed as the built-in role it was cloned from (:mod:`app.supply.contract_expiry_mail`), so the choices
 stay the built-in roles while custom roles come and go.
 
+S291 (bk-075): how many days the season calendar step of the catalog sync waits before it reads the catalog again
+for a trip plan it could not give a calendar (no tour, no destination on its first day), next to the two bk-059
+values of that step in :mod:`app.pricing.policy_params`; section "operations", approved by the administrator group.
+
 AA-1149 (bk-065): the default and maximum length of a can-operate sale exception, in the existing section
 "operations", approved by the administrator group; read by :mod:`app.catalog.sell_exceptions`.
 """
@@ -35,6 +39,7 @@ OPERABLE_MAX_DAYS = "operable_exception_max_days"
 ADDON_DAYS_AHEAD = "addon_days_ahead"
 CONTRACT_EXPIRY_ALERT_DAYS = "contract_expiry_alert_days"
 CONTRACT_EXPIRY_MAIL_ROLES = "contract_expiry_mail_roles"
+SEASON_SYNC_RECHECK_DAYS = "season_sync_recheck_days"
 # The built-in Booking staff roles (= app.auth.staff.STAFF_ROLES, by a test; plain data, so not imported from there).
 # Not a business option list: custom roles (booking.staff_role) follow their based_on role when the e-mail is sent.
 STAFF_ROLE_CHOICES = ("admin", "contracting", "content_creator", "finance", "sales")
@@ -133,5 +138,19 @@ SPECS: tuple[dict[str, Any], ...] = (
         "used_by": "app.supply.contract_expiry_mail",
         "section": "operations",
         "choices": STAFF_ROLE_CHOICES,
+    },
+    {
+        "key": SEASON_SYNC_RECHECK_DAYS,
+        "type": "integer",
+        "unit": "days",
+        "question": "S279",
+        "group": "admin",
+        "label": "Season calendar recheck (days)",
+        "help": "Days before the catalog sync reads the CIS catalog again for a trip plan it could not give a season "
+        "calendar (sooner when CIS changes the tour's status).",
+        "used_by": "app.catalog.trip_plan_sync",
+        "section": "operations",
+        "minimum": Decimal("1"),
+        "maximum": Decimal("90"),
     },
 )

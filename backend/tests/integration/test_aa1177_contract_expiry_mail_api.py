@@ -243,6 +243,12 @@ async def test_done_when_hotel_contract_listed_announced_and_mailed_once(
     )
     assert sorted(record["sent"]) == [ADMIN, MAKER] and record["done"] is True and record["refused"] == []
 
+    # S291: the staff notifications API never returns the mail record (staff keys of who was mailed): every staff
+    # member reads the shared queue. The reminder key and the rest of data stay.
+    feed = await _ok(await c.get("/notifications?type=contract.expiring", headers=_as(cis, SALES)))
+    assert len(feed["items"]) == 2
+    assert all("mail" not in i["data"] and i["data"]["reminder_key"].startswith("expiring:") for i in feed["items"])
+
     # A second run sends nothing and announces nothing.
     again = await contract_expiry.handle_watch(pool, job, mail)
     assert again["announced_count"] == 0 and again["mail"]["sent"] == 0 and len(ses.sent) == 4
@@ -339,3 +345,41 @@ async def test_a_custom_role_is_mailed_as_its_base_role_while_it_can_read_suppli
         assert [p.ref for p in sales_only] == ["it-1177-c-desk", SALES]
     finally:
         await _custom_roles(admin, create=False)
+
+
+async def test_a_run_that_stops_part_way_resends_only_what_was_not_sent(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    """S291: the mail record is written per message, so a run that dies after its first message mails only the
+    missing people next time, and a full run after that mails nobody."""
+    today = await admin.fetchval("SELECT (now() AT TIME ZONE 'UTC')::date")
+    await _contract(admin, "Jade Harbour Inn", "hotel", today, 12)
+    await _contract(admin, "Cedar Valley Lodge", "hotel", today, 15)
+    await _staff(admin)
+    job = Job(id="j-1177c", kind=contract_expiry.KIND, payload={"day": today.isoformat()}, attempt=1, max_attempts=3)
+    ses = FakeSes()
+
+    async def dies_on_the_second(message: mailer.Message) -> str:
+        if ses.sent:
+            raise ConnectionError("the task stopped")
+        return await ses(message)
+
+    with pytest.raises(ConnectionError):
+        await contract_expiry.handle_watch(
+            pool, job, Mailer(dies_on_the_second, "test", "https://booking.example.test")
+        )
+    assert len(ses.sent) == 1
+    records = [
+        json.loads(r["mail"]) if r["mail"] else None
+        for r in await admin.fetch(
+            "SELECT data -> 'mail' AS mail FROM booking.notifications WHERE type = 'contract.expiring'"
+        )
+    ]
+    assert sorted(len(r["sent"]) if r else 0 for r in records) == [0, 1]  # the one message sent is recorded
+
+    retry = await contract_expiry.handle_watch(pool, job, Mailer(ses, "test", "https://booking.example.test"))
+    assert retry["announced_count"] == 0 and retry["mail"]["sent"] == 3 and len(ses.sent) == 4
+    pairs = sorted((m.to, m.subject.rsplit(": ", 1)[-1]) for m in ses.sent)
+    assert len(set(pairs)) == 4  # each person got each contract once, never twice
+    last = await contract_expiry.handle_watch(pool, job, Mailer(ses, "test", "https://booking.example.test"))
+    assert last["mail"]["sent"] == 0 and len(ses.sent) == 4

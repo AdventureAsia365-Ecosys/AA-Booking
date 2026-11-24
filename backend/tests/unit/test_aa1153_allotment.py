@@ -61,6 +61,25 @@ async def test_two_rooms_fit_a_third_is_on_request_and_asks_share_the_allotment(
 
 
 @pytest.mark.asyncio
+async def test_a_line_answered_on_request_takes_no_room_from_the_next_line() -> None:
+    """S291: line 1 asks 2 rooms on the 10th (fits) and 3 on the 11th (full): the line is on request and held on
+    request, so it takes nothing; line 2 (1 room on the 10th) still gets one of the 2 rooms. Before, the 10th of line 1
+    counted as taken and line 2 read allotment_full (a conservative miscount inside one pass)."""
+    conn = _conn([_row("a", DMC_B, units=2, release_days=7)])
+    asks = [_ask(2), _ask(3, on=date(2027, 3, 11)), _ask(1)]
+    first_night, second_night, other = await availability.many(conn, asks, today=TODAY, groups=[1, 1, 2])
+    assert (first_night.reason, second_night.reason, other.reason) == ("allotment", "allotment_full", "allotment")
+    # Without groups every ask is its own group (the staff check): the 10th of line 1 is taken as before.
+    *_, ungrouped = await availability.many(conn, asks, today=TODAY)
+    assert ungrouped.reason == "allotment_full"
+    # A whole line available still takes its rooms for the next line; inside one line its own units count at once.
+    a, b = await availability.many(conn, [_ask(2), _ask(1)], today=TODAY, groups=[1, 2])
+    assert (a.reason, b.reason) == ("allotment", "allotment_full")
+    a, b = await availability.many(conn, [_ask(1), _ask(2)], today=TODAY, groups=[1, 1])
+    assert (a.reason, b.reason) == ("allotment", "allotment_full")
+
+
+@pytest.mark.asyncio
 async def test_booked_and_held_rooms_count_and_the_own_hold_is_left_out() -> None:
     conn = _conn([_row("a", DMC_B, units=2, release_days=7)], booked=1, held=1)
     [verdict] = await availability.many(conn, [_ask(1)], today=TODAY, exclude_hold="h-own")
