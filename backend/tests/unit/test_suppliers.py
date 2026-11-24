@@ -122,6 +122,17 @@ def test_supplier_body_validation(stubs: dict[str, Recorder], body: dict[str, An
     assert not stubs["create_supplier"].calls
 
 
+def test_dmc_is_a_category_and_seven_is_the_most(stubs: dict[str, Recorder]) -> None:
+    """AA-1148 (bk-073): a DMC that runs whole programs is a supplier category; the list stays closed."""
+    c = client(CONTRACTING)
+    assert c.post("/booking/suppliers", json={"company_name": "Zephyr Delta", "categories": ["dmc"]}).status_code == 201
+    every = ["hotel", "transport", "guide", "entrance", "activity", "meal", "dmc"]
+    assert c.post("/booking/suppliers", json={"company_name": "Quillmoor", "categories": every}).status_code == 201
+    eight = [*every, "dmc"]
+    assert c.post("/booking/suppliers", json={"company_name": "Ombre", "categories": eight}).status_code == 422
+    assert service.normalize({"categories": ["dmc", "hotel"]})["categories"] == ["hotel", "dmc"]
+
+
 def test_patch_passes_only_sent_fields(stubs: dict[str, Recorder]) -> None:
     r = client(CONTRACTING).patch(f"/booking/suppliers/{SUPPLIER_ID}", json={"website": None, "region": "North"})
     assert r.status_code == 200

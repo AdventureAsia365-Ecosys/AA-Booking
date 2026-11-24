@@ -37,7 +37,7 @@ from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
 from app.suppliers import bank_accounts, profile, profile_options
 
-CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal")
+CATEGORIES = ("hotel", "transport", "guide", "entrance", "activity", "meal", "dmc")  # dmc: bk-073, AA-1148
 STATUSES = ("pending", "active", "inactive")
 SORTS = {"company_name": "lower(s.company_name)", "updated_at": "s.updated_at", "created_at": "s.created_at"}
 TEXT_FIELDS = (
