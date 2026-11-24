@@ -7,6 +7,13 @@ plan before its LIMIT and ran past the statement timeout on every run, while the
 picked from ``booking.trip_plans`` alone, the catalog is read one plan at a time (each read cut at the pricing policy's
 ``season_sync_read_timeout_seconds``, in a savepoint), and every plan picked is counted under one outcome.
 :func:`last_run` gives the Seasons page the last finished run's counts and the plans still without a calendar.
+
+S291 (bk-075, S290 capacity review finding 6): a plan the step cannot give a calendar (``no_tour``, ``no_destination``)
+gets a row in ``booking.season_sync_checks`` with the time of the check, and is not picked again until the pricing
+policy's ``season_sync_recheck_days`` have passed or CIS sent a lifecycle event for its tour after the check
+(``booking.inbox_events``, contract ``catalog.tour``: retired, restored, paused, superseded). Before, every run read
+the catalog for the same plans again (29,200 reads in six days, 650 found a destination). A plan that gets a calendar
+loses its row. ``deferred`` counts the plans without a calendar left out of a run for that reason.
 """
 
 from __future__ import annotations
@@ -17,19 +24,42 @@ from typing import Any
 import asyncpg
 
 NAME_MAX = 120  # technical-constant: the season_calendars name length (a calendar made by the sync)
-# Every plan picked is counted under one outcome (picked = assigned + no_tour + no_destination + timed_out + not_tried).
-COUNTS = ("picked", "assigned", "calendars_created", "no_tour", "no_destination", "timed_out", "not_tried")
+# Every plan picked is counted under one outcome (picked = assigned + no_tour + no_destination + timed_out + not_tried);
+# deferred = plans without a calendar not picked because their last check is recent (bk-075).
+COUNTS = ("picked", "assigned", "calendars_created", "no_tour", "no_destination", "timed_out", "not_tried", "deferred")
+# The CIS lifecycle events Booking keeps (app.catalog.lifecycle): one for a plan's tour after its check = recheck now.
+LIFECYCLE_SOURCE, LIFECYCLE_CONTRACT = "cis", "catalog.tour"
 
 # AA-1128 B1: the batch comes from booking.trip_plans alone; the CIS catalog is read one plan at a time below (the old
 # batch query joined catalog.v_tour for every plan without a calendar before its LIMIT and ran past the statement
 # timeout on every run, so no calendar was ever assigned on Dev).
-UNASSIGNED_SQL = """
+# S291 (bk-075): a plan checked without result waits for the recheck interval ($3 days) or a lifecycle event of its
+# tour received after the check; plans never checked come first.
+DUE = """(c.trip_plan_id IS NULL
+       OR c.checked_at <= now() - make_interval(days => $1::int)
+       OR EXISTS (SELECT 1 FROM booking.inbox_events e
+                  WHERE e.source = $2 AND e.contract = $3 AND e.received_at > c.checked_at
+                    AND e.payload ->> 'source_system' = p.source_system AND e.payload ->> 'source_id' = p.source_id))"""
+UNASSIGNED_SQL = f"""
 SELECT p.id::text AS id, p.source_system, p.source_id
 FROM booking.trip_plans p
-WHERE p.season_calendar_id IS NULL
-ORDER BY md5(p.id::text || $2)
-LIMIT $1
+LEFT JOIN booking.season_sync_checks c ON c.trip_plan_id = p.id
+WHERE p.season_calendar_id IS NULL AND {DUE}
+ORDER BY c.trip_plan_id IS NOT NULL, md5(p.id::text || $5)
+LIMIT $4
+"""  # noqa: S608 — constant fragment
+DEFERRED_SQL = f"""
+SELECT count(*)::int FROM booking.trip_plans p
+JOIN booking.season_sync_checks c ON c.trip_plan_id = p.id
+WHERE p.season_calendar_id IS NULL AND NOT {DUE}
+"""  # noqa: S608 — constant fragment
+RECORD_SQL = """
+INSERT INTO booking.season_sync_checks (trip_plan_id, outcome, tour_id, checked_at)
+VALUES ($1::uuid, $2, $3::uuid, now())
+ON CONFLICT (trip_plan_id) DO UPDATE SET outcome = EXCLUDED.outcome, tour_id = EXCLUDED.tour_id,
+                                         checked_at = EXCLUDED.checked_at
 """
+FORGET_SQL = "DELETE FROM booking.season_sync_checks WHERE trip_plan_id = $1::uuid"
 # One tour key at a time, by equality (a filter the view's plan reaches).
 TOUR_ID_SQL = """
 SELECT t.tour_id FROM catalog.v_tour t WHERE t.source_system = $1 AND t.source_id = $2 LIMIT 1
@@ -60,7 +90,7 @@ READ_CUT: tuple[type[BaseException], ...] = (TimeoutError, asyncpg.QueryCanceled
 
 
 async def assign_default_calendars(
-    conn: asyncpg.Connection, limit: int, salt: str, read_timeout: float
+    conn: asyncpg.Connection, limit: int, salt: str, read_timeout: float, recheck_days: int
 ) -> dict[str, int]:
     """Give up to ``limit`` plans without a calendar the calendar of the destination of their first day (made empty
     when missing). ``salt`` rotates which plans are tried, so the ones that cannot get a calendar never block the
@@ -74,11 +104,17 @@ async def assign_default_calendars(
       ``season_sync_read_timeout_seconds``): the read is rolled back to its savepoint and the batch ends there, since
       a slow catalog would cut every next read too; the plans after it are ``not_tried``.
 
+    ``no_tour`` and ``no_destination`` are recorded per plan (``booking.season_sync_checks``): the plan is picked again
+    after ``recheck_days`` (pricing policy ``season_sync_recheck_days``) or once a CIS lifecycle event of its tour
+    arrived after the check; ``deferred`` counts the plans waiting so (not part of ``picked``).
+
     A caller treats ``timed_out`` or ``not_tried`` above zero as a degraded run (:mod:`app.catalog.trip_plan_sync`).
     Catalog errors other than a cut read (view missing, no grant) propagate: the whole step is skipped."""
     out = dict.fromkeys(COUNTS, 0)
-    plans = await conn.fetch(UNASSIGNED_SQL, limit, salt)
+    due = (recheck_days, LIFECYCLE_SOURCE, LIFECYCLE_CONTRACT)
+    plans = await conn.fetch(UNASSIGNED_SQL, *due, limit, salt)
     out["picked"] = len(plans)
+    out["deferred"] = int(await conn.fetchval(DEFERRED_SQL, *due) or 0)
     for done, plan in enumerate(plans):
         try:
             async with conn.transaction():  # a savepoint: a cut read rolls back alone
@@ -92,11 +128,10 @@ async def assign_default_calendars(
             out["timed_out"] += 1
             out["not_tried"] = len(plans) - done - 1
             break
-        if tour_id is None:
-            out["no_tour"] += 1
-            continue
-        if dest is None:
-            out["no_destination"] += 1
+        if tour_id is None or dest is None:
+            outcome = "no_tour" if tour_id is None else "no_destination"
+            await conn.execute(RECORD_SQL, plan["id"], outcome, None if tour_id is None else str(tour_id))
+            out[outcome] += 1
             continue
         before = await conn.fetchval(
             "SELECT count(*) FROM booking.season_calendars WHERE destination_id = $1::uuid", dest["destination_id"]
@@ -110,6 +145,7 @@ async def assign_default_calendars(
             plan["id"],
             cal,
         )
+        await conn.execute(FORGET_SQL, plan["id"])
         out["assigned"] += 1
     return out
 

@@ -7,6 +7,9 @@ never hides a cut read.
    only that read rolls back (a savepoint), the batch ends there, the rest is counted ``not_tried``, the plans already
    assigned in that run keep their calendar, and the connection stays usable.
 3. The Seasons list returns the last finished run's counts and how many plans still wait for a calendar.
+4. S291 (bk-075): a plan whose first day names no destination is remembered; the next run does not read the catalog
+   for it (``deferred``), it is read again once ``season_sync_recheck_days`` have passed or a CIS lifecycle event of
+   its tour arrived after the check, and it loses its record when it gets a calendar.
 
 Invented tours and places only (the catalog stub of tests/integration/stub_catalog.sql)."""
 
@@ -91,6 +94,7 @@ async def test_a_cut_catalog_read_ends_the_batch_and_keeps_the_connection(
     await admin.execute(
         "UPDATE booking.trip_plans SET season_calendar_id = NULL WHERE source_id = ANY($1::text[])", [TOUR, STAFF_TOUR]
     )
+    await admin.execute("DELETE FROM booking.season_sync_checks")  # bk-075: the run above remembered both plans
     waiting = await admin.fetchval("SELECT count(*) FROM booking.trip_plans WHERE season_calendar_id IS NULL")
     blocker = await asyncpg.connect(migrated_admin_dsn)
     try:
@@ -98,7 +102,7 @@ async def test_a_cut_catalog_read_ends_the_batch_and_keeps_the_connection(
         await tx.start()
         await blocker.execute("LOCK TABLE catalog.v_tour IN ACCESS EXCLUSIVE MODE")
         async with pool.acquire() as conn, conn.transaction():
-            out = await season_sync.assign_default_calendars(conn, int(waiting), "salt-it", 0.3)
+            out = await season_sync.assign_default_calendars(conn, int(waiting), "salt-it", 0.3, 7)
             # the savepoint rolled back the cut read alone: the transaction still answers
             assert await conn.fetchval("SELECT 1") == 1
         await tx.rollback()
@@ -151,3 +155,91 @@ async def test_the_seasons_list_shows_the_last_run(
         assert (out["plans"], out["plans_without_calendar"]) == (total, without)
     finally:
         await admin.execute("DELETE FROM booking.job WHERE idempotency_key = $1", JOB_KEY)
+
+
+async def _check(admin: asyncpg.Connection, source_id: str) -> asyncpg.Record | None:  # noqa: F811
+    return await admin.fetchrow(
+        "SELECT c.outcome, c.tour_id::text AS tour_id, c.checked_at FROM booking.season_sync_checks c"
+        " JOIN booking.trip_plans p ON p.id = c.trip_plan_id WHERE p.source_id = $1",
+        source_id,
+    )
+
+
+async def _tour_reads(pool: asyncpg.Pool, recheck_days: int = 7) -> tuple[dict[str, int], list[str]]:  # noqa: F811
+    """One step run (batch 500) and the source keys it read from catalog.v_tour, in order."""
+    read: list[str] = []
+
+    def log(q: object) -> None:
+        if "FROM catalog.v_tour t" in q.query and q.args:  # type: ignore[attr-defined]
+            read.append(q.args[1])  # type: ignore[attr-defined]
+
+    async with pool.acquire() as conn:
+        conn.add_query_logger(log)
+        try:
+            async with conn.transaction():
+                out = await season_sync.assign_default_calendars(conn, 500, "salt-recheck", 5.0, recheck_days)
+        finally:
+            conn.remove_query_logger(log)
+    return out, read
+
+
+async def test_a_plan_without_a_destination_waits_for_the_interval_or_a_cis_change(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+    seasons_clean: None,  # noqa: F811
+) -> None:
+    await _tours(admin)
+    # The bridge makes both plans and its step reads both: neither tour has a first day with a place yet.
+    first = (await trip_plan_sync.run(pool))["calendars"]
+    assert first["no_destination"] >= 2 and first["deferred"] == 0
+    recorded = await _check(admin, STAFF_TOUR)
+    assert recorded is not None and recorded["outcome"] == "no_destination" and recorded["tour_id"]
+
+    # The next run leaves both out: no catalog read, counted deferred, nothing degraded.
+    again, read = await _tour_reads(pool)
+    assert STAFF_TOUR not in read and TOUR not in read
+    assert again["deferred"] >= 2 and again["timed_out"] == 0
+    assert again["picked"] == sum(again[k] for k in ("assigned", "no_tour", "no_destination", "timed_out", "not_tried"))
+
+    # A CIS lifecycle event of TOUR received after the check: TOUR is read again at once (and now has a destination).
+    await _day_one(admin)
+    await admin.execute(
+        "INSERT INTO booking.inbox_events (source, contract, idempotency_key, payload, status, processed_at)"
+        " VALUES ('cis', 'catalog.tour', $1, $2::jsonb, 'processed', now())",
+        JOB_KEY + ":lifecycle",
+        json.dumps({"source_system": "cis", "source_id": TOUR, "event": "superseded"}),
+    )
+    try:
+        changed, read = await _tour_reads(pool)
+        assert TOUR in read and STAFF_TOUR not in read
+        assert changed["assigned"] >= 1 and await _check(admin, TOUR) is None  # assigned: the record is gone
+
+        # The interval: a check older than season_sync_recheck_days is read again.
+        await admin.execute(
+            "UPDATE booking.season_sync_checks SET checked_at = now() - interval '8 days'"
+            " WHERE trip_plan_id = (SELECT id FROM booking.trip_plans WHERE source_id = $1)",
+            STAFF_TOUR,
+        )
+        later, read = await _tour_reads(pool)
+        assert STAFF_TOUR in read and later["no_destination"] >= 1
+        refreshed = await _check(admin, STAFF_TOUR)
+        assert refreshed is not None and refreshed["checked_at"] > recorded["checked_at"]
+        # ... and with a longer interval in force it would have waited.
+        await admin.execute(
+            "UPDATE booking.season_sync_checks SET checked_at = now() - interval '8 days'"
+            " WHERE trip_plan_id = (SELECT id FROM booking.trip_plans WHERE source_id = $1)",
+            STAFF_TOUR,
+        )
+        _, read = await _tour_reads(pool, recheck_days=30)
+        assert STAFF_TOUR not in read
+    finally:
+        await admin.execute("DELETE FROM catalog.v_tour_day WHERE source_id = $1", TOUR)
+        await admin.execute("DELETE FROM booking.inbox_events WHERE idempotency_key = $1", JOB_KEY + ":lifecycle")
+
+    # bk-075: the interval is an approved pricing policy parameter, version 1 = 7 days.
+    seeded = await admin.fetchval(
+        "SELECT p.value::text FROM booking.pricing_policy p"
+        " JOIN booking.pricing_policy_events a ON a.policy_id = p.id AND a.event = 'approved'"
+        " WHERE p.created_by = 'seed:bk-075' AND p.param_key = 'season_sync_recheck_days'"
+    )
+    assert json.loads(seeded) == 7

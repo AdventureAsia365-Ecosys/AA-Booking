@@ -89,6 +89,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-072",  # AA-1153 part 2: allotment release days default + rate-sheet row cap as pricing policy values; MIG-4
     "bk-073",  # AA-1148: supplier category dmc (1 to 7) and booking.v_supply_suppliers for CIS; MIG-4
     "bk-074",  # AA-1177: contract_expiry_mail_roles, the staff roles mailed before a contract ends; MIG-4
+    "bk-075",  # AA-1128 S291: season_sync_checks per plan + season_sync_recheck_days (catalog sync reads); MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)
 

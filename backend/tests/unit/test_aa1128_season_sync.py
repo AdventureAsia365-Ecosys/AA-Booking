@@ -32,14 +32,15 @@ def _conn(**policy: str) -> ScriptedConn:
 async def test_the_step_reads_its_batch_and_timeout_from_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[tuple[int, str, float]] = []
 
-    async def assign(conn: Any, limit: int, salt: str, read_timeout: float) -> dict[str, int]:
-        seen.append((limit, salt, read_timeout))
+    async def assign(conn: Any, limit: int, salt: str, read_timeout: float, recheck: int) -> dict[str, int]:
+        seen.append((limit, salt, read_timeout, recheck))
         return {"picked": 0, "assigned": 0}
 
     monkeypatch.setattr(sync.season_sync, "assign_default_calendars", assign)
-    out = await sync._calendars(_conn(season_sync_batch_size="7", season_sync_read_timeout_seconds="3"))  # type: ignore[arg-type]
+    policy = _conn(season_sync_batch_size="7", season_sync_read_timeout_seconds="3", season_sync_recheck_days="4")
+    out = await sync._calendars(policy)  # type: ignore[arg-type]
     assert out == {"picked": 0, "assigned": 0}
-    assert [(limit, timeout) for limit, _, timeout in seen] == [(7, 3.0)]
+    assert [(limit, timeout, recheck) for limit, _, timeout, recheck in seen] == [(7, 3.0, 4)]
     assert seen[0][1].startswith("bk_trip_plan_sync:slot:")
 
 
@@ -145,7 +146,11 @@ def test_the_batch_never_reads_the_catalog_and_each_catalog_read_is_one_key() ->
     """CI guard (AA-1128 B1): the batch query reads booking.trip_plans alone (joining the CIS catalog view for every
     plan before the LIMIT ran past the statement timeout on every Dev run), and each catalog read names one key by
     equality (an ANY() list or a join does not reach the view's per-tour parse, lessons "Dữ liệu")."""
-    assert "catalog." not in season_sync.UNASSIGNED_SQL and "JOIN" not in season_sync.UNASSIGNED_SQL.upper()
+    for batch in (season_sync.UNASSIGNED_SQL, season_sync.DEFERRED_SQL):
+        flat = " ".join(batch.split())
+        # S291 (bk-075): the only join is the Booking table of past checks; the recheck reads Booking's inbox.
+        assert "catalog." not in flat and flat.upper().count(" JOIN ") == 1
+        assert "JOIN booking.season_sync_checks c" in flat
     for sql in (season_sync.TOUR_ID_SQL, season_sync.DAY_ONE_SQL):
         flat = " ".join(sql.split()).upper()
         assert "ANY(" not in flat.replace(" ", "") and " JOIN " not in flat
@@ -167,7 +172,8 @@ def _assign_conn(
 
     return ScriptedConn(
         [
-            ("WHERE p.season_calendar_id IS NULL ORDER BY md5", plans),
+            ("ORDER BY c.trip_plan_id IS NOT NULL, md5", plans),
+            ("SELECT count(*)::int FROM booking.trip_plans p", 3),
             ("FROM catalog.v_tour t WHERE t.source_system = $1", tour_of),
             ("FROM catalog.v_tour_place pl", lambda tour: places.get(tour)),
             ("SELECT count(*) FROM booking.season_calendars WHERE destination_id", count),
@@ -190,7 +196,7 @@ async def test_default_calendars_follow_the_destination_of_day_one() -> None:
     }
     made: list[str] = []
     conn = _assign_conn(plans, tours, places, made)
-    out = await season_sync.assign_default_calendars(conn, 10, "salt-1", 4.0)
+    out = await season_sync.assign_default_calendars(conn, 10, "salt-1", 4.0, 7)
     assert out == {
         "picked": 4,
         "assigned": 2,
@@ -199,13 +205,21 @@ async def test_default_calendars_follow_the_destination_of_day_one() -> None:
         "no_destination": 1,
         "timed_out": 0,
         "not_tried": 0,
+        "deferred": 3,
     }
     assert conn.sql("WITH made AS") == [
         (DEST, "Invented Bay", season_sync.SYSTEM),
         (DEST, "Destination", season_sync.SYSTEM),
     ]
     assert conn.sql("SET season_calendar_id = $2::uuid") == [("p-1", CAL), ("p-3", CAL)]
-    assert conn.sql("ORDER BY md5")[0] == (10, "salt-1")
+    assert conn.sql("ORDER BY c.trip_plan_id IS NOT NULL, md5")[0] == (7, "cis", "catalog.tour", 10, "salt-1")
+    assert conn.sql("SELECT count(*)::int FROM booking.trip_plans p")[0] == (7, "cis", "catalog.tour")
+    # S291 (bk-075): a plan without a result is recorded with its outcome; an assigned plan loses its record.
+    assert conn.sql("INSERT INTO booking.season_sync_checks") == [
+        ("p-2", "no_destination", "t-2"),
+        ("p-4", "no_tour", None),
+    ]
+    assert conn.sql("DELETE FROM booking.season_sync_checks") == [("p-1",), ("p-3",)]
     assert conn.sql("FROM catalog.v_tour t")[0] == ("cis", "s-1")
     # every catalog read carries the policy's read timeout; the booking reads and writes do not
     assert {sql.split(" FROM ")[1].split()[0] for sql, _ in conn.timeouts} == {"catalog.v_tour", "catalog.v_tour_place"}
@@ -220,8 +234,10 @@ async def test_a_cut_catalog_read_ends_the_batch_and_counts_the_rest(cut: BaseEx
     tours = {"s-1": "t-1", "s-2": cut, "s-3": "t-3", "s-4": "t-4"}
     places = {"t-1": {"destination_id": DEST, "destination_name": "Invented Bay"}}
     conn = _assign_conn(plans, tours, places, [])
-    out = await season_sync.assign_default_calendars(conn, 10, "salt-2", 2.0)
+    out = await season_sync.assign_default_calendars(conn, 10, "salt-2", 2.0, 7)
     assert (out["picked"], out["assigned"], out["timed_out"], out["not_tried"]) == (4, 1, 1, 2)
     # nothing is read after the cut: a slow catalog would cut every next read too
     assert [args for args in conn.sql("FROM catalog.v_tour t")] == [("cis", "s-1"), ("cis", "s-2")]
     assert conn.sql("SET season_calendar_id = $2::uuid") == [("p-1", CAL)]
+    # a cut read records nothing for the plan it cut nor for the plans after it: they are tried at the next run
+    assert conn.sql("INSERT INTO booking.season_sync_checks") == []

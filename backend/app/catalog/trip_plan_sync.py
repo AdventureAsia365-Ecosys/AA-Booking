@@ -37,10 +37,11 @@ reported, the bridge still runs.
 
 **Season calendars** (AA-1091 bk-055, AA-1128 bk-059): after the bridge, up to ``season_sync_batch_size`` plans
 without a season calendar get the one of their first day's destination (:func:`_calendars`). The result counts every
-plan picked (``calendars``: assigned, no tour, no destination, timed out, not tried). When the step is skipped (catalog
-or policy unreadable) or a catalog read is cut by ``season_sync_read_timeout_seconds``, the run's ``outcome`` is
-``degraded`` with ``degraded: ["calendars"]`` and a warning log line, never a quiet ``ok``; the Seasons page shows the
-last run (``app.pricing.season_sync.last_run``).
+plan picked (``calendars``: assigned, no tour, no destination, timed out, not tried); a plan without a result is not
+read again before ``season_sync_recheck_days`` or a CIS lifecycle event of its tour (bk-075, counted ``deferred``).
+When the step is skipped (catalog or policy unreadable) or a catalog read is cut by
+``season_sync_read_timeout_seconds``, the run's ``outcome`` is ``degraded`` with ``degraded: ["calendars"]`` and a
+warning log line, never a quiet ``ok``; the Seasons page shows the last run (``app.pricing.season_sync.last_run``).
 
 Without ``catalog.v_tour`` readable the run answers ``skipped``. Idempotent: a second run with nothing new writes
 nothing (``ON CONFLICT DO NOTHING``, updates only where something differs).
@@ -77,6 +78,8 @@ AUDIT_KEYS = 50
 # policy (Pricing > Policy, administrator approval), never from a constant.
 BATCH_KEY = "season_sync_batch_size"
 TIMEOUT_KEY = "season_sync_read_timeout_seconds"
+# S291 (bk-075): days before a plan the step could not give a calendar is read from the catalog again.
+RECHECK_KEY = "season_sync_recheck_days"
 
 TOUR_VIEW = liveness.View("catalog", "v_tour", ("source_system", "source_id"))
 REFERENCE_VIEW = liveness.View("catalog", "v_tour_price_reference_v1", ("source_system", "source_id", "price_raw"))
@@ -358,10 +361,15 @@ async def _calendars(pool: asyncpg.Pool) -> dict[str, Any]:
     ``skipped``; the run is then degraded (:func:`calendars_degraded`)."""
     try:
         async with pool.acquire() as conn, conn.transaction():
-            policy = await policy_values.require(conn, await policy_values.today_utc(conn), BATCH_KEY, TIMEOUT_KEY)
+            today = await policy_values.today_utc(conn)
+            policy = await policy_values.require(conn, today, BATCH_KEY, TIMEOUT_KEY, RECHECK_KEY)
             salt = schedule_key(datetime.now(UTC))
             return await season_sync.assign_default_calendars(
-                conn, policy.integer(BATCH_KEY), salt, float(policy.integer(TIMEOUT_KEY))
+                conn,
+                policy.integer(BATCH_KEY),
+                salt,
+                float(policy.integer(TIMEOUT_KEY)),
+                policy.integer(RECHECK_KEY),
             )
     except policy_values.PolicyUnavailable:
         log.warning("bk_trip_plan_sync calendars skipped: policy_unavailable")

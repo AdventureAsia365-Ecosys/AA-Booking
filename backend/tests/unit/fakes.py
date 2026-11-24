@@ -58,6 +58,7 @@ POLICY_SEED: dict[str, str] = {
     # AA-1128 B1 (bk-059)
     "season_sync_batch_size": "50",
     "season_sync_read_timeout_seconds": "5",
+    "season_sync_recheck_days": "7",  # S291 (bk-075)
     "emergency_contact_keep_days": "90",
     "agency_reminder_steps_days": "[1, 7, 14]",
     "rounding_increment_by_currency": '{"AUD": "5", "EUR": "5", "GBP": "5", "SGD": "5", "USD": "5"}',
