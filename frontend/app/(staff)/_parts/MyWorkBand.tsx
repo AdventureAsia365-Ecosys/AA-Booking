@@ -14,6 +14,7 @@ import {
   Banknote,
   Briefcase,
   CalendarClock,
+  CalendarX2,
   FileWarning,
   Handshake,
   Landmark,
@@ -44,6 +45,7 @@ const ICONS: Record<string, React.ReactNode> = {
   supplier_bills_overdue: <FileWarning size={ICON} />,
   supplier_bills_due_soon: <CalendarClock size={ICON} />,
   agency_invoices_overdue: <AlarmClock size={ICON} />,
+  contracts_ending_soon: <CalendarX2 size={ICON} />, // AA-1177
   supplier_bills_to_approve: <Stamp size={ICON} />,
   supplier_bills_to_pay: <Banknote size={ICON} />,
   agency_payments_to_approve: <ReceiptText size={ICON} />,

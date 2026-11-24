@@ -19,7 +19,12 @@ due date among them (``earliest_due``), and the query string of the list page th
     suppliers_to_activate       supplier.activate       approve   /suppliers?status=pending&approvable=me
     billing_changes_to_approve  billing_config.approve  approve   /agency-billing?tab=settings&approvable=me
     supplier_bank_to_approve    supplier_bank.approve   approve   /suppliers?bank=pending&approvable=me
+    contracts_ending_soon       supply.write            work      /suppliers?contracts=ending (the expiring list)
     owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&from=<month start>
+
+AA-1177: ``contracts_ending_soon`` counts the published supplier contracts of every kind that end within the policy
+value ``contract_expiry_alert_days`` (``app.supply.contract_expiry``, the list the Suppliers page shows with that
+filter), for the people who renew them (``supply.write``: admin, contracting); ``days`` is that window.
 
 AA-1158: ``owner_self_approvals`` counts the business-owner self-approvals of the current UTC calendar month (audit
 rows with ``owner_self_approved``). It is shown to every ``audit.read`` holder, not only to the marker holder, so the
@@ -65,7 +70,7 @@ from app.errors import Forbidden, Unavailable
 from app.ops import bill_approvals, bill_filters, supplier_bills, trip_checks
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
-from app.supply import restrictions
+from app.supply import contract_expiry, restrictions
 from app.trip_cases import service as trip_cases
 
 log = logging.getLogger(__name__)
@@ -145,6 +150,10 @@ async def _owner_self_approvals(conn: asyncpg.Connection, _: Staff) -> dict[str,
     return await audit.owner_self_approvals_month(conn)
 
 
+async def _contracts_ending_soon(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
+    return await contract_expiry.queue_count(conn)
+
+
 async def _stop_sales_to_review(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
     return await restrictions.review_queue(conn, reviewable_by=staff.cis_user_id)
 
@@ -173,6 +182,7 @@ TILES: tuple[Tile, ...] = (
     Tile("supplier_bills_overdue", "bill.read", WORK, _bills_overdue, {"bill_status": "open", "bill_due": "overdue"}),
     Tile("supplier_bills_due_soon", "bill.read", WORK, _bills_due_soon, {"bill_status": "open", "bill_due": "soon"}),
     Tile("agency_invoices_overdue", "agency_billing.read", WORK, _agency_invoices_overdue, {"status": "overdue"}),
+    Tile("contracts_ending_soon", "supply.write", WORK, _contracts_ending_soon, {"contracts": "ending"}),
     Tile(
         "supplier_bills_to_approve",
         "bill.approve",

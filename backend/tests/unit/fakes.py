@@ -82,6 +82,7 @@ POLICY_SEED: dict[str, str] = {
     # AA-1151 (bk-068)
     "addon_days_ahead": "365",
     "contract_expiry_alert_days": "60",
+    "contract_expiry_mail_roles": '["admin", "contracting"]',  # AA-1177 (bk-074)
     # AA-1175 (bk-066): v2, the business owner's bands
     "price_pax_bands": "[[1, 1], [2, 2], [3, 3], [4, 4], [5, 7], [8, 10], [11, null]]",
     # AA-1153 (bk-069)

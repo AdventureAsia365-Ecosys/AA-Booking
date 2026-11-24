@@ -103,7 +103,8 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
     "contract_expiry_alert_days": _g(
         (
             "How many days before a published supplier contract ends its staff are told it is expiring (a "
-            "notification once per contract and end date, and the warning on the Add-ons page).",
+            "notification and an e-mail once per contract and end date, the My work tile and the warning on the "
+            "Suppliers, supplier Contracts and Add-ons pages).",
             "The warning comes earlier: more time to agree next year's rates, more contracts listed at once.",
             "The warning comes later: fewer contracts listed, less time to renew before what they price stops selling.",
             "Raise it when suppliers take long to send new rates; lower it when the list is too long to act on.",
@@ -111,11 +112,35 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
         ),
         (
             "Hợp đồng nhà cung cấp đã xuất bản được báo sắp hết hạn trước ngày kết thúc bao nhiêu ngày (một thông báo "
-            "cho mỗi hợp đồng và ngày kết thúc, và cảnh báo trên trang Add-on).",
+            "và một e-mail cho mỗi hợp đồng và ngày kết thúc, ô Việc của tôi và cảnh báo trên các trang Nhà cung "
+            "cấp, tab Hợp đồng của nhà cung cấp và Add-on).",
             "Cảnh báo tới sớm hơn: nhiều thời gian thoả thuận giá năm sau hơn, nhiều hợp đồng hiện cùng lúc hơn.",
             "Cảnh báo tới muộn hơn: ít hợp đồng hơn, ít thời gian gia hạn trước khi những gì nó định giá ngừng bán.",
             "Tăng khi nhà cung cấp gửi giá mới chậm; giảm khi danh sách quá dài để xử lý.",
             "Giá trị ban đầu 60 ngày.",
+        ),
+    ),
+    "contract_expiry_mail_roles": _g(
+        (
+            "Which Booking staff roles get the e-mail about a supplier contract ending within the warning window: "
+            "every active member of these roles with an e-mail address gets one e-mail per contract and end date.",
+            "Adding a role: more people are told, also those who cannot renew a contract themselves.",
+            "Removing a role: fewer people are told; an empty list sends no e-mail (the notification and the lists "
+            "on the pages stay).",
+            "Add finance or sales when they plan with the supplier's prices; keep it to the people who renew "
+            "contracts when the e-mail is noise for the others.",
+            "Starting value: admin and contracting (Product & operations).",
+        ),
+        (
+            "Những vai trò nhân viên Booking nào nhận e-mail về hợp đồng nhà cung cấp sắp hết hạn trong khoảng cảnh "
+            "báo: mọi thành viên đang hoạt động của các vai trò này có địa chỉ e-mail nhận một e-mail cho mỗi hợp "
+            "đồng và ngày kết thúc.",
+            "Thêm một vai trò: nhiều người được báo hơn, kể cả người không tự gia hạn hợp đồng được.",
+            "Bỏ một vai trò: ít người được báo hơn; danh sách trống thì không gửi e-mail (thông báo và danh sách "
+            "trên các trang vẫn còn).",
+            "Thêm finance hoặc sales khi họ lên kế hoạch theo giá nhà cung cấp; chỉ giữ người gia hạn hợp đồng "
+            "khi e-mail làm phiền người khác.",
+            "Giá trị ban đầu: admin và contracting (Sản phẩm và vận hành).",
         ),
     ),
 }

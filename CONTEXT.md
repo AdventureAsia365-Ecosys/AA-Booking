@@ -499,7 +499,11 @@ inquiry" e-mail (`bk_notify_email`) is retired with the B2C intake (AA-1046). **
 e-mail per step it reaches (pricing policy parameter `agency_reminder_steps_days`, seed 1 / 7 / 14 days overdue, plus the credit-stop
 step at the agency's `suspend_after_days`; only the highest step reached), to the bill-to billing e-mail of the
 invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` (bk-044). Outside `prod` every
-reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). Bounce/complaint suppression in Booking
+reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). **Contract expiry e-mail**
+(AA-1177, Jira PR-31, `app/supply/contract_expiry_mail.py`): the job `bk_contract_expiry_watch` e-mails each supplier
+contract it announced to the active staff of the roles in the pricing policy value `contract_expiry_mail_roles` (bk-074,
+seeded admin + contracting), one message per person, on every environment (staff are internal; outside `prod` the
+subject starts with the environment); see "Add-on offers" below. Bounce/complaint suppression in Booking
 tables is not built yet (the SES configuration set's account suppression list applies).
 
 ## The B2C part is retired (AA-1046; AA-1034 R0 and AA-1037 before it; root ADR 0019 d8)
@@ -1548,7 +1552,24 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
 - **Contracts ending (B3)**: the daily job `bk_contract_expiry_watch` (`app/supply/contract_expiry.py`, 01:00 UTC)
   announces once per contract and end date every published supplier contract ending within the policy value
   `contract_expiry_alert_days` (seeded 60): staff notification `contract.expiring`. `GET /booking/contracts/expiring`
-  (`supply.read`) lists them live; the staff page Supply > Add-ons shows them above the offers.
+  (`supply.read`; `?supplier=<UUID or code>` for one supplier) lists them live, every contract kind (the supplier's
+  `categories`), with `announced` and `mailed`. Shown on Suppliers ("Contracts ending soon" panel and the KPI tile,
+  both on the policy window; the old fixed 30-day KPI is no longer shown), on a supplier's Contracts tab (that
+  supplier only) and on Supply > Add-ons; the dashboard My work tile `contracts_ending_soon` (`supply.write`) counts
+  them and opens `/suppliers?contracts=ending`.
+- **Contract expiry e-mail (AA-1177, Jira PR-31, bk-074)**: after announcing, the same job e-mails every announcement
+  whose contract is still published and in the window and whose mail record is not done: one e-mail per contract and
+  end date to each active `staff_users` row of the roles in `contract_expiry_mail_roles` (Pricing > Policy, section
+  operations, pricing group; seeded `["admin", "contracting"]`; empty = no e-mail, the notification and lists stay)
+  with an address, resolved at send time (deduplicated by address). English then Vietnamese body: supplier, kind,
+  contract, reference, end date, days left, link `STAFF_ADMIN_URL/suppliers/<code>?tab=contracts`; no personal data
+  but the recipient's own address. The record is `data.mail` of the announcement row (`sent` / `refused` staff keys,
+  never addresses; `done`; `at`), so the announcement's `reminder_key` makes it once per end date: a second run sends
+  nothing, a retry sends only to people not handled yet. An SES refusal that cannot change is recorded as `refused`;
+  throttling / network failures leave the record open and the job raises at the end (retried); a sending pause fails
+  the run. No `SES_FROM_ADDRESS`: skipped, nothing written (mailed once mail is configured). Nobody holding a mail
+  role: `no_recipients`, nothing written (mailed once someone does). Someone given a role after a contract was mailed
+  does not get that contract's e-mail. Job result `mail` = counts (`sent`, `refused`, `failed`, `contracts_done`).
 
 ## Hotel contracts through DMCs (AA-1153 part 1, bk-069; S285 advisories r2 hotels T8, T9, T10, T11, B7; Jira PR-30)
 
@@ -1854,6 +1875,7 @@ singleton index). Runner rules since AA-751 (port of CIS `shared/jobs/queue.py`)
 | `bk_settlement_draft` | AA-1037 R4: the tour settlement drafts of a month (default: the closed month): per confirmed B2B hold, `deposit` (deposit % of the B2B total) or `full` (booked inside the balance window), then `balance` once the balance date (departure - `balance_days_before_departure`) is before the period end, or one `cancellation_fee` line (the fee less what was billed; a credit when negative) for a cancelled booking; terms from `billing_terms` (agency override, else default); one live line per (hold, role), so nothing is billed twice and an unbilled earlier event lands on the next run. Queued daily by `DraftSchedule` for the previous month and by staff. Not deploy-gate exempt. |
 | `bk_departure_cost_recompute` | AA-1074 (bk-045): queued by a maintenance hook whenever the watermark (per departure with an unfrozen rate-priced shared cost: sold seats and newest hold / hold line change; the newest rate change) moves; key = its hash. One transaction per departure: each active, unfrozen `rate` cost re-reads the band for the sold seats; a pending booking behind it follows (net, pax, day). Audit `departure_cost.repriced`. Payload `{departure_id?}`. Not deploy-gate exempt (seconds). |
 | `bk_departure_watch` | AA-1073 (bk-046): queued once per UTC day by `DepartureDailySchedule` (first pass at or after 01:00 UTC, key `bk_departure_watch:<UTC date>`) and by staff (`POST /booking/b2b-desk/departure-checks/runs`, key per UTC minute; `dry_run` reports only). Scheduled departures with a minimum, not started, at most 500 per run, `FOR UPDATE SKIP LOCKED`: sold >= minimum → `guaranteed` (audit, event); else on or after the decision date and not stamped → `at_risk_at` (event `departure.at_risk`, one staff notification per departure, audit). Not deploy-gate exempt (seconds). |
+| `bk_contract_expiry_watch` | AA-1151 (bk-068) + AA-1177 (bk-074): queued once per UTC day by `ExpiryDailySchedule` (first pass at or after 01:00 UTC, key `bk_contract_expiry_watch:<UTC date>`; payload `day`, `dry_run`). One transaction: a staff notification `contract.expiring` (`reminder_key` `expiring:<valid_to>`) for every published supplier contract ending within `contract_expiry_alert_days` not announced for that end date. Then, outside it, the contract expiry e-mail to the active staff of `contract_expiry_mail_roles` (recorded on the notification, `data.mail`; see "Add-on offers"); result `mail`. A failed send is counted, the others kept, the run raises at the end (retried); a sending pause fails it. Not deploy-gate exempt (seconds). |
 | `bk_allotment_release` | AA-1073 (bk-046): same daily hook and staff run. Stamps `released_at` on the allotments in force whose release date (`start_date - release_days_before`, UTC day) is today or earlier (at most 500, `SKIP LOCKED`); the trigger emits `allotment.released`; one audit row each. Not deploy-gate exempt (seconds). |
 | `bk_supplier_order_send` | AA-1074 (bk-045): one per Send of a purchase order (key per order and press). E-mails the order's snapshot through SES (outside prod to the staff inbox), then marks it `sent` and requests its pending lines; a permanent SES refusal (or no sender / staff inbox) puts the order back to `draft` with `send_error`; throttling retries. At least once (a worker dying after SES accepted re-sends). Not deploy-gate exempt. |
 | `bk_noop_sleep` | AA-993 G4 proof, **Dev only**: registered only when `JOB_TEST_KINDS` is truthy (`Settings.job_test_kinds`; AA-CIS-Infra sets it on the Dev task). Sleeps `payload.seconds` (1..3600) in 5 s steps, writes `progress.slept_seconds` each step and resumes from it after a release; a cancel request (`cancel_requested`, SQL only) ends its own row `cancelled`. Port of CIS `noop_sleep`. Deploy-gate exempt; never deploy-blocking. Touches nothing else; the serial worker runs nothing else while it sleeps. |
@@ -2760,6 +2782,12 @@ SELECT to `booking` and `cis_app` (AA-CIS-Infra `db/owners.yaml` consumer grant,
 workspace links a source tour to the supplier it comes from (`raw_tours.supplier_id`, a soft key, CIS 478). The Booking
 code PR that accepts `dmc` in the supplier forms raises readiness to `bk-073`.
 
+### `bk-074` (AA-1177 contract expiry e-mail roles — needs `bk-050`, `bk-068`)
+
+A **contract** file (config rows in existing tables; MIG-4, the code PR raises readiness to bk-074). Pricing policy
+parameter `contract_expiry_mail_roles` version 1 = `["admin", "contracting"]` (codes, the built-in staff roles), made by
+`seed:bk-074`, submitted and approved by another actor (Jira PR-31: remind the admins before a supplier contract ends).
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
@@ -2915,7 +2943,8 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   AA-1159: the dashboard opens with a **My work** band (`GET /booking/my-work/summary`, `app/my_work.py`): one tile per
   work queue the caller's capabilities allow, never per person (my open cases `trip_case.read`, overdue trip checks
   `ops.read`, open on-request lines `b2b_desk.read`, supplier bills overdue / due soon `bill.read`, agency invoices
-  overdue `agency_billing.read`; "To approve or pay": supplier bills to approve `bill.approve`, to pay `payout.write`,
+  overdue `agency_billing.read`, supplier contracts ending soon `supply.write` (AA-1177, the policy window
+  `contract_expiry_alert_days` as `days`); "To approve or pay": supplier bills to approve `bill.approve`, to pay `payout.write`,
   agency payments to approve `agency_payment.approve`, stop-sales to review `stop_sale.approve`). The approval tiles
   count only what the caller may act on (maker-checker: never a bill they entered or last changed, a payment they
   recorded, a stop-sale they entered or asked to end), through the same `approvable=me` filter of `GET /supplier-bills`

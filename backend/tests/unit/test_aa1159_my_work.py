@@ -26,7 +26,7 @@ from app.ops import bill_filters, supplier_bills, trip_checks
 from app.settings import Settings
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
-from app.supply import restrictions
+from app.supply import contract_expiry, restrictions
 from app.trip_cases import service as trip_cases
 from tests.unit.fakes import ScriptedConn
 
@@ -79,6 +79,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "supplier_bills_overdue",
                 "supplier_bills_due_soon",
                 "agency_invoices_overdue",
+                "contracts_ending_soon",  # AA-1177
                 "supplier_bills_to_approve",
                 "supplier_bills_to_pay",
                 "agency_payments_to_approve",
@@ -97,6 +98,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "b2b_on_request",
                 "supplier_bills_overdue",
                 "supplier_bills_due_soon",
+                "contracts_ending_soon",  # AA-1177
                 "supplier_bills_to_approve",
                 "stop_sales_to_review",
                 "suppliers_to_activate",
@@ -213,6 +215,12 @@ def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
     monkeypatch.setattr(suppliers, "queue", _queue({"count": 7, "oldest_at": stamp}, calls, "suppliers"))
     monkeypatch.setattr(entity_changes, "queue", _queue({"count": 8, "oldest_at": stamp}, calls, "entity_changes"))
     monkeypatch.setattr(bank_accounts, "queue", _queue({"count": 9, "oldest_at": stamp}, calls, "bank_accounts"))
+    # AA-1177: the supplier contracts ending within the policy window (days = the window).
+    monkeypatch.setattr(
+        contract_expiry,
+        "queue_count",
+        _queue({"count": 2, "earliest_due": date(2026, 12, 20), "days": 60}, calls, "contracts_ending"),
+    )
     monkeypatch.setattr(
         audit,
         "owner_self_approvals_month",
@@ -249,6 +257,17 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
     assert tiles["suppliers_to_activate"]["count"] == 7 and tiles["billing_changes_to_approve"]["count"] == 8
     assert tiles["supplier_bank_to_approve"]["count"] == 9
     assert tiles["supplier_bank_to_approve"]["filter"] == {"bank": "pending", "approvable": "me"}
+    assert tiles["contracts_ending_soon"] | {"capability": None} == {
+        "key": "contracts_ending_soon",
+        "capability": None,
+        "group": "work",
+        "filter": {"contracts": "ending"},
+        "available": True,
+        "count": 2,
+        "oldest_at": None,
+        "earliest_due": "2026-12-20",
+        "days": 60,
+    }
     assert tiles["owner_self_approvals"]["filter"] == {"owner_self_approved": "true", "from": "2026-11-01"}
     assert tiles["stop_sales_to_review"] | {"oldest_at": None} == {
         "key": "stop_sales_to_review",

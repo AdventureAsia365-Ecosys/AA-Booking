@@ -4,7 +4,8 @@
 // rules. Content staff and contracting write drafts (or import a file of activities); a second person publishes a draft
 // (never one of its writers: the API answers 403 maker_checker). The table flags what still stops an add-on from
 // selling (no place, no price in force, no published customer text in CIS). Above it, the supplier contracts that end
-// within the warning window of Pricing > Policy (contract_expiry_alert_days), so nobody misses a renewal.
+// within the warning window of Pricing > Policy (contract_expiry_alert_days), so nobody misses a renewal (the shared
+// panel of the Suppliers pages, AA-1177).
 
 import { useState } from "react";
 import Link from "next/link";
@@ -29,6 +30,7 @@ import {
   useUrlFilters,
 } from "@/ui";
 import { useT } from "@/ui/core/useI18n";
+import { ExpiringContracts } from "@/app/(staff)/suppliers/_parts/ExpiringContracts";
 import { ActivityImportDrawer } from "./ActivityImportDrawer";
 import { MSG } from "./AddonsView.messages";
 
@@ -73,35 +75,6 @@ export function AddonsView() {
       )}
       {importing && <ActivityImportDrawer onClose={() => setImporting(false)} />}
     </PageFrame>
-  );
-}
-
-function ExpiringContracts() {
-  const t = useT(MSG);
-  const canSupply = useCan("supply.read");
-  const list = useQuery({ queryKey: ["contracts-expiring"], queryFn: addonsApi.expiring, enabled: canSupply });
-  if (!canSupply || !list.data || list.data.items.length === 0) return null;
-  return (
-    <Section
-      title={t("Contracts ending soon")}
-      description={t("Published supplier contracts that end within {0} days. Enter the next contract before then.", list.data.window_days)}
-    >
-      <ul className="flex flex-col gap-1.5 text-[13px]" data-testid="contracts-expiring">
-        {list.data.items.map((k) => (
-          <li key={k.id} className="flex min-w-0 flex-wrap items-center gap-2">
-            {/* One tone: the only threshold is the policy window (contract_expiry_alert_days); no second cut-over in code. */}
-            <Pill tone="warning">{t("{0} days left", k.days_left)}</Pill>
-            <Link href={`/suppliers/${k.supplier_code}`} className="font-semibold">
-              {k.supplier_name}
-            </Link>
-            <span className="min-w-0 truncate text-body">{k.title}</span>
-            <span className="text-muted">
-              {t("ends")} <DateText value={k.valid_to} />
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Section>
   );
 }
 

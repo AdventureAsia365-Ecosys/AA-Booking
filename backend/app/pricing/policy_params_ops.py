@@ -12,6 +12,9 @@ AA-1151 (bk-068): how many days ahead the place add-on read model ``booking.v_pl
 the value in force itself) and how many days before its end a published supplier contract is announced as expiring
 (:mod:`app.supply.contract_expiry`); section "operations", approved by the pricing group (product / contracting).
 
+AA-1177 (bk-074): which built-in staff roles the same job e-mails about an expiring contract (Jira PR-31), section
+"operations", approved by the pricing group like the window; an empty list switches the e-mail off.
+
 AA-1149 (bk-065): the default and maximum length of a can-operate sale exception, in the existing section
 "operations", approved by the administrator group; read by :mod:`app.catalog.sell_exceptions`.
 """
@@ -29,6 +32,9 @@ OPERABLE_DEFAULT_DAYS = "operable_exception_default_days"
 OPERABLE_MAX_DAYS = "operable_exception_max_days"
 ADDON_DAYS_AHEAD = "addon_days_ahead"
 CONTRACT_EXPIRY_ALERT_DAYS = "contract_expiry_alert_days"
+CONTRACT_EXPIRY_MAIL_ROLES = "contract_expiry_mail_roles"
+# The built-in Booking staff roles (= app.auth.staff.STAFF_ROLES, by a test; plain data, so not imported from there).
+STAFF_ROLE_CHOICES = ("admin", "contracting", "content_creator", "finance", "sales")
 
 SPECS: tuple[dict[str, Any], ...] = (
     {
@@ -111,5 +117,17 @@ SPECS: tuple[dict[str, Any], ...] = (
         "section": "operations",
         "minimum": Decimal("7"),
         "maximum": Decimal("365"),
+    },
+    {
+        "key": CONTRACT_EXPIRY_MAIL_ROLES,
+        "type": "codes",
+        "unit": None,
+        "question": "PR-31",
+        "group": "pricing",
+        "label": "Contract expiring e-mail: staff roles",
+        "help": "The active Booking staff of these roles get one e-mail per expiring contract; empty = no e-mail.",
+        "used_by": "app.supply.contract_expiry_mail",
+        "section": "operations",
+        "choices": STAFF_ROLE_CHOICES,
     },
 )

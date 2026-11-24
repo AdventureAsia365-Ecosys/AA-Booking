@@ -20,6 +20,7 @@ import { ContractDrawer } from "./ContractDrawer";
 import { RateSheetDrawer } from "./RateSheetDrawer";
 import { ContractPublishReview } from "./RateReview";
 import { RatesTab } from "./RatesTab";
+import { ExpiringContracts } from "./ExpiringContracts";
 import { SupplierBookingsTab } from "./SupplierBookingsTab";
 import { SupplierBankTab } from "./SupplierBankTab";
 import { LegalTermsFacts } from "./SupplierLegalTerms";
@@ -129,7 +130,13 @@ function TabPane({ tab, s, canWrite }: { tab: string; s: SupplierDetail; canWrit
     case "profile":
       return <Profile s={s} />;
     case "contracts":
-      return <Contracts s={s} canWrite={canWrite} />;
+      // AA-1177: this supplier's contracts ending within the Pricing > Policy window, above the contracts table.
+      return (
+        <div className="flex min-w-0 flex-col gap-4">
+          <ExpiringContracts supplier={s.id} />
+          <Contracts s={s} canWrite={canWrite} />
+        </div>
+      );
     case "rates":
       return <RatesTab s={s} canWrite={canWrite} />;
     case "bookings":

@@ -76,6 +76,16 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     empty: "Nothing overdue",
   },
   {
+    // AA-1177: published supplier contracts of every kind ending within Pricing > Policy contract_expiry_alert_days.
+    key: "contracts_ending_soon",
+    capability: "supply.write",
+    group: "work",
+    path: "/suppliers",
+    label: "Contracts ending soon",
+    aria: "Contracts ending soon: open the supplier contracts that end within the warning window",
+    empty: "No contract ends soon",
+  },
+  {
     key: "supplier_bills_to_approve",
     capability: "bill.approve",
     group: "approve",
