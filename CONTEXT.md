@@ -1520,6 +1520,15 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
   runs and has an adult rate in force under a published contract of its active supplier, without a stop-sale in
   effect; `inventory_kind` free_sale / allotment / on_request. No net, price or supplier. Staff preview:
   `GET /booking/add-ons/place-days`.
+- **Agencies (AA-1152, contract `booking.b2b.v1` 1.11)**: `GET /booking/b2b/v1/add-ons` (scope `read`;
+  `?destination_id=`, `?date=`, `?pax=` default 2, `?currency=`; `app/b2b/addon_list.py`, router
+  `app/routers/b2b_addons.py`) lists the same view per offer (the asked day, else its first day) with its places
+  (CIS name and country, fail soft) and, priced by the quote engine for `pax` adults on that day, the calling agency's
+  `b2b_price_per_person` (its tier or contract discount off; a group or vehicle unit shared over the party) and AA's
+  `rrp_per_person` (the sell price before the discount plus the B2B rule's RRP markup, up to the policy's rounding
+  increment; VND like a quote line). An offer that cannot be priced today is listed with both null. At most 200
+  offers (`truncated`). The CRM's "AA add-on" drawer and the agency's own "from" prices (B2 option C) read it; the
+  chosen add-on is quoted with `POST /quotes` like any `sv:` line. Never a net, a margin or a supplier.
 - **Quotes (T7, B4)**: an `sv:` line whose service has a published offer is 422 `invalid` below `min_pax`, on a day it
   does not run, or past the cut-off (`app/supply/addon_rules.py`; local start times compared as UTC: the catalog has
   no place time zone yet). The B4 child order becomes supplier child rate > offer `child_pct` > contract child % >

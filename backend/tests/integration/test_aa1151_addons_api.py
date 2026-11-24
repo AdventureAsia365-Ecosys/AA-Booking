@@ -268,6 +268,15 @@ async def test_done_when_import_five_publish_view_child_and_expiry(
         refused = await c.post("/b2b/v1/quotes", json=bad, headers=auth)
         assert refused.status_code == 422 and reason in refused.json()["message"], refused.text
 
+    # AA-1152 (booking.b2b.v1 1.11): the agency reads the same add-ons with its B2B price per traveller.
+    listed = await _ok(await c.get(f"/b2b/v1/add-ons?destination_id={HANOI}&pax=2", headers=auth))
+    assert {i["title"] for i in listed["items"]} == set(TITLES[:4]) and listed["truncated"] is False
+    walk = next(i for i in listed["items"] if i["component_id"] == sv)
+    assert walk["first_date"] == expected[0] and walk["min_pax"] == 2  # the first running day
+    assert walk["places"][0]["destination_id"] == HANOI and walk["b2b_price_per_person"]["currency"] == "USD"
+    assert D(walk["b2b_price_per_person"]["amount"]) > D("40")  # above the 40 USD net, never the net itself
+    on_day = await _ok(await c.get(f"/b2b/v1/add-ons?date={(run_day + timedelta(days=1)).isoformat()}", headers=auth))
+    assert on_day["items"] == []  # nothing runs the day after
     # The contract ends on today + 40: inside the 60-day warning (policy contract_expiry_alert_days).
     expiring = await _ok(await c.get("/contracts/expiring", headers=sales))
     assert expiring["window_days"] == 60

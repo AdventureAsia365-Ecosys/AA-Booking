@@ -259,6 +259,271 @@
         "title": "AgeBandsBody",
         "type": "object"
       },
+      "AgencyAddon": {
+        "additionalProperties": false,
+        "properties": {
+          "b2b_price_per_person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "component_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Component Id",
+            "type": "string"
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "cutoff_hours": {
+            "minimum": 0.0,
+            "title": "Cutoff Hours",
+            "type": "integer"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
+          },
+          "featured": {
+            "title": "Featured",
+            "type": "boolean"
+          },
+          "first_date": {
+            "format": "date",
+            "title": "First Date",
+            "type": "string"
+          },
+          "inventory_kind": {
+            "enum": [
+              "free_sale",
+              "allotment",
+              "on_request"
+            ],
+            "title": "Inventory Kind",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "transfer",
+              "guide",
+              "activity",
+              "entrance",
+              "meal"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_group_size": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Group Size"
+          },
+          "min_pax": {
+            "minimum": 1.0,
+            "title": "Min Pax",
+            "type": "integer"
+          },
+          "offer_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Offer Id",
+            "type": "string"
+          },
+          "operating_weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Operating Weekdays",
+            "type": "array"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/AgencyAddonPlace"
+            },
+            "title": "Places",
+            "type": "array"
+          },
+          "rrp_per_person": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "start_times": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Start Times",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "person",
+              "group",
+              "vehicle",
+              "day"
+            ],
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component_id",
+          "offer_id",
+          "kind",
+          "title",
+          "unit",
+          "min_pax",
+          "cutoff_hours",
+          "operating_weekdays",
+          "start_times",
+          "inventory_kind",
+          "featured",
+          "first_date",
+          "places",
+          "b2b_price_per_person",
+          "rrp_per_person"
+        ],
+        "title": "AgencyAddon",
+        "type": "object"
+      },
+      "AgencyAddonPage": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgencyAddon"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          },
+          "priced_for_pax": {
+            "minimum": 1.0,
+            "title": "Priced For Pax",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "currency",
+          "priced_for_pax",
+          "date",
+          "truncated",
+          "items"
+        ],
+        "title": "AgencyAddonPage",
+        "type": "object"
+      },
+      "AgencyAddonPlace": {
+        "additionalProperties": false,
+        "properties": {
+          "country_code": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code"
+          },
+          "destination_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Destination Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "enum": [
+              "operates",
+              "pickup"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination_id",
+          "role"
+        ],
+        "title": "AgencyAddonPlace",
+        "type": "object"
+      },
       "AgencyDraftRunIn": {
         "additionalProperties": false,
         "properties": {
@@ -17503,6 +17768,120 @@
           }
         ],
         "summary": "Update Partner",
+        "tags": [
+          "b2b"
+        ]
+      }
+    },
+    "/booking/b2b/v1/add-ons": {
+      "get": {
+        "description": "1.11 (AA-1152): the published add-ons (of one place, of one day, or all), each with its places and the calling\nagency's price per traveller for ``pax`` adults (``app.b2b.addon_list``).",
+        "operationId": "list_addons_booking_b2b_v1_add_ons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "destination_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-fA-F-]{36}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pax",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 60,
+              "minimum": 1,
+              "title": "Pax",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "default": "USD",
+              "pattern": "^[A-Z]{3}$",
+              "title": "Currency",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The calling agency's CIS tenant id (uuid)",
+            "in": "header",
+            "name": "X-AA-Tenant-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The calling agency's CIS tenant id (uuid)",
+              "title": "X-Aa-Tenant-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgencyAddonPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "m2m": []
+          }
+        ],
+        "summary": "List Addons",
         "tags": [
           "b2b"
         ]

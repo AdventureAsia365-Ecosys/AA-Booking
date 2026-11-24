@@ -65,6 +65,7 @@ from app.routers import (
     agency_billing,
     agency_pricing,
     b2b,
+    b2b_addons,
     b2b_desk,
     b2b_partners,
     catalog,
@@ -264,6 +265,7 @@ def create_app(
     app.include_router(retention.router)
     app.include_router(ops.router)
     app.include_router(b2b.router)
+    app.include_router(b2b_addons.router)  # AA-1152: GET /booking/b2b/v1/add-ons (contract 1.11)
     app.include_router(b2b_partners.router)
     app.include_router(b2b_desk.router)
     app.include_router(supplier_bookings.router)
