@@ -167,6 +167,7 @@ ALLOWLIST: dict[str, str] = {
     "supplier_profile_option.label_vi": "the Vietnamese name of a supplier profile choice (bk-067), no person",
     "rate_sheet_imports.file_name": "the name of a supplier rate-sheet file (bk-069), supply data, no person",
     "supplier_contract_seasons.name": "a season name of a supplier contract (bk-069, e.g. Low), no person",
+    "v_place_addons.title": "AA's name of an add-on (bk-070 contract view of services.title), no customer data",
 }
 
 COMMENTS_SQL = """

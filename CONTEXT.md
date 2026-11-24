@@ -2682,6 +2682,14 @@ A **contract** file (MIG-4, the code PR raises readiness to bk-069): `hotel_supp
 a hotel with an active link to the contract's supplier); six pricing policy parameters (section hotels). The new tables'
 foreign keys cascade (role booking deletes no hotel, supplier or contract: only an owner clean-up follows them).
 
+### `bk-070` (AA-1152 add-on title — needs `bk-068`)
+
+A **contract** file (it replaces a view a consumer reads; MIG-4). `booking.v_place_addons` keeps the bk-068 body and
+appends one column, `title` (AA's name of the service, `booking.services.title`; no supplier identity), for
+`supply.place_addons.v1` 1.1; grants restated. Columns are append-only, so `CREATE OR REPLACE VIEW` in bk-068 cannot
+replay over it: the test re-runs of bk-068 drop the view first when a later column is there
+(`run_068_dropping_later_view`, `LATER_068_VIEW_COLUMNS` in the integration conftest; DB Migrate never re-runs a file).
+
 ## Out of scope today
 
 A payment provider (money is marked by hand, AA-682 D6), tax lines / the legal VAT e-invoice on the B2C invoices
