@@ -483,6 +483,10 @@ staff admin calls them) are reported as warnings. Each release gets the document
 - **Slow statements** (AA-996): every pool connection carries a query logger; a statement at or over 1 s
   (`app.db.SLOW_QUERY_MS`, the pool `command_timeout` is 5 s) logs `slow_query duration_ms=… budget_ms=… catalog=…
   error=… sql=…` (compacted SQL text, never the arguments). A read cut by the timeout logs `error=TimeoutError`.
+- **Stable savepoint names** (S291, AA-838, C4.3 review): every pool (`app.db.Database`, the Dev E2E fixtures) uses
+  `app.pg_connection.StableSavepointConnection`, which names a nested `conn.transaction()` savepoint by its depth
+  (`bk_sp_1`, `bk_sp_2`) instead of asyncpg's process-wide counter, so `pg_stat_statements` keeps a handful of
+  SAVEPOINT texts on the shared RDS. Same class as AA-Partner (`crm_sp_<n>`) and CIS (`cis_sp_<n>`).
 - **Request id:** a well-formed `X-Request-ID` (`[A-Za-z0-9._:-]{1,128}`) is kept, anything else is replaced by a new
   `uuid4().hex`; it is echoed as `X-Request-ID` on every response (the unhandled 500 too) and set as the Sentry tag
   `request_id`. API Gateway passes its `context.requestId` in that header once Infra maps it on the proxy integrations.

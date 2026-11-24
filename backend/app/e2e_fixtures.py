@@ -69,6 +69,7 @@ from app.auth.staff import STAFF_COLUMNS, Staff
 from app.b2b import departures, desk_bookings, quotes
 from app.b2b.components import LineAsk
 from app.ops import supplier_bookings
+from app.pg_connection import StableSavepointConnection
 
 log = logging.getLogger(__name__)
 
@@ -381,6 +382,7 @@ async def _main(args: argparse.Namespace) -> int:
         max_size=2,
         timeout=10,
         server_settings={"application_name": "booking-e2e-fixtures"},
+        connection_class=StableSavepointConnection,  # S291: depth-named savepoints like the API pool (app.db)
     )
     today = datetime.now(UTC).date()
     try:

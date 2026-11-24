@@ -15,6 +15,7 @@ from typing import Any
 
 import asyncpg
 
+from app.pg_connection import StableSavepointConnection
 from app.settings import Settings
 
 log = logging.getLogger(__name__)
@@ -159,6 +160,9 @@ class Database:
                     timeout=CONNECT_TIMEOUT_S,
                     command_timeout=PROBE_TIMEOUT_S,
                     init=self._init_connection,
+                    # S291 (C4.3, AA-838): savepoints named by depth, not by asyncpg's counter, so pg_stat_statements
+                    # (it keys utility statements by text) keeps a handful of SAVEPOINT texts.
+                    connection_class=StableSavepointConnection,
                     # AA-824: named pool on the shared RDS (pg_stat_activity, data standards C2.2).
                     server_settings={"application_name": "booking-api"},
                 )
