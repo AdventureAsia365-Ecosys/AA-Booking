@@ -1,4 +1,4 @@
-"""Body checks of the Dev-only E2E writers (root ADR 0006a A10e-1..A10e-5), beside :mod:`app.auth.e2e_staff`.
+"""Body checks of the Dev-only E2E writers (root ADR 0006a A10e-1..A10e-6), beside :mod:`app.auth.e2e_staff`.
 
 A leaf module: pure functions of the parsed JSON body, no database, no import of the auth core.
 :mod:`app.auth.e2e_staff` maps each allow-listed write to one of them (``BODY_CHECKS``) and runs it before any DB access
@@ -124,3 +124,31 @@ def desk_entry_body_ok(body: Any) -> bool:
     if not isinstance(lines, list) or not lines or not all(_desk_line_ok(line) for line in lines):
         return False
     return len(desk_room_ids(body)) == len(lines)
+
+
+# A10e-6 (AA-1175 S290): the checker's rejection of the E2E owner's band change carries a marked reason only.
+def policy_reject_body_ok(body: Any) -> bool:
+    return _fields_ok(body, frozenset({"reason"}), frozenset({"reason"}), "reason")
+
+
+# A10e-6 (AA-1158 S290): the maker's supplier bill. The supplier's bill number carries the mark; a trip case, never a
+# departure; no notes text; lines are exactly a supplier booking and an amount (the bk-045 trigger holds each line to
+# the bill's supplier and case). The supplier and the case are then checked synthetic (app.auth.e2e_staff_finance).
+_BILL_REQUIRED = frozenset(
+    {"supplier_id", "trip_case", "bill_number", "currency", "amount", "issue_date", "due_date", "lines"}
+)
+_BILL_LINE_FIELDS = frozenset({"supplier_booking_id", "amount"})
+
+
+def bill_body_ok(body: Any) -> bool:
+    if not _fields_ok(body, _BILL_REQUIRED, _BILL_REQUIRED | {"notes"}, "bill_number"):
+        return False
+    lines = body["lines"]
+    return (
+        body.get("notes") is None
+        and isinstance(body["trip_case"], str)
+        and bool(body["trip_case"].strip())
+        and isinstance(lines, list)
+        and len(lines) > 0
+        and all(isinstance(line, dict) and set(line) == _BILL_LINE_FIELDS for line in lines)
+    )

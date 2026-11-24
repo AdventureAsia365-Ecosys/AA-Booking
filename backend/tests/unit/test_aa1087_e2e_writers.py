@@ -125,6 +125,9 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     # tests/unit/test_aa1153_e2e_hotel_quote.py.
                     e2e_staff.HOTEL_SUPPLIER_LINK,
                     e2e_staff.DESK_ENTRY,
+                    # A10e-6 (S290): a bill of its synthetic supplier on a synthetic agency's case;
+                    # tests/unit/test_aa1175_e2e_policy_bills.py.
+                    e2e_staff.BILL_CREATE,
                 }
             ),
         ),
@@ -137,6 +140,10 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     e2e_staff.PRICE_VERSION_WITHDRAW,
                     e2e_staff.CONTRACT_STATUS,
                     e2e_staff.SUPPLIER_ACTIVATE,  # AA-1158: the synthetic supplier starts pending
+                    # A10e-6 (S290): the E2E owner's band changes and the maker's synthetic bills only.
+                    e2e_staff.POLICY_APPROVE,
+                    e2e_staff.POLICY_REJECT,
+                    e2e_staff.BILL_APPROVE,
                 }
             ),
         ),
@@ -176,6 +183,10 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         e2e_staff.SERVICE_DEACTIVATE,
         e2e_staff.HOTEL_SUPPLIER_LINK,
         e2e_staff.DESK_ENTRY,
+        e2e_staff.POLICY_APPROVE,
+        e2e_staff.POLICY_REJECT,
+        e2e_staff.BILL_CREATE,
+        e2e_staff.BILL_APPROVE,
     }
     for writer in e2e_staff.E2E_WRITERS.values():
         assert set(writer.grants) <= writer.writes
@@ -192,7 +203,8 @@ def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
             param, sql = e2e_staff.SYNTHETIC_SQL[route]
             assert "{" + param + "}" in route and "is_synthetic" in sql and "$1" in sql
     # Every allowed write is checked exactly one way: by its path record, by the plans or the supplier its body names,
-    # in the route, (a new synthetic supplier) by its body check alone, or (A10e-5) by its path and body together.
+    # in the route, (a new synthetic supplier) by its body check alone, or (A10e-5 / A10e-6) by its path and body
+    # together.
     ways = [
         set(e2e_staff.SYNTHETIC_SQL),
         set(e2e_staff.BODY_SYNTHETIC),
@@ -200,12 +212,14 @@ def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
         set(e2e_staff.CHECKED_IN_ROUTE),
         set(e2e_staff.NEW_RECORD),
         set(e2e_staff.RECORD_CHECKED),
+        set(e2e_staff.FINANCE_CHECKED),
     ]
     assert set().union(*ways) == {route for _, route in allowed}
     assert sum(len(w) for w in ways) == len(set().union(*ways))  # disjoint
     # A write checked by its body alone has a body check.
     assert {(m, r) for m, r in allowed if r in e2e_staff.NEW_RECORD} <= set(e2e_staff.BODY_CHECKS)
     assert {(m, r) for m, r in allowed if r in e2e_staff.RECORD_CHECKED} <= set(e2e_staff.BODY_CHECKS)
+    assert {(m, r) for m, r in allowed if r in e2e_staff.FINANCE_CHECKED} <= set(e2e_staff.BODY_CHECKS)
 
 
 @pytest.mark.parametrize("email", [STAFF, STAFF.upper(), f"  {MAKER} ", CHECKER])
