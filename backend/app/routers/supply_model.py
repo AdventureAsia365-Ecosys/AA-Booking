@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.staff import Staff, get_pool, require
 from app.pricing import policy_values
+from app.supply import availability as supply_availability
 from app.supply import contract_terms, restrictions
 
 router = APIRouter(prefix="/booking", tags=["supply"])
@@ -67,7 +68,9 @@ class NewTerm(BaseModel):
     date_from: date
     date_to: date
     units: Count | None = None
-    release_days: Annotated[int, Field(ge=0, le=365)] | None = None
+    release_days: Annotated[
+        int | None, Field(ge=0, le=365, description="allotment only; empty = the pricing policy default")
+    ] = None
     max_pax: Count | None = None
     note: str | None = Field(default=None, max_length=restrictions.MAX_NOTE)
 
@@ -225,10 +228,20 @@ async def availability(
     date_to: date,
     pax: Annotated[int, Query(ge=1, le=999)] = 2,
     units: Annotated[int, Query(ge=1, le=999, description="rooms or seats the booking needs")] = 1,
+    supplier_id: Annotated[
+        str | None, Query(min_length=36, max_length=36, description="one supplier's terms and use only (a DMC)")
+    ] = None,
 ) -> dict[str, Any]:
     """The availability engine per date (stop_sale > allotment / free_sale > on_request), with its reason."""
     async with pool.acquire() as conn:
         today = await policy_values.today_utc(conn)
-        return await restrictions.check(
-            conn, component_id=component_id, date_from=date_from, date_to=date_to, pax=pax, units=units, today=today
+        return await supply_availability.check(
+            conn,
+            component_id=component_id,
+            date_from=date_from,
+            date_to=date_to,
+            pax=pax,
+            units=units,
+            today=today,
+            supplier_id=supplier_id,
         )

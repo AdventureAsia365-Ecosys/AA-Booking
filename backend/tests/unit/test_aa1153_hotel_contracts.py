@@ -283,10 +283,11 @@ def test_a_season_row_becomes_one_rate_per_range_and_children_are_read() -> None
 # ── Policy parameters ────────────────────────────────────────────────────────
 
 
-def test_the_seven_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
+def test_the_hotel_parameters_are_registered_with_their_guides_and_seed() -> None:
     keys = {s["key"] for s in policy_params_hotels.SPECS}
     assert keys == {*policy_params_hotels.MATCH_KEYS, policy_params_hotels.FACTS_RECONFIRM_DAYS,
-                    policy_params_hotels.JUMP_WARN_PCT, policy_params_hotels.DEFAULT_BOARD}  # fmt: skip
+                    policy_params_hotels.JUMP_WARN_PCT, policy_params_hotels.DEFAULT_BOARD,
+                    policy_params_hotels.RELEASE_DAYS_DEFAULT, policy_params_hotels.SHEET_MAX_ROWS}  # fmt: skip
     board = policy_params.PARAMS[policy_params_hotels.DEFAULT_BOARD]
     assert (board.section, board.group, board.type, board.used_by) == ("hotels", "pricing", "code", "app.supply.rates")
     assert board.choices == policy_params_hotels.BOARDS == rates.MEAL_PLANS

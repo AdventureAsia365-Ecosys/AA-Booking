@@ -24,22 +24,21 @@ stop-sale ends only when a second person approves the end request (maker-checker
 exhausted or released allotment, a party over the free-sale limit, or no row at all). A stop-sale changes
 availability, never the price.
 
-**Allotment use** (:data:`USED_ROOMS_SQL`, :data:`USED_SEATS_SQL`): the supplier bookings of the component that are
-requested or confirmed: one room per booking and night of a room type, the booking's pax per day of a service.
-Holds do not count (the quote reserves nothing; the supplier booking does). Counting the rooms of a booking and the
-contract it was bought under comes with the hotel slice.
+**Reads** (:mod:`app.supply.availability`, AA-1153 part 2): the rows in effect per component and supplier (DMC), the
+allotment use (supplier bookings and B2B room lines held from an allotment) and the staff check
+(``GET /booking/supply/availability``). The B2B quote (:mod:`app.b2b.quotes`) asks the engine for every night and
+component of every line (a ``tp:`` line for each of its plan's components on their dates): a stop-sale puts the line
+on request; an ``rt:`` room line is available when every night has an allotment with rooms left (not released) or a
+free-sale term, else on request (B8). A ``tp:`` or ``sv:`` line without a departure stays on request.
 
-The B2B quote (:mod:`app.b2b.quotes`) asks the engine for every night and component of every line (a ``tp:`` line
-for each of its plan's components on their dates) and a stop-sale puts the line on request. Until the hold can
-confirm a line with no departure at once (the supplier booking slice), a B2B line without a departure stays on
-request even when the engine says available; the staff check (``GET /booking/supply/availability``) shows the
-engine's full answer.
+**Release days default** (AA-1153 part 2, bk-072): an allotment term written without ``release_days`` takes the
+pricing policy value ``allotment_release_days_default`` in force today (stored on the row, so the term keeps it).
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
@@ -49,6 +48,8 @@ import asyncpg
 from app import audit
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
+from app.pricing import policy_values
+from app.pricing.policy_params_hotels import RELEASE_DAYS_DEFAULT
 from app.suppliers import service as suppliers
 from app.suppliers.service import clean_text
 from app.supply.records import as_uuid
@@ -61,7 +62,6 @@ CONTRACT_STATUS = "contract"
 STOP_IN_EFFECT = ("pending", "approved")
 MAX_NOTE = 300  # technical-constant: the bk-060 CHECK length of a note or reason
 MAX_SPAN_DAYS = 731  # technical-constant: the bk-060 CHECK span of one row (two years)
-MAX_CHECK_DAYS = 62  # technical-constant: page size of one staff availability check (two months)
 
 # Reasons of a verdict (the staff check shows them; the quote stores ``stop_sale`` in the line's price note).
 R_STOP, R_ALLOTMENT, R_FREE = "stop_sale", "allotment", "free_sale"
@@ -82,6 +82,7 @@ class Restriction:
     release_days: int | None = None
     max_pax: int | None = None
     ended: bool = False
+    supplier_id: str | None = None  # AA-1153 part 2: the supplier (DMC) of the row's contract
 
     def covers(self, day: date) -> bool:
         return self.date_from <= day <= self.date_to
@@ -146,92 +147,11 @@ class SupplyAsk:
     on: date
     pax: int
     units: int = 1
+    supplier_id: str | None = None  # AA-1153 part 2: the DMC whose rate priced it (None: every supplier's rows)
 
     @property
     def component(self) -> str:
         return self.room_type_id or self.service_id or ""
-
-
-# Stop-sales in effect (whatever the contract's state now) and the terms of published contracts, over a date range.
-RESTRICTIONS_SQL = """
-SELECT r.id::text AS id, r.hotel_room_type_id::text AS room_type_id, r.service_id::text AS service_id,
-       r.inventory_kind AS kind, r.date_from, r.date_to, r.units, r.release_days, r.max_pax, r.status,
-       r.ended_at IS NOT NULL AS ended
-FROM booking.supply_restrictions r
-JOIN booking.supplier_contracts k ON k.id = r.supplier_contract_id
-WHERE (r.hotel_room_type_id = ANY($1::uuid[]) OR r.service_id = ANY($2::uuid[]))
-  AND r.date_from <= $4::date AND r.date_to >= $3::date
-  AND ((r.inventory_kind = 'stop_sale' AND r.status IN ('pending', 'approved') AND r.ended_at IS NULL)
-       OR (r.inventory_kind <> 'stop_sale' AND k.status = 'published'))
-"""
-# Rooms booked per room type and night (one room per supplier booking, requested or confirmed).
-USED_ROOMS_SQL = """
-SELECT b.hotel_room_type_id::text AS id, d.night::date AS day, count(*)::int AS used
-FROM booking.supplier_bookings b
-CROSS JOIN LATERAL generate_series(
-    b.service_date::timestamp, (b.service_date + greatest(coalesce(b.nights, 1), 1) - 1)::timestamp, interval '1 day'
-) AS d(night)
-WHERE b.hotel_room_type_id = ANY($1::uuid[]) AND b.status IN ('requested', 'confirmed')
-  AND b.service_date <= $3::date AND b.service_date + greatest(coalesce(b.nights, 1), 1) - 1 >= $2::date
-GROUP BY 1, 2
-"""
-# Seats booked per service and day (the booking's pax, requested or confirmed).
-USED_SEATS_SQL = """
-SELECT b.service_id::text AS id, b.service_date AS day, sum(greatest(coalesce(b.pax, 1), 1))::int AS used
-FROM booking.supplier_bookings b
-WHERE b.service_id = ANY($1::uuid[]) AND b.status IN ('requested', 'confirmed')
-  AND b.service_date BETWEEN $2::date AND $3::date
-GROUP BY 1, 2
-"""
-
-
-def _row(r: Any) -> Restriction:
-    return Restriction(
-        id=r["id"],
-        kind=r["kind"],
-        date_from=r["date_from"],
-        date_to=r["date_to"],
-        status=r["status"],
-        units=r["units"],
-        release_days=r["release_days"],
-        max_pax=r["max_pax"],
-        ended=bool(r["ended"]),
-    )
-
-
-async def availability_many(conn: asyncpg.Connection, asks: Sequence[SupplyAsk], *, today: date) -> list[Verdict]:
-    """The engine's verdict for every ask (same order), with one restrictions query and, only when an allotment
-    applies, one usage query per component kind."""
-    if not asks:
-        return []
-    rooms = sorted({a.room_type_id for a in asks if a.room_type_id})
-    services = sorted({a.service_id for a in asks if a.service_id})
-    start, stop = min(a.on for a in asks), max(a.on for a in asks)
-    by_component: dict[str, list[Restriction]] = {}
-    for r in await conn.fetch(RESTRICTIONS_SQL, rooms, services, start, stop):
-        by_component.setdefault(r["room_type_id"] or r["service_id"], []).append(_row(r))
-    used: dict[tuple[str, date], int] = {}
-    allot = {c for c, rows in by_component.items() if any(r.kind == ALLOTMENT for r in rows)}
-    if allot:
-        usage = (
-            (USED_ROOMS_SQL, [c for c in rooms if c in allot]),
-            (USED_SEATS_SQL, [c for c in services if c in allot]),
-        )
-        for sql, ids in usage:
-            if ids:
-                for r in await conn.fetch(sql, ids, start, stop):
-                    used[(r["id"], r["day"])] = int(r["used"])
-    return [
-        evaluate(
-            by_component.get(a.component, ()),
-            a.on,
-            pax=a.pax,
-            units=a.units,
-            used=used.get((a.component, a.on), 0),
-            today=today,
-        )
-        for a in asks
-    ]
 
 
 ROW_COLUMNS = """
@@ -398,23 +318,6 @@ def parse_component(value: str) -> tuple[str | None, str | None]:
     return (ident, None) if prefix == "rt" else (None, ident)
 
 
-async def check(
-    conn: asyncpg.Connection, *, component_id: str, date_from: date, date_to: date, pax: int, units: int, today: date
-) -> dict[str, Any]:
-    """The engine's verdict per date for one component (staff ``GET /booking/supply/availability``)."""
-    if date_to < date_from or (date_to - date_from).days >= MAX_CHECK_DAYS:
-        raise Invalid("invalid_range", f"check 1 to {MAX_CHECK_DAYS} dates, date_to on or after date_from")
-    room, service = parse_component(component_id)
-    days = [date_from + timedelta(days=i) for i in range((date_to - date_from).days + 1)]
-    verdicts = await availability_many(conn, [SupplyAsk(room, service, d, pax, units) for d in days], today=today)
-    return {
-        "component_id": component_id,
-        "pax": pax,
-        "units": units,
-        "days": [{"date": d.isoformat(), **v.out()} for d, v in zip(days, verdicts, strict=True)],
-    }
-
-
 # ── Writes ───────────────────────────────────────────────────────────────────
 
 
@@ -537,14 +440,24 @@ async def _draft(conn: asyncpg.Connection, contract_id: str) -> dict[str, Any]:
     return contract
 
 
+async def default_release_days(conn: asyncpg.Connection) -> int:
+    """AA-1153 part 2 (bk-072): ``allotment_release_days_default`` in force today, for an allotment term that names no
+    release days (503 ``policy_unavailable`` without it; never a literal)."""
+    policy = await policy_values.require_staff(conn, await policy_values.today_utc(conn), RELEASE_DAYS_DEFAULT)
+    return policy.integer(RELEASE_DAYS_DEFAULT)
+
+
 async def create_term(conn: asyncpg.Connection, staff: Staff, contract_id: str, data: dict[str, Any]) -> dict[str, Any]:
-    """An allotment, free-sale or on-request row under a draft contract (``supply.write``)."""
+    """An allotment, free-sale or on-request row under a draft contract (``supply.write``). An allotment without
+    release days takes the policy default (:func:`default_release_days`)."""
     kind = data.get("inventory_kind")
     if kind not in TERM_KINDS:
         raise Invalid("unknown_inventory_kind", f"a contract term is one of {', '.join(TERM_KINDS)}")
     contract = await _draft(conn, contract_id)
     component = await _component(conn, str(data.get("component_id") or ""), contract)
     span = _dates(data, contract)
+    if kind == ALLOTMENT and data.get("release_days") is None:
+        data = {**data, "release_days": await default_release_days(conn)}
     numbers = _numbers(kind, data)
     rid = await _insert(conn, staff, contract, component, kind, span, numbers, clean_text(data.get("note")), "contract")
     await _touch_contract(conn, staff, contract["id"])
