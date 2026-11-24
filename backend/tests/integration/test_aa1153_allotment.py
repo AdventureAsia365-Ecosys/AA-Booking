@@ -89,7 +89,7 @@ async def _availability(c: Any, m2m: Any, ref: str, lines: list[dict[str, Any]])
 async def _note(admin: asyncpg.Connection, ref: str) -> dict[str, Any]:
     raw = await admin.fetchval(
         "SELECT l.price_note::text FROM booking.b2b_quote_lines l JOIN booking.b2b_quotes q ON q.id = l.quote_id"
-        " WHERE q.proposal_ref = $1 ORDER BY q.created_at DESC LIMIT 1",
+        " WHERE q.proposal_ref = $1",  # one quote per proposal ref in these tests
         ref,
     )
     return json.loads(raw or "{}")
@@ -260,4 +260,3 @@ async def test_export_is_refused_past_the_row_cap(
     finally:
         await admin.execute("DELETE FROM booking.pricing_policy_events WHERE policy_id = $1::uuid", policy)
         await admin.execute("DELETE FROM booking.pricing_policy WHERE id = $1::uuid", policy)
-
