@@ -10,7 +10,10 @@ contract_expiry`).
 - **Who gets it**: resolved at send time, never stored as a list: the active Booking staff (``booking.staff_users``)
   whose role is one of the pricing policy value ``contract_expiry_mail_roles`` (Pricing > Policy, seeded
   ``["admin", "contracting"]`` by bk-074; an empty list switches the e-mail off, the in-app notification and the
-  lists stay). Each person gets their own message (no address sees another). A person without an e-mail address is
+  lists stay). The list names built-in roles; a custom role (AA-1155, ``booking.staff_role``, cloned from a built-in
+  one) counts as its ``based_on`` role while it is not archived and still holds ``supply.read`` (the e-mail's link
+  opens the supplier's Contracts tab), so moving someone to a custom role cloned from contracting keeps their
+  e-mail. Each person gets their own message (no address sees another). A person without an e-mail address is
   skipped. Someone given the role after a contract was mailed does not get that contract's e-mail.
 - **The record** ``data.mail``: ``sent`` / ``refused`` (the staff keys handled, never an address), ``done`` and
   ``at``. ``refused`` = SES refused that address for good (``MessageRejected`` and the like: a retry cannot help).
@@ -69,11 +72,18 @@ WHERE n.recipient_type = 'staff' AND n.type = $3 AND n.entity_type = 'supplier_c
   AND coalesce(n.data -> 'mail' ->> 'done', 'false') <> 'true'
 ORDER BY k.valid_to, sp.company_name, k.id
 """
+# A custom role (AA-1155, booking.staff_role) counts as the built-in role it was cloned from (based_on) while it is not
+# archived and still holds READ_CAPABILITY, the capability the e-mail's link needs (the supplier's Contracts tab).
+READ_CAPABILITY = "supply.read"
 RECIPIENTS_SQL = """
-SELECT cis_user_id, btrim(email) AS email
-FROM booking.staff_users
-WHERE active AND role = ANY($1::text[]) AND email IS NOT NULL AND position('@' IN email) > 1
-ORDER BY cis_user_id
+SELECT s.cis_user_id, btrim(s.email) AS email
+FROM booking.staff_users s
+WHERE s.active AND s.email IS NOT NULL AND position('@' IN s.email) > 1
+  AND (s.role = ANY($1::text[])
+       OR EXISTS (SELECT 1 FROM booking.staff_role r
+                  JOIN booking.staff_role_capability c ON c.role_code = r.code AND c.capability = $2
+                  WHERE r.code = s.role AND NOT r.archived AND r.based_on = ANY($1::text[])))
+ORDER BY s.cis_user_id
 """
 RECORD_SQL = "UPDATE booking.notifications SET data = jsonb_set(data, '{mail}', $2::jsonb, true) WHERE id = $1::uuid"
 
@@ -211,10 +221,11 @@ def render(row: Any, *, to: str, environment: str, admin_url: str) -> mailer.Mes
 
 
 async def recipients(conn: asyncpg.Connection, roles: list[str]) -> list[Recipient]:
-    """The active staff of ``roles`` with an address, one per address (first key wins)."""
+    """The active staff of ``roles`` (built-in, or a custom role cloned from one; see the module docstring) with an
+    address, one per address (first key wins)."""
     seen: set[str] = set()
     out: list[Recipient] = []
-    for r in await conn.fetch(RECIPIENTS_SQL, list(roles)):
+    for r in await conn.fetch(RECIPIENTS_SQL, list(roles), READ_CAPABILITY):
         key = r["email"].lower()
         if key not in seen:
             seen.add(key)

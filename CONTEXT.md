@@ -502,7 +502,8 @@ invoice, recorded once per (invoice, step) in `booking.agency_invoice_reminder` 
 reminder goes to `STAFF_NOTIFY_EMAIL` instead (the agency address named in the body). **Contract expiry e-mail**
 (AA-1177, Jira PR-31, `app/supply/contract_expiry_mail.py`): the job `bk_contract_expiry_watch` e-mails each supplier
 contract it announced to the active staff of the roles in the pricing policy value `contract_expiry_mail_roles` (bk-074,
-seeded admin + contracting), one message per person, on every environment (staff are internal; outside `prod` the
+seeded admin + contracting; a custom role counts as its `based_on` built-in role while not archived and holding
+`supply.read`), one message per person, on every environment (staff are internal; outside `prod` the
 subject starts with the environment); see "Add-on offers" below. Bounce/complaint suppression in Booking
 tables is not built yet (the SES configuration set's account suppression list applies).
 
@@ -1561,7 +1562,9 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
   whose contract is still published and in the window and whose mail record is not done: one e-mail per contract and
   end date to each active `staff_users` row of the roles in `contract_expiry_mail_roles` (Pricing > Policy, section
   operations, pricing group; seeded `["admin", "contracting"]`; empty = no e-mail, the notification and lists stay)
-  with an address, resolved at send time (deduplicated by address). English then Vietnamese body: supplier, kind,
+  with an address, resolved at send time (deduplicated by address). The list holds built-in roles; a holder of a
+  custom role (`booking.staff_role`, AA-1155) is mailed when that role is not archived, its `based_on` is in the list
+  and it holds `supply.read` (the link's page). English then Vietnamese body: supplier, kind,
   contract, reference, end date, days left, link `STAFF_ADMIN_URL/suppliers/<code>?tab=contracts`; no personal data
   but the recipient's own address. The record is `data.mail` of the announcement row (`sent` / `refused` staff keys,
   never addresses; `done`; `at`), so the announcement's `reminder_key` makes it once per end date: a second run sends

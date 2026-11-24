@@ -123,7 +123,9 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
     "contract_expiry_mail_roles": _g(
         (
             "Which Booking staff roles get the e-mail about a supplier contract ending within the warning window: "
-            "every active member of these roles with an e-mail address gets one e-mail per contract and end date.",
+            "every active member of these roles with an e-mail address gets one e-mail per contract and end date. A "
+            "custom role counts as the built-in role it was cloned from while it is not archived and can still read "
+            "suppliers.",
             "Adding a role: more people are told, also those who cannot renew a contract themselves.",
             "Removing a role: fewer people are told; an empty list sends no e-mail (the notification and the lists "
             "on the pages stay).",
@@ -134,7 +136,8 @@ OPS_GUIDES: dict[str, dict[str, dict[str, str]]] = {
         (
             "Những vai trò nhân viên Booking nào nhận e-mail về hợp đồng nhà cung cấp sắp hết hạn trong khoảng cảnh "
             "báo: mọi thành viên đang hoạt động của các vai trò này có địa chỉ e-mail nhận một e-mail cho mỗi hợp "
-            "đồng và ngày kết thúc.",
+            "đồng và ngày kết thúc. Một vai trò tuỳ chỉnh được tính như vai trò dựng sẵn mà nó được sao chép từ đó, "
+            "khi chưa lưu trữ và còn quyền xem nhà cung cấp.",
             "Thêm một vai trò: nhiều người được báo hơn, kể cả người không tự gia hạn hợp đồng được.",
             "Bỏ một vai trò: ít người được báo hơn; danh sách trống thì không gửi e-mail (thông báo và danh sách "
             "trên các trang vẫn còn).",

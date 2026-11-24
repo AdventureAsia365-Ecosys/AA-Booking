@@ -13,7 +13,9 @@ the value in force itself) and how many days before its end a published supplier
 (:mod:`app.supply.contract_expiry`); section "operations", approved by the pricing group (product / contracting).
 
 AA-1177 (bk-074): which built-in staff roles the same job e-mails about an expiring contract (Jira PR-31), section
-"operations", approved by the pricing group like the window; an empty list switches the e-mail off.
+"operations", approved by the pricing group like the window; an empty list switches the e-mail off. A custom role
+(AA-1155) is mailed as the built-in role it was cloned from (:mod:`app.supply.contract_expiry_mail`), so the choices
+stay the built-in roles while custom roles come and go.
 
 AA-1149 (bk-065): the default and maximum length of a can-operate sale exception, in the existing section
 "operations", approved by the administrator group; read by :mod:`app.catalog.sell_exceptions`.
@@ -34,6 +36,7 @@ ADDON_DAYS_AHEAD = "addon_days_ahead"
 CONTRACT_EXPIRY_ALERT_DAYS = "contract_expiry_alert_days"
 CONTRACT_EXPIRY_MAIL_ROLES = "contract_expiry_mail_roles"
 # The built-in Booking staff roles (= app.auth.staff.STAFF_ROLES, by a test; plain data, so not imported from there).
+# Not a business option list: custom roles (booking.staff_role) follow their based_on role when the e-mail is sent.
 STAFF_ROLE_CHOICES = ("admin", "contracting", "content_creator", "finance", "sales")
 
 SPECS: tuple[dict[str, Any], ...] = (
@@ -125,7 +128,8 @@ SPECS: tuple[dict[str, Any], ...] = (
         "question": "PR-31",
         "group": "pricing",
         "label": "Contract expiring e-mail: staff roles",
-        "help": "The active Booking staff of these roles get one e-mail per expiring contract; empty = no e-mail.",
+        "help": "The active Booking staff of these roles, and of custom roles cloned from them, get one e-mail per "
+        "expiring contract; empty = no e-mail.",
         "used_by": "app.supply.contract_expiry_mail",
         "section": "operations",
         "choices": STAFF_ROLE_CHOICES,

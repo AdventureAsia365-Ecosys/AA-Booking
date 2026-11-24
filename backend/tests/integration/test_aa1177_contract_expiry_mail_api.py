@@ -23,7 +23,7 @@ from app.db import Database
 from app.jobs.queue import Job
 from app.main import create_app
 from app.settings import Settings
-from app.supply import contract_expiry
+from app.supply import contract_expiry, contract_expiry_mail
 from app.supply.contract_expiry_mail import Mailer
 from tests.integration.conftest import MIGRATIONS
 from tests.integration.supply import purge_supply
@@ -283,3 +283,59 @@ async def test_roles_off_or_without_staff_mail_nobody_and_mail_later(
         and later["mail"]["sent"] == 1
         and [m.to for m in ses.sent] == ["rates@example.test"]
     )
+
+
+# Custom roles (AA-1155): (code, based_on, archived, capabilities, holder, address).
+CUSTOM = [
+    ("custom_it1177_lead", "contracting", False, ("supply.read", "supply.write"), "it-1177-c-lead", "a@example.test"),
+    ("custom_it1177_old", "contracting", True, ("supply.read",), "it-1177-c-old", "old@example.test"),
+    ("custom_it1177_blind", "admin", False, ("trip_case.read",), "it-1177-c-blind", "blind@example.test"),
+    ("custom_it1177_desk", "sales", False, ("supply.read",), "it-1177-c-desk", "counter@example.test"),
+]
+
+
+async def _custom_roles(admin: asyncpg.Connection, create: bool) -> None:
+    await admin.execute("DELETE FROM booking.staff_users WHERE cis_user_id LIKE 'it-1177-c-%'")
+    await admin.execute("SET ROLE bk_owner")
+    try:
+        await admin.execute("DELETE FROM booking.staff_role WHERE code LIKE 'custom_it1177_%'")
+        for code, based_on, archived, capabilities, _holder, _email in CUSTOM if create else []:
+            await admin.execute(
+                "INSERT INTO booking.staff_role (code, label, based_on, archived, created_by, updated_by)"
+                " VALUES ($1, $1, $2, $3, 'it-1177', 'it-1177')",
+                code,
+                based_on,
+                archived,
+            )
+            for capability in capabilities:
+                await admin.execute(
+                    "INSERT INTO booking.staff_role_capability (role_code, capability, created_by)"
+                    " VALUES ($1, $2, 'it-1177')",
+                    code,
+                    capability,
+                )
+    finally:
+        await admin.execute("RESET ROLE")
+    for code, _based_on, _archived, _capabilities, holder, email in CUSTOM if create else []:
+        await admin.execute(
+            "INSERT INTO booking.staff_users (cis_user_id, role, active, name, email) VALUES ($1, $2, true, $1, $3)",
+            holder,
+            code,
+            email,
+        )
+
+
+async def test_a_custom_role_is_mailed_as_its_base_role_while_it_can_read_suppliers(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    """Moving a contracting person to a custom role cloned from contracting keeps the e-mail; an archived custom role,
+    one that cannot read suppliers (the link's page) or one cloned from a role not in the list is not mailed."""
+    await _custom_roles(admin, create=True)
+    try:
+        async with pool.acquire() as conn:  # role booking, like the job
+            people = await contract_expiry_mail.recipients(conn, ["admin", "contracting"])
+            sales_only = await contract_expiry_mail.recipients(conn, ["sales"])
+        assert [p.ref for p in people] == [ADMIN, "it-1177-c-lead", MAKER]
+        assert [p.ref for p in sales_only] == ["it-1177-c-desk", SALES]
+    finally:
+        await _custom_roles(admin, create=False)

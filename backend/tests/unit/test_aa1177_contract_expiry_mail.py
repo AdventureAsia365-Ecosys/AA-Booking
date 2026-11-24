@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from app import mailer
-from app.auth.staff import STAFF_ROLES
+from app.auth.staff import PERMISSIONS, STAFF_ROLES
 from app.jobs.queue import Job
 from app.jobs.worker import PermanentError
 from app.pricing import policy_params, policy_params_ops
@@ -146,7 +146,7 @@ async def test_one_mail_per_person_and_contract_then_nothing_on_the_next_run() -
         "failed": 0,
     }
     assert sorted(m.to for m in ses.sent) == ["lead@example.test", "rates@example.test"]
-    assert conn.sql("FROM booking.staff_users")[0] == (["admin", "contracting"],)
+    assert conn.sql("FROM booking.staff_users")[0] == (["admin", "contracting"], "supply.read")
     (record,) = _records(conn)
     assert record["sent"] == ["cog:a1", "cog:c1"] and record["done"] is True and record["refused"] == []
     # The SQL leaves out a done record; a record that is done is never mailed again even if it were read.
@@ -268,3 +268,14 @@ async def test_the_job_raises_after_recording_when_a_send_failed() -> None:
 def test_build_handler_binds_the_settings() -> None:
     handler = contract_expiry.build_handler(Settings(database_url=None))
     assert callable(handler)
+
+
+def test_custom_roles_are_mailed_as_their_base_role_while_they_can_read_suppliers() -> None:
+    """A custom role (AA-1155) is not a choice of its own: it follows its based_on role, if not archived and still
+    holding the capability the e-mail's link needs (real rows: the integration test of the same name)."""
+    sql = " ".join(contract_expiry_mail.RECIPIENTS_SQL.split())
+    assert "s.role = ANY($1::text[])" in sql
+    assert "FROM booking.staff_role r JOIN booking.staff_role_capability c" in sql
+    assert "NOT r.archived AND r.based_on = ANY($1::text[])" in sql and "c.capability = $2" in sql
+    assert contract_expiry_mail.READ_CAPABILITY == "supply.read"
+    assert "supply.read" in {p for p, roles in PERMISSIONS.items() if "contracting" in roles}
