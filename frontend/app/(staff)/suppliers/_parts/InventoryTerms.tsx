@@ -8,9 +8,9 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
-import type { SupplierContract } from "@/lib/api/suppliers";
-import { INVENTORY_KINDS, supplyApi, type InventoryKind, type InventoryTerm, type InventoryTermBody } from "@/lib/api/supply";
+import { Download, Plus, Trash2 } from "lucide-react";
+import { suppliersApi, type InventoryPreviewRow, type SupplierContract } from "@/lib/api/suppliers";
+import { INVENTORY_KINDS, supplyApi, type InventoryKind, type InventoryTerm, type InventoryTermBody, type SupplyOption } from "@/lib/api/supply";
 import { Button, ConfirmDialog, DateField, EmptyState, FormDrawer, Input, Pill, RowMenu, Section, Select, Skeleton, Textarea, useFormat, useToast } from "@/ui";
 import { FormField, errorFor, inputCls } from "@/app/(staff)/_parts/FormField";
 import { supplyError } from "@/app/(staff)/_parts/supply";
@@ -33,6 +33,82 @@ function releaseOf(term: InventoryTerm): string | null {
   const d = new Date(`${term.date_from}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - term.release_days);
   return d.toISOString().slice(0, 10);
+}
+
+type TermForm = { target: string; kind: InventoryKind; date_from: string; date_to: string; units: string; release_days: string; max_pax: string; note: string };
+type Fe = ApiError["fieldErrors"];
+
+const whole = (v: string) => (v.trim() === "" ? null : Number(v));
+
+/** What is wrong with the form (an English message key), or null. */
+function formProblem(form: TermForm): "Pick the room type or service." | "Pick the first and last day; the last is on or after the first." | "An allotment needs the rooms (or seats) it holds, 1 or more." | null {
+  if (!form.target) return "Pick the room type or service.";
+  if (!form.date_from || !form.date_to || form.date_to < form.date_from) return "Pick the first and last day; the last is on or after the first.";
+  const units = whole(form.units);
+  if (form.kind === "allotment" && !(units && units >= 1)) return "An allotment needs the rooms (or seats) it holds, 1 or more.";
+  return null;
+}
+
+/** The API body of a checked form: only the numbers of its kind. */
+function termBody(form: TermForm): InventoryTermBody {
+  const [prefix, id] = form.target.split(":");
+  const allotment = form.kind === "allotment";
+  return {
+    component_id: `${prefix === "room_type" ? "rt" : "sv"}:${id}`,
+    inventory_kind: form.kind,
+    date_from: form.date_from,
+    date_to: form.date_to,
+    units: allotment ? whole(form.units) : null,
+    release_days: allotment ? whole(form.release_days) : null,
+    max_pax: form.kind === "free_sale" ? whole(form.max_pax) : null,
+    note: form.note.trim() || null,
+  };
+}
+
+/** AA-1153 part 2: the selected contract as a filled rate sheet (edit it, import it back as a new draft). */
+export function ContractExcelButton({ contract }: { contract: SupplierContract | undefined }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  const toast = useToast();
+  if (!contract) return null;
+  const id = contract.id;
+  async function download() {
+    try {
+      const { blob, filename } = await suppliersApi.contractRateSheet(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(e instanceof Error ? tx(e.message) : t("The rate sheet could not be downloaded."));
+    }
+  }
+  return (
+    <Button variant="secondary" onClick={download} title={t("Download this contract as a rate sheet: edit it and import it back as a new draft.")}>
+      <Download size={15} /> {t("Excel")}
+    </Button>
+  );
+}
+
+/** The Inventory terms a rate-sheet dry run would write (the import drawer). */
+export function InventoryPreview({ rows }: { rows: InventoryPreviewRow[] | undefined }) {
+  const t = useT(MSG);
+  if (!rows?.length) return null;
+  const filled = rows.find((r) => r.release_days_default);
+  return (
+    <p className="text-xs text-muted" data-testid="rate-sheet-inventory">
+      {t("Inventory: {0} term(s)", rows.length)}
+      {filled ? t(" · release days from the Pricing policy ({0}) where the sheet gives none", filled.release_days ?? "") : ""}
+    </p>
+  );
+}
+
+/** The inventory of the selected contract under its rates (nothing without a contract). */
+export function ContractInventory({ supplier, contract, canWrite }: { supplier: { id: string; status: string }; contract: SupplierContract | undefined; canWrite: boolean }) {
+  if (!contract) return null;
+  return <InventoryTerms supplierId={supplier.id} contract={contract} canWrite={canWrite && supplier.status === "active"} />;
 }
 
 export function InventoryTerms({ supplierId, contract, canWrite }: { supplierId: string; contract: SupplierContract; canWrite: boolean }) {
@@ -139,7 +215,7 @@ function TermDrawer({ supplierId, contract, onClose }: { supplierId: string; con
     queryKey: ["supply", "options", supplierId],
     queryFn: () => supplyApi.options({ supplier_id: supplierId, limit: 50 }),
   });
-  const initial = { target: "", kind: "allotment" as InventoryKind, date_from: contract.valid_from, date_to: contract.valid_to ?? "", units: "", release_days: "", max_pax: "", note: "" };
+  const initial: TermForm = { target: "", kind: "allotment", date_from: contract.valid_from, date_to: contract.valid_to ?? "", units: "", release_days: "", max_pax: "", note: "" };
   const [form, setForm] = useState(initial);
   const [localError, setLocalError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -151,25 +227,10 @@ function TermDrawer({ supplierId, contract, onClose }: { supplierId: string; con
       onClose();
     },
   });
-  const whole = (v: string) => (v.trim() === "" ? null : Number(v));
-
   function submit() {
-    if (!form.target) return setLocalError(t("Pick the room type or service."));
-    if (!form.date_from || !form.date_to || form.date_to < form.date_from) return setLocalError(t("Pick the first and last day; the last is on or after the first."));
-    const units = whole(form.units);
-    if (form.kind === "allotment" && !(units && units >= 1)) return setLocalError(t("An allotment needs the rooms (or seats) it holds, 1 or more."));
-    setLocalError(null);
-    const [prefix, id] = form.target.split(":");
-    save.mutate({
-      component_id: `${prefix === "room_type" ? "rt" : "sv"}:${id}`,
-      inventory_kind: form.kind,
-      date_from: form.date_from,
-      date_to: form.date_to,
-      units: form.kind === "allotment" ? units : null,
-      release_days: form.kind === "allotment" ? whole(form.release_days) : null,
-      max_pax: form.kind === "free_sale" ? whole(form.max_pax) : null,
-      note: form.note.trim() || null,
-    });
+    const problem = formProblem(form);
+    setLocalError(problem ? t(problem) : null);
+    if (!problem) save.mutate(termBody(form));
   }
 
   const fe = save.error instanceof ApiError ? save.error.fieldErrors : [];
@@ -190,17 +251,7 @@ function TermDrawer({ supplierId, contract, onClose }: { supplierId: string; con
         {t("Under")} <strong className="text-ink">{tx(contract.title)}</strong>
         {t(". Saving makes you this draft's maker: another person publishes it with its terms.")}
       </p>
-      <FormField label={t("For")} required hint={t("Room types of hotels this supplier sells, and its services.")} error={errorFor(fe, "component_id")}>
-        <Select className={inputCls} value={form.target} onChange={(e) => set("target")(e.target.value)} disabled={options.isLoading}>
-          <option value="">{options.isLoading ? t("Loading…") : t("Pick a room type or service")}</option>
-          {(options.data?.items ?? []).map((o) => (
-            <option key={`${o.kind}:${o.id}`} value={`${o.kind}:${o.id}`}>
-              {o.kind === "room_type" ? t("Room · ") : t("Service · ")}
-              {tx(o.label)} ({o.code})
-            </option>
-          ))}
-        </Select>
-      </FormField>
+      <TargetField options={options.data?.items} loading={options.isLoading} value={form.target} onChange={set("target")} fe={fe} />
       <FormField label={t("Kind")} required error={errorFor(fe, "inventory_kind")}>
         <Select className={inputCls} value={form.kind} onChange={(e) => set("kind")(e.target.value)}>
           {INVENTORY_KINDS.map((k) => (
@@ -217,25 +268,51 @@ function TermDrawer({ supplierId, contract, onClose }: { supplierId: string; con
         <FormField label={t("To")} required hint={t("Inside the contract.")} error={errorFor(fe, "date_to")}>
           <DateField className={inputCls} value={form.date_to} min={form.date_from} max={contract.valid_to ?? undefined} onChange={(v) => set("date_to")(v)} />
         </FormField>
-        {form.kind === "allotment" && (
-          <>
-            <FormField label={t("Rooms or seats")} required hint={t("A night (rooms) or a day (seats).")} error={errorFor(fe, "units")}>
-              <Input type="number" min={1} max={999} className={inputCls} value={form.units} onChange={(e) => set("units")(e.target.value)} />
-            </FormField>
-            <FormField label={t("Release days")} hint={t("Empty = the Pricing policy default.")} error={errorFor(fe, "release_days")}>
-              <Input type="number" min={0} max={365} className={inputCls} value={form.release_days} onChange={(e) => set("release_days")(e.target.value)} />
-            </FormField>
-          </>
-        )}
-        {form.kind === "free_sale" && (
-          <FormField label={t("Most travellers a booking")} hint={t("Empty = any party size.")} error={errorFor(fe, "max_pax")}>
-            <Input type="number" min={1} max={999} className={inputCls} value={form.max_pax} onChange={(e) => set("max_pax")(e.target.value)} />
-          </FormField>
-        )}
+        <TermNumbers form={form} set={set} fe={fe} />
       </div>
       <FormField label={t("Note")} hint={t("Staff only.")} error={errorFor(fe, "note")}>
         <Textarea className={textareaCls} maxLength={300} value={form.note} onChange={(e) => set("note")(e.target.value)} />
       </FormField>
     </FormDrawer>
+  );
+}
+
+function TargetField({ options, loading, value, onChange, fe }: { options: SupplyOption[] | undefined; loading: boolean; value: string; onChange: (v: string) => void; fe: Fe }) {
+  const t = useT(MSG);
+  const tx = useTx();
+  return (
+    <FormField label={t("For")} required hint={t("Room types of hotels this supplier sells, and its services.")} error={errorFor(fe, "component_id")}>
+      <Select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)} disabled={loading}>
+        <option value="">{loading ? t("Loading…") : t("Pick a room type or service")}</option>
+        {(options ?? []).map((o) => (
+          <option key={`${o.kind}:${o.id}`} value={`${o.kind}:${o.id}`}>
+            {o.kind === "room_type" ? t("Room · ") : t("Service · ")}
+            {tx(o.label)} ({o.code})
+          </option>
+        ))}
+      </Select>
+    </FormField>
+  );
+}
+
+function TermNumbers({ form, set, fe }: { form: TermForm; set: (k: keyof TermForm) => (v: string) => void; fe: Fe }) {
+  const t = useT(MSG);
+  if (form.kind === "allotment") {
+    return (
+      <>
+        <FormField label={t("Rooms or seats")} required hint={t("A night (rooms) or a day (seats).")} error={errorFor(fe, "units")}>
+          <Input type="number" min={1} max={999} className={inputCls} value={form.units} onChange={(e) => set("units")(e.target.value)} />
+        </FormField>
+        <FormField label={t("Release days")} hint={t("Empty = the Pricing policy default.")} error={errorFor(fe, "release_days")}>
+          <Input type="number" min={0} max={365} className={inputCls} value={form.release_days} onChange={(e) => set("release_days")(e.target.value)} />
+        </FormField>
+      </>
+    );
+  }
+  if (form.kind !== "free_sale") return null;
+  return (
+    <FormField label={t("Most travellers a booking")} hint={t("Empty = any party size.")} error={errorFor(fe, "max_pax")}>
+      <Input type="number" min={1} max={999} className={inputCls} value={form.max_pax} onChange={(e) => set("max_pax")(e.target.value)} />
+    </FormField>
   );
 }

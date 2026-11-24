@@ -7,13 +7,13 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { suppliersApi, type SupplierContract, type SupplierDetail } from "@/lib/api/suppliers";
 import { supplyApi, type SupplierRate } from "@/lib/api/supply";
 import { Select, Button, ConfirmDialog, EmptyState, Section, useToast, RowMenu } from "@/ui";
 import { RatesTable, amountText, rateTarget, supplyError } from "@/app/(staff)/_parts/supply";
 import { inputCls } from "@/app/(staff)/_parts/FormField";
-import { InventoryTerms } from "./InventoryTerms";
+import { ContractExcelButton, ContractInventory } from "./InventoryTerms";
 import { RateDrawer } from "./RateDrawer";
 import { ContractPhaseBadge } from "./shared";
 import { useLang, useT } from "@/ui/core/useI18n";
@@ -55,21 +55,6 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
     );
   }
   const editable = canWrite && contract?.status === "draft";
-  // AA-1153 part 2: the contract as a filled rate sheet (edit it, import it back as a new draft).
-  async function download() {
-    if (!contract) return;
-    try {
-      const { blob, filename } = await suppliersApi.contractRateSheet(contract.id);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      toast.error(e instanceof Error ? tx(e.message) : t("The rate sheet could not be downloaded."));
-    }
-  }
   return (
     <>
     <Section
@@ -94,11 +79,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
             ))}
           </Select>
           {contract && <ContractPhaseBadge phase={contract.phase} />}
-          {contract && (
-            <Button variant="secondary" onClick={download} title={t("Download this contract as a rate sheet: edit it and import it back as a new draft.")}>
-              <Download size={15} /> {t("Excel")}
-            </Button>
-          )}
+          <ContractExcelButton contract={contract} />
           {editable && s.status === "active" && (
             <Button variant="primary" onClick={() => setDrawer({})}>
               <Plus size={15} /> {t("Add rate")}
@@ -153,7 +134,7 @@ export function RatesTab({ s, canWrite }: { s: SupplierDetail; canWrite: boolean
         }
       />
     </Section>
-    {contract && <InventoryTerms supplierId={s.id} contract={contract} canWrite={canWrite && s.status === "active"} />}
+    <ContractInventory supplier={s} contract={contract} canWrite={canWrite} />
     </>
   );
 }

@@ -24,9 +24,6 @@ export const MSG = phrasebook(
     "Remove rate": "Remove rate",
     "Remove the {0} rate for": (...a: unknown[]) => `Remove the ${a[0]} rate for`,
     "from this draft?": "from this draft?",
-    "The rate sheet could not be downloaded.": "The rate sheet could not be downloaded.",
-    "Download this contract as a rate sheet: edit it and import it back as a new draft.": "Download this contract as a rate sheet: edit it and import it back as a new draft.",
-    "Excel": "Excel",
   },
   {
     "Rate removed from the draft.": "Đã xoá giá khỏi bản nháp.",
@@ -46,9 +43,6 @@ export const MSG = phrasebook(
     "Remove rate": "Xoá giá",
     "Remove the {0} rate for": (...a: unknown[]) => `Xoá giá ${a[0]} cho`,
     "from this draft?": "khỏi bản nháp này?",
-    "The rate sheet could not be downloaded.": "Không tải được bảng giá.",
-    "Download this contract as a rate sheet: edit it and import it back as a new draft.": "Tải hợp đồng này dưới dạng bảng giá: sửa rồi nhập lại thành một bản nháp mới.",
-    "Excel": "Excel",
   },
   ),
 );

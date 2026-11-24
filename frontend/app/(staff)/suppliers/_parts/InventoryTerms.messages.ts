@@ -50,6 +50,11 @@ export const MSG = phrasebook(
     "Empty = any party size.": "Empty = any party size.",
     "Note": "Note",
     "Staff only.": "Staff only.",
+    "The rate sheet could not be downloaded.": "The rate sheet could not be downloaded.",
+    "Download this contract as a rate sheet: edit it and import it back as a new draft.": "Download this contract as a rate sheet: edit it and import it back as a new draft.",
+    "Excel": "Excel",
+    "Inventory: {0} term(s)": (...a: unknown[]) => `Inventory: ${a[0]} term(s)`,
+    " · release days from the Pricing policy ({0}) where the sheet gives none": (...a: unknown[]) => ` · release days from the Pricing policy (${a[0]}) where the sheet gives none`,
   },
   {
     "Allotment": "Allotment (giữ phòng)",
@@ -95,6 +100,11 @@ export const MSG = phrasebook(
     "Empty = any party size.": "Để trống = không giới hạn số khách.",
     "Note": "Ghi chú",
     "Staff only.": "Chỉ nhân viên xem.",
+    "The rate sheet could not be downloaded.": "Không tải được bảng giá.",
+    "Download this contract as a rate sheet: edit it and import it back as a new draft.": "Tải hợp đồng này dưới dạng bảng giá: sửa rồi nhập lại thành một bản nháp mới.",
+    "Excel": "Excel",
+    "Inventory: {0} term(s)": (...a: unknown[]) => `Inventory: ${a[0]} điều khoản`,
+    " · release days from the Pricing policy ({0}) where the sheet gives none": (...a: unknown[]) => ` · số ngày nhả phòng lấy từ chính sách giá (${a[0]}) ở dòng không ghi`,
   },
   ),
 );
