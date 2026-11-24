@@ -12,7 +12,8 @@
 -- env var), so it is a parameter of Pricing > Policy:
 --   contract_expiry_mail_roles  ["admin", "contracting"]  (codes) the built-in staff roles whose active members get
 --                                                          the e-mail; an empty list switches the e-mail off (the
---                                                          in-app notification and the lists stay).
+--                                                          in-app notification and the lists stay). A custom role
+--                                                          (bk-062) counts as its based_on role (code PR).
 -- Key, type, choices and approver group: backend/app/pricing/policy_params_ops.py (section operations, approved by the
 -- pricing group like contract_expiry_alert_days).
 --
