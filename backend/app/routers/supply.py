@@ -5,7 +5,10 @@ for every write. AA-1155 T4.1: activating a hotel or a service also needs ``supp
 checked in ``app.supply.records.set_status`` before any read, 403 ``forbidden``). Facts only: there is no
 customer-facing description field anywhere here (ADR 0004a d2, Q17). AA-835 S4: the detail GETs carry ``content``, the
 customer content CIS published (read-only, ``app.supply.content``), and supplier photos are uploaded here (``…/media``,
-``app.supply.media``) with a ``usage_rights`` flag CIS obeys.
+``app.supply.media``) with a ``usage_rights`` flag CIS obeys. AA-1153 (bk-069, ``app.supply.hotel_master``): the
+duplicate check (``GET /booking/hotels/duplicates``; a create or edit that may duplicate a hotel answers 409 with the
+candidates), the DMCs that sell a hotel (``…/suppliers``), the facts confirmation, external codes and room type
+aliases.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.auth.staff import Staff, get_pool, require
 from app.suppliers import service as suppliers
-from app.supply import media, rates, records
+from app.supply import hotel_master, media, rates, records
 from app.supply.records import HOTEL, SERVICE
 
 router = APIRouter(prefix="/booking", tags=["supply"])
@@ -66,6 +69,43 @@ class HotelFields(BaseModel):
     amenities: list[ShortText] | None = Field(default=None, max_length=50)
     links: list[Link] | None = Field(default=None, max_length=10)
     internal_notes: str | None = Field(default=None, max_length=5000)
+    # AA-1153 (bk-069): codes of this hotel elsewhere ({"<system>": "<code>"}) and, when the hotel looks like another
+    # one at the same place, why it is a different hotel (audited).
+    external_codes: dict[Annotated[str, Field(max_length=40)], Annotated[str, Field(max_length=64)]] | None = Field(
+        default=None, max_length=20
+    )
+    not_duplicate_reason: str | None = Field(default=None, max_length=300)
+
+
+class SupplierLinkIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    supplier_id: str = Field(min_length=1, max_length=64, description="supplier UUID or code (SUP-000123)")
+    supplier_hotel_code: str | None = Field(default=None, max_length=64)
+    is_preferred: bool = False
+
+
+class SupplierLinkPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    supplier_hotel_code: str | None = Field(default=None, max_length=64)
+    is_preferred: bool | None = None
+    status: Literal["active", "inactive"] | None = None
+
+
+class FactsConfirmationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["dmc_sheet", "hotel_website", "site_visit"]
+    supplier_id: UUID | None = Field(default=None, description="the DMC whose sheet confirmed the facts (dmc_sheet)")
+    confirmed_on: date | None = None
+
+
+class AliasIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    alias: str = Field(min_length=1, max_length=120)
+    supplier_id: UUID | None = Field(default=None, description="the DMC that uses this name; empty = any DMC")
 
 
 class NewHotel(HotelFields):
@@ -205,11 +245,16 @@ async def list_hotels(
     sort: Annotated[str | None, Query(max_length=30)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
+    reconfirm: Annotated[
+        Literal["due"] | None, Query(description="Hotels whose facts are due for a new confirmation")
+    ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
+        days = await hotel_master.reconfirm_days(conn) if reconfirm == "due" else None
         page = await records.list_records(
             conn,
             HOTEL,
+            reconfirm_days=days,
             q=q,
             status=status,
             supplier=supplier,
@@ -223,6 +268,30 @@ async def list_hotels(
         # The photo grid of the staff list (photo count + first supplier photo, presigned): one read for the page.
         await media.add_photo_summary(conn, store, HOTEL, page["items"])
         return page
+
+
+@router.get("/hotels/duplicates")
+async def hotel_duplicates(
+    _: CanRead,
+    pool: Pool,
+    name: Annotated[str, Query(min_length=1, max_length=200)],
+    destination_id: UUID | None = None,
+    country_code: Annotated[str | None, Query(pattern=r"^[A-Za-z]{2}$")] = None,
+    latitude: Annotated[Decimal | None, Query(ge=-90, le=90)] = None,
+    longitude: Annotated[Decimal | None, Query(ge=-180, le=180)] = None,
+    exclude: UUID | None = None,
+) -> dict[str, Any]:
+    """AA-1153: the hotels a new or edited hotel may duplicate (``verdict`` block or warn), for the form."""
+    values = {
+        "name": name,
+        "destination_id": str(destination_id) if destination_id else None,
+        "country_code": country_code.upper() if country_code else None,
+        "latitude": latitude if longitude is not None else None,
+        "longitude": longitude if latitude is not None else None,
+    }
+    async with pool.acquire() as conn:
+        found = await hotel_master.candidates(conn, values, exclude_id=str(exclude) if exclude else None)
+    return {"items": found}
 
 
 @router.post("/hotels", status_code=201)
@@ -257,6 +326,46 @@ async def activate_hotel(
 ) -> dict[str, Any]:
     async with pool.acquire() as conn, conn.transaction():
         return await records.set_status(conn, HOTEL, staff, hotel_ref, "active", body.reason if body else None)
+
+
+@router.post("/hotels/{hotel_ref}/suppliers", status_code=201)
+async def link_supplier(body: SupplierLinkIn, hotel_ref: HotelRef, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+    """AA-1153 (T8): one more DMC sells this hotel (its own code for it, optionally the preferred DMC)."""
+    async with pool.acquire() as conn, conn.transaction():
+        return {"items": await hotel_master.add_link(conn, staff, hotel_ref, body.model_dump())}
+
+
+@router.patch("/hotels/{hotel_ref}/suppliers/{supplier_id}")
+async def patch_supplier_link(
+    body: SupplierLinkPatch, hotel_ref: HotelRef, supplier_id: UUID, staff: CanWrite, pool: Pool
+) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        changes = body.model_dump(exclude_unset=True)
+        return {"items": await hotel_master.update_link(conn, staff, hotel_ref, str(supplier_id), changes)}
+
+
+@router.post("/hotels/{hotel_ref}/facts-confirmation")
+async def confirm_hotel_facts(
+    body: FactsConfirmationIn, hotel_ref: HotelRef, staff: CanWrite, pool: Pool
+) -> dict[str, Any]:
+    """AA-1153 (T11): the facts were confirmed (today, or ``confirmed_on``) from a DMC sheet, the website or a visit."""
+    async with pool.acquire() as conn, conn.transaction():
+        await hotel_master.confirm_facts(conn, staff, hotel_ref, _payload(body))
+        return await records.get_record(conn, HOTEL, hotel_ref)
+
+
+@router.post("/room-types/{room_type_id}/aliases", status_code=201)
+async def add_room_type_alias(body: AliasIn, room_type_id: RecordId, staff: CanWrite, pool: Pool) -> dict[str, Any]:
+    async with pool.acquire() as conn, conn.transaction():
+        supplier = str(body.supplier_id) if body.supplier_id else None
+        return {"items": await hotel_master.add_alias(conn, staff, room_type_id, body.alias, supplier)}
+
+
+@router.delete("/room-type-aliases/{alias_id}", status_code=204)
+async def remove_room_type_alias(alias_id: UUID, staff: CanWrite, pool: Pool) -> Response:
+    async with pool.acquire() as conn, conn.transaction():
+        await hotel_master.remove_alias(conn, staff, str(alias_id))
+    return Response(status_code=204)
 
 
 @router.post("/hotels/{hotel_ref}/room-types", status_code=201)

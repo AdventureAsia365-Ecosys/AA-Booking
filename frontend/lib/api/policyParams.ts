@@ -28,6 +28,7 @@ export type ParamType =
   | "month_day"
   | "month_days"
   | "codes"
+  | "code" // AA-1153 (bk-069): one code from choices (the default board of a hotel night)
   | "currency_map"
   | "integers"
   | "amount_map"
@@ -51,6 +52,7 @@ export const SECTIONS = [
   "retention",
   "security",
   "ops",
+  "hotels", // AA-1153 (bk-069): hotel matching, facts re-confirmation, rate-sheet price jumps
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 /** draft / pending: not used yet; in_force: used today; scheduled: approved, from a later day; superseded: replaced. */
@@ -204,6 +206,7 @@ export function textToValue(text: string, type: ParamType): ParamValue | null {
   const parts = t ? t.split(",").map((p) => p.trim()).filter(Boolean) : [];
   if (type === "month_days") return parts.every((p) => /^\d{2}-\d{2}$/.test(p)) ? parts : null;
   if (type === "codes") return parts;
+  if (type === "code") return t || null;
   if (type === "integers") return parts.length && parts.every((p) => /^\d+$/.test(p)) ? parts.map(Number) : null;
   if (type === "amount_map" || type === "currency_map") return textToMap(parts, type);
   return null;

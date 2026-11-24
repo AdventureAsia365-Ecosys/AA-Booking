@@ -153,6 +153,11 @@ class Policy:
         return pax_bands.as_bands(self.get(pax_bands.KEY))
 
     @property
+    def hotel_default_board(self) -> str:
+        """AA-1153 (bk-069 T9): the board a hotel night is priced on when neither the line nor the tour names one."""
+        return str(self.get("hotel_default_board"))
+
+    @property
     def rounding_increments(self) -> dict[str, Decimal]:
         """``rounding_increment_by_currency``: the rounding step of each selling currency."""
         return self.amounts("rounding_increment_by_currency")

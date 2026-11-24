@@ -1529,6 +1529,69 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
   `contract_expiry_alert_days` (seeded 60): staff notification `contract.expiring`. `GET /booking/contracts/expiring`
   (`supply.read`) lists them live; the staff page Supply > Add-ons shows them above the offers.
 
+## Hotel contracts through DMCs (AA-1153 part 1, bk-069; S285 advisories r2 hotels T8, T9, T10, T11, B7; Jira PR-30)
+
+AA has no contract with a hotel: the chain is hotel -> DMC (AA's supplier) -> AA, so one hotel is sold to AA by several
+DMCs, each under its own AA supplier contract. Part 2 (later): allotment / release days on quotes (B8) and the Excel
+two-way round trip (facts and room-type sheets, export).
+
+- **Property master** (`app/supply/hotel_master.py`): one `booking.hotels` row per real hotel; the DMCs that sell it
+  are `booking.hotel_supplier_links` (the DMC's own code for it, unique per supplier; at most one **preferred** DMC;
+  active / inactive, never deleted). `hotels.supplier_id` stays = the supplier that first listed it (backfilled and
+  trigger-kept as a link); the hotel list's supplier filter finds every hotel a supplier is linked to. `POST
+  /booking/hotels/{ref}/suppliers`, `PATCH …/suppliers/{supplier_id}` (code, preferred, status), `supply.write`.
+- **Duplicates**: a create, or a change of the name / place / position, compares the cleaned name (accents,
+  punctuation and words such as hotel / resort dropped; `difflib`) and the haversine distance with the hotels of the
+  same place, country or nearby: 409 `hotel_duplicate` (similarity >= `hotel_match_block_pct` and closer than
+  `hotel_match_block_m`, or the same place without a position) with the candidates, 409 `hotel_possible_duplicate`
+  (similarity >= `hotel_match_warn_pct` at the same place or closer than `hotel_match_warn_m`) unless the body gives
+  `not_duplicate_reason` (10..300 characters, audited). `GET /booking/hotels/duplicates` previews it. The four values
+  are pricing policy parameters (Pricing > Policy, section hotels, approver group pricing; bk-069 seeds 85 / 300 /
+  60 / 1000).
+- **Room type aliases** (`booking.hotel_room_type_aliases`, `POST /booking/room-types/{id}/aliases`, `DELETE
+  /booking/room-type-aliases/{id}`): the name a DMC (or any DMC) uses for an AA room type.
+- **Facts confirmation** (T11): `facts_source` (`dmc_sheet` with the DMC, `hotel_website`, `site_visit`),
+  `facts_confirmed_on` / `_by` (`POST /booking/hotels/{ref}/facts-confirmation`); due again after the policy
+  `hotel_facts_reconfirm_days` (`facts_reconfirm_due` on the detail, the list filter `reconfirm=due`). `external_codes`
+  (`{"<system>": "<code>"}`, a DMC code or a GIATA id later; no paid code). None of them is a `supply.hotel.v1` fact.
+- **Rates**: a room rate is written (and counted) under a contract whose supplier has an **active link** to the hotel
+  (the bk-069 guards `supplier_rate_guard` / `supply_restriction_guard`, `rates.create_rate`, `restrictions`). One rate
+  choice for every caller (`rates.RATES_MANY_SQL`): per supplier as before (newest validity, pax band, lowest net)
+  with the asked board first; across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
+  net at the approved FX rate in force on the night, `booking.fx_rates`; a currency without one sorts last). Each found
+  rate names its `supplier_id`. **One DMC per room**: every night and occupancy of one room type on one B2B line (and
+  every night of a version item) is priced by the DMC of the first night; a unit another DMC was cheaper for is asked
+  again pinned to it, and a unit that DMC cannot price refuses the line (never two DMCs' nets on one booking).
+- **Board basis** (T9): a lookup asks a board or none (= the pricing policy's default board `hotel_default_board`,
+  seeded BB, first; then a rate without a board, then any other board). The board comes from the quote line
+  (`booking.b2b.v1` 1.10 `meal_plan`), else the tour night (`trip_plan_components.meal_plan`, set with the components),
+  else the policy default (Pricing > Policy, section hotels; the quote reads it on its day, staff paths today); the cost
+  sheet reads the tour night's board.
+  A night on HB / FB / AI whose day also holds a `meal` service (a tour component of that day, or another `sv:` meal
+  line of the quote) gets `price_note.board.warnings` `double_dinner` (a warning; the price is the rates').
+- **Hotel child prices** (`booking.hotel_child_policies`, per contract and hotel: age band, sharing / extra bed,
+  optional board, net per night; one row per contract, hotel, board, basis and band start): a room line charges them for
+  the children its room mix does not hold (rooms given explicitly; the oldest children first by `child_ages`, an
+  unknown age by the band reaching the oldest age; exact board first). Basis: `sharing` while the rooms' free places
+  (`max_occupancy` less the occupancy) hold the child, `extra_bed` beyond them (the oldest first), the other basis
+  only when the DMC gives none on it. None found = no extra, `price_note.child_room` says so (with `extra_bed`, the
+  children counted on an extra bed; `app/b2b/hotel_children.py`).
+- **The booking goes to the DMC of the price used**: a quote part stores its rate's supplier; Generate takes a version
+  item's supplier from its first cost row's rate, else the B2B quote line's first rate, else the hotel's / service's.
+  `supplier_bookings.hotel_confirmation_ref`: the hotel's own number the DMC passes on (confirm body or PATCH, while
+  live; rooms only on confirm).
+- **DMC rate sheets** (`app/supply/rate_sheet.py`, `rate_sheet_match.py`, `rate_checks.py`, `rate_review.py`): hotels
+  matched by the DMC's code first, room types by name then alias; at most 2000 rows over the rate, `Seasons` and
+  `Hotel children` sheets and again after the season expansion, 40 MB unpacked; optional `Seasons` (a season row with no dates becomes one rate per range,
+  `booking.supplier_contract_seasons`) and `Hotel children` sheets; B7 `Published` + `Commission %` give the net. Checks:
+  `season_overlap` (error: nothing imported), `season_gap`, `board_order` (HB below BB), `price_jump` (>=
+  `rate_sheet_jump_warn_pct` against the supplier's previous contract) as warnings; the dry run shows them with the
+  **diff** (added / changed / removed). An import writes `booking.rate_sheet_imports` (file hash and name, checks and
+  diff at import time). `GET /booking/contracts/{id}/review` = the live checks and diff; publishing an imported draft
+  with warnings needs `acknowledge_checks` (409 `checks_unacknowledged`).
+- **Version items**: a room's default net is priced night by night (one cost row per run of nights at one rate; the
+  first night's DMC for the whole stay).
+
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
 
 - A **supplier bill** (`booking.supplier_bills`, `BIL-000123`) is what a supplier asks AA to pay: its own bill number
@@ -2608,6 +2671,16 @@ trigger, maker-checker and owner self-approval CHECKs, the bk-064 owner guard in
 `booking`), `booking.addon_offer_places` (draft only; an insert records its writer), the view `booking.v_place_addons`
 (security barrier; SELECT to `booking` and `tripplanner`) and the pricing policy values `addon_days_ahead` (365) and
 `contract_expiry_alert_days` (60), made by `seed:bk-068` and approved. Number: lane A of S289 holds bk-067.
+
+### `bk-069` (AA-1153 part 1 hotel contracts through DMCs — needs `bk-008`, `bk-010`, `bk-019`, `bk-026`, `bk-050`, `bk-060`)
+
+A **contract** file (MIG-4, the code PR raises readiness to bk-069): `hotel_supplier_links` (backfilled from
+`hotels.supplier_id`; an AFTER INSERT trigger on hotels adds the link), `hotels.external_codes` / `facts_*`,
+`hotel_room_type_aliases`, `supplier_contract_seasons` and `hotel_child_policies` (draft-only, guard
+`supplier_contract_parts_guard`), `rate_sheet_imports` (append-only), `trip_plan_components.meal_plan`,
+`supplier_bookings.hotel_confirmation_ref`; `supplier_rate_guard` and `supply_restriction_guard` replaced (a room type of
+a hotel with an active link to the contract's supplier); six pricing policy parameters (section hotels). The new tables'
+foreign keys cascade (role booking deletes no hotel, supplier or contract: only an owner clean-up follows them).
 
 ### `bk-070` (AA-1152 add-on title — needs `bk-068`)
 

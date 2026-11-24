@@ -73,6 +73,7 @@ from app.jobs import queue
 from app.jobs.queue import Job
 from app.pricing import engine, pax_bands, policy_values, repository, seasons
 from app.pricing import service as pricing_service
+from app.supply import rates as supply_rates
 from app.supply.rates import RateAsk, rates_in_force_many
 
 log = logging.getLogger(__name__)
@@ -138,6 +139,7 @@ class Part:
     room_type_id: str | None
     service_id: str | None
     max_occupancy: int | None = None
+    meal_plan: str | None = None  # AA-1153 (T9): the tour night's board (None = the default BB)
 
     @property
     def item(self) -> str:
@@ -258,13 +260,15 @@ def asks(wins: Sequence[Window], parts: Sequence[Part], bands: Sequence[pax_band
                 on = win.start + timedelta(days=part.offset)
                 if part.room_type_id:
                     for occupancy, _rooms in room_mix(low, part.max_occupancy):
-                        out.append(RateAsk(part.room_type_id, None, on, occupancy))
+                        out.append(RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan))
                 else:
                     out.append(RateAsk(None, part.service_id, on, low))
         for part in parts:
             if part.room_type_id and not (part.max_occupancy is not None and part.max_occupancy < 2):
                 on = win.start + timedelta(days=part.offset)
-                out.extend(RateAsk(part.room_type_id, None, on, occupancy) for occupancy in (1, 2))
+                out.extend(
+                    RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan) for occupancy in (1, 2)
+                )
     return out
 
 
@@ -284,7 +288,7 @@ def cells(
                 on = win.start + timedelta(days=part.offset)
                 if part.room_type_id:
                     for occupancy, rooms in room_mix(low, part.max_occupancy):
-                        rate = found.get(RateAsk(part.room_type_id, None, on, occupancy))
+                        rate = found.get(RateAsk(part.room_type_id, None, on, occupancy, "adult", part.meal_plan))
                         if rate is None:
                             cell.complete = False
                             continue
@@ -329,8 +333,8 @@ def single_supplement(
             continue
         rooms += 1
         on = win.start + timedelta(days=part.offset)
-        single = found.get(RateAsk(part.room_type_id, None, on, 1))
-        double = found.get(RateAsk(part.room_type_id, None, on, 2))
+        single = found.get(RateAsk(part.room_type_id, None, on, 1, "adult", part.meal_plan))
+        double = found.get(RateAsk(part.room_type_id, None, on, 2, "adult", part.meal_plan))
         if single is None or double is None:
             return None
         cell.add(single_part(single, double, fx), engine.BASE_CURRENCY if single["currency"] != double["currency"]
@@ -446,6 +450,9 @@ class Pricing:
     # AA-1175 (bk-066): the group-size bands in force (pricing policy ``price_pax_bands``); empty when the policy has
     # none, then no row is computed (reason ``no_rule``, like a plan without a rule).
     bands: tuple[pax_bands.Band, ...] = ()
+    # AA-1153 (bk-069 T9): the default board of a hotel night (pricing policy ``hotel_default_board``); None when the
+    # policy has none, then a room lookup asks the policy again and answers 503 (AA-side data missing).
+    board: str | None = None
 
     @property
     def can_price(self) -> bool:
@@ -476,8 +483,13 @@ async def load_pricing(conn: asyncpg.Connection, on: date) -> Pricing:
     except policy_values.PolicyUnavailable:
         log.warning("cost_sheet_pax_bands_unavailable on=%s", on)
         bands = ()
+    try:
+        board = await supply_rates.default_board(conn, on=on)
+    except policy_values.PolicyUnavailable:
+        log.warning("cost_sheet_default_board_unavailable on=%s", on)
+        board = None
     fx = {c: d.rate for c, d in dated_fx.items()}
-    return Pricing(on=on, rules=rules, fx=fx, rounding=rounding, bands=bands)
+    return Pricing(on=on, rules=rules, fx=fx, rounding=rounding, bands=bands, board=board)
 
 
 def _dec(value: Any) -> Decimal | None:
@@ -635,7 +647,9 @@ def assemble(
 async def _parts(conn: asyncpg.Connection, plan_id: str) -> tuple[list[Part], bool]:
     rows = await conn.fetch(COMPONENTS_SQL, plan_id)
     active = all(component_active(r) for r in rows)
-    parts = [Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"]) for r in rows]
+    parts = [
+        Part(int(r["day_no"]), r["room_type_id"], r["service_id"], r["max_occupancy"], r.get("meal_plan")) for r in rows
+    ]
     return parts, active
 
 
@@ -661,7 +675,7 @@ async def compute(
         return [], info
     info["windows"] = len(wins)
     wanted = asks(wins, parts, pricing.bands)
-    found = dict(zip(wanted, await rates_in_force_many(conn, wanted), strict=True))
+    found = dict(zip(wanted, await rates_in_force_many(conn, wanted, board=pricing.board), strict=True))
     singles = [single_supplement(w, parts, found, pricing.fx) for w in wins]
     codes = [cal.season_on(w.start).code for w in wins] if cal.configured else None
     grid = cells(wins, parts, found, pricing.bands)

@@ -901,6 +901,35 @@
         "title": "AgencyReasonIn",
         "type": "object"
       },
+      "AliasIn": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Alias",
+            "type": "string"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the DMC that uses this name; empty = any DMC",
+            "title": "Supplier Id"
+          }
+        },
+        "required": [
+          "alias"
+        ],
+        "title": "AliasIn",
+        "type": "object"
+      },
       "AllotmentIn": {
         "additionalProperties": false,
         "properties": {
@@ -1618,6 +1647,18 @@
               }
             ],
             "title": "Dropoff Point"
+          },
+          "hotel_confirmation_ref": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotel Confirmation Ref"
           },
           "hotel_room_type_id": {
             "anyOf": [
@@ -2571,6 +2612,18 @@
             "title": "Confirmation Ref",
             "type": "string"
           },
+          "hotel_confirmation_ref": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotel Confirmation Ref"
+          },
           "voucher_file_id": {
             "anyOf": [
               {
@@ -2732,6 +2785,18 @@
       "ContractPatch": {
         "additionalProperties": false,
         "properties": {
+          "acknowledge_checks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the publisher saw the review warnings",
+            "title": "Acknowledge Checks"
+          },
           "cancellation_policy": {
             "anyOf": [
               {
@@ -4451,6 +4516,50 @@
         "title": "ExtendRequest",
         "type": "object"
       },
+      "FactsConfirmationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed On"
+          },
+          "source": {
+            "enum": [
+              "dmc_sheet",
+              "hotel_website",
+              "site_visit"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "the DMC whose sheet confirmed the facts (dmc_sheet)",
+            "title": "Supplier Id"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "FactsConfirmationIn",
+        "type": "object"
+      },
       "FeeBasis": {
         "additionalProperties": false,
         "properties": {
@@ -5022,6 +5131,25 @@
             ],
             "title": "Destination Id"
           },
+          "external_codes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 20,
+                "propertyNames": {
+                  "maxLength": 40
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Codes"
+          },
           "hotel_style": {
             "anyOf": [
               {
@@ -5106,6 +5234,18 @@
               }
             ],
             "title": "Name"
+          },
+          "not_duplicate_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Duplicate Reason"
           },
           "star_rating": {
             "anyOf": [
@@ -5957,6 +6097,18 @@
             ],
             "title": "Dropoff Point"
           },
+          "hotel_confirmation_ref": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotel Confirmation Ref"
+          },
           "hotel_room_type_id": {
             "anyOf": [
               {
@@ -6560,6 +6712,25 @@
             ],
             "title": "Destination Id"
           },
+          "external_codes": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxProperties": 20,
+                "propertyNames": {
+                  "maxLength": 40
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Codes"
+          },
           "hotel_style": {
             "anyOf": [
               {
@@ -6638,6 +6809,18 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "not_duplicate_reason": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Duplicate Reason"
           },
           "star_rating": {
             "anyOf": [
@@ -8184,6 +8367,24 @@
             ],
             "title": "Hotel Room Type Id"
           },
+          "meal_plan": {
+            "anyOf": [
+              {
+                "enum": [
+                  "RO",
+                  "BB",
+                  "HB",
+                  "FB",
+                  "AI"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Plan"
+          },
           "service_id": {
             "anyOf": [
               {
@@ -9036,6 +9237,23 @@
       "QuoteLineRequest": {
         "additionalProperties": false,
         "properties": {
+          "child_ages": {
+            "anyOf": [
+              {
+                "items": {
+                  "maximum": 17.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "maxItems": 60,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Child Ages"
+          },
           "component_id": {
             "maxLength": 64,
             "minLength": 1,
@@ -9059,6 +9277,24 @@
             "minLength": 1,
             "title": "Line Ref",
             "type": "string"
+          },
+          "meal_plan": {
+            "anyOf": [
+              {
+                "enum": [
+                  "RO",
+                  "BB",
+                  "HB",
+                  "FB",
+                  "AI"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meal Plan"
           },
           "nights": {
             "anyOf": [
@@ -11139,6 +11375,85 @@
           }
         },
         "title": "SupplierFields",
+        "type": "object"
+      },
+      "SupplierLinkIn": {
+        "additionalProperties": false,
+        "properties": {
+          "is_preferred": {
+            "default": false,
+            "title": "Is Preferred",
+            "type": "boolean"
+          },
+          "supplier_hotel_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Hotel Code"
+          },
+          "supplier_id": {
+            "description": "supplier UUID or code (SUP-000123)",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Supplier Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supplier_id"
+        ],
+        "title": "SupplierLinkIn",
+        "type": "object"
+      },
+      "SupplierLinkPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "is_preferred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Preferred"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "supplier_hotel_code": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Hotel Code"
+          }
+        },
+        "title": "SupplierLinkPatch",
         "type": "object"
       },
       "SupplierPaymentTerms": {
@@ -23189,6 +23504,60 @@
         ]
       }
     },
+    "/booking/contracts/{contract_id}/review": {
+      "get": {
+        "description": "AA-1153 (T10): the business checks and the diff against the supplier's previous contract, live, with the\ncontract's seasons, hotel child prices and the rate-sheet import it came from (what the publisher reviews).",
+        "operationId": "contract_review_booking_contracts__contract_id__review_get",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Contract Review Booking Contracts  Contract Id  Review Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Contract Review",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
     "/booking/contracts/{contract_id}/stop-sales": {
       "post": {
         "description": "A stop-sale on a published contract: in effect at once (pending), a second person reviews it.",
@@ -24268,6 +24637,25 @@
               "title": "Offset",
               "type": "integer"
             }
+          },
+          {
+            "description": "Hotels whose facts are due for a new confirmation",
+            "in": "query",
+            "name": "reconfirm",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "due",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Hotels whose facts are due for a new confirmation",
+              "title": "Reconfirm"
+            }
           }
         ],
         "responses": {
@@ -24346,6 +24734,153 @@
           }
         ],
         "summary": "Create Hotel",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/hotels/duplicates": {
+      "get": {
+        "description": "AA-1153: the hotels a new or edited hotel may duplicate (``verdict`` block or warn), for the form.",
+        "operationId": "hotel_duplicates_booking_hotels_duplicates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "destination_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Destination Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "country_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[A-Za-z]{2}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Country Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "latitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90.0,
+                  "minimum": -90.0,
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Latitude"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180.0,
+                  "minimum": -180.0,
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Longitude"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exclude",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Exclude"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Hotel Duplicates Booking Hotels Duplicates Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Hotel Duplicates",
         "tags": [
           "supply"
         ]
@@ -24605,6 +25140,70 @@
         ]
       }
     },
+    "/booking/hotels/{hotel_ref}/facts-confirmation": {
+      "post": {
+        "description": "AA-1153 (T11): the facts were confirmed (today, or ``confirmed_on``) from a DMC sheet, the website or a visit.",
+        "operationId": "confirm_hotel_facts_booking_hotels__hotel_ref__facts_confirmation_post",
+        "parameters": [
+          {
+            "description": "Hotel UUID or code (HTL-000123)",
+            "in": "path",
+            "name": "hotel_ref",
+            "required": true,
+            "schema": {
+              "description": "Hotel UUID or code (HTL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Hotel Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactsConfirmationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Confirm Hotel Facts Booking Hotels  Hotel Ref  Facts Confirmation Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Hotel Facts",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
     "/booking/hotels/{hotel_ref}/media": {
       "get": {
         "operationId": "hotel_media_booking_hotels__hotel_ref__media_get",
@@ -24842,6 +25441,143 @@
           }
         ],
         "summary": "Create Room Type",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/hotels/{hotel_ref}/suppliers": {
+      "post": {
+        "description": "AA-1153 (T8): one more DMC sells this hotel (its own code for it, optionally the preferred DMC).",
+        "operationId": "link_supplier_booking_hotels__hotel_ref__suppliers_post",
+        "parameters": [
+          {
+            "description": "Hotel UUID or code (HTL-000123)",
+            "in": "path",
+            "name": "hotel_ref",
+            "required": true,
+            "schema": {
+              "description": "Hotel UUID or code (HTL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Hotel Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierLinkIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Link Supplier Booking Hotels  Hotel Ref  Suppliers Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Link Supplier",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/hotels/{hotel_ref}/suppliers/{supplier_id}": {
+      "patch": {
+        "operationId": "patch_supplier_link_booking_hotels__hotel_ref__suppliers__supplier_id__patch",
+        "parameters": [
+          {
+            "description": "Hotel UUID or code (HTL-000123)",
+            "in": "path",
+            "name": "hotel_ref",
+            "required": true,
+            "schema": {
+              "description": "Hotel UUID or code (HTL-000123)",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Hotel Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierLinkPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Supplier Link Booking Hotels  Hotel Ref  Suppliers  Supplier Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Supplier Link",
         "tags": [
           "supply"
         ]
@@ -28243,6 +28979,47 @@
         ]
       }
     },
+    "/booking/room-type-aliases/{alias_id}": {
+      "delete": {
+        "operationId": "remove_room_type_alias_booking_room_type_aliases__alias_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alias_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Alias Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Room Type Alias",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
     "/booking/room-types/{room_type_id}": {
       "patch": {
         "operationId": "patch_room_type_booking_room_types__room_type_id__patch",
@@ -28299,6 +29076,67 @@
           }
         ],
         "summary": "Patch Room Type",
+        "tags": [
+          "supply"
+        ]
+      }
+    },
+    "/booking/room-types/{room_type_id}/aliases": {
+      "post": {
+        "operationId": "add_room_type_alias_booking_room_types__room_type_id__aliases_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "room_type_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Room Type Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AliasIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Add Room Type Alias Booking Room Types  Room Type Id  Aliases Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Room Type Alias",
         "tags": [
           "supply"
         ]

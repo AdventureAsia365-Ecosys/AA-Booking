@@ -36,6 +36,7 @@ export const M = defineMessages(
     section_retention: "Data retention",
     section_security: "Staff sign-in",
     section_ops: "Job checks",
+    section_hotels: "Hotel contracting",
     sectionHint_quotes: "How long a quote holds and when a group is quoted on request.",
     sectionHint_prices: "How computed and provisional prices are published and shown.",
     sectionHint_surcharges: "When a confirmed booking may get a surcharge line.",
@@ -51,6 +52,8 @@ export const M = defineMessages(
     sectionHint_security: "How administrators must sign in. The administrator approves these.",
     sectionHint_ops:
       "When the background job checks e-mail the platform alerts: a stuck job queue and a job running too long. The administrator approves these.",
+    sectionHint_hotels:
+      "When a new hotel is refused or questioned as a duplicate, when hotel facts are due for a new confirmation and which rate-sheet price rises are flagged before publishing.",
     unit_hours: "hours",
     unit_extensions: "extensions",
     unit_holds: "holds",
@@ -310,6 +313,7 @@ export const M = defineMessages(
     section_retention: "Lưu trữ dữ liệu",
     section_security: "Đăng nhập nhân viên",
     section_ops: "Kiểm tra job",
+    section_hotels: "Hợp đồng khách sạn",
     sectionHint_quotes: "Báo giá có hiệu lực bao lâu và khi nào đoàn được báo giá theo yêu cầu.",
     sectionHint_prices: "Cách công bố và hiển thị giá tính toán và giá tạm tính.",
     sectionHint_surcharges: "Khi nào một booking đã xác nhận được thêm dòng phụ thu.",
@@ -325,6 +329,8 @@ export const M = defineMessages(
     sectionHint_security: "Quản trị viên phải đăng nhập thế nào. Quản trị viên duyệt các giá trị này.",
     sectionHint_ops:
       "Khi nào kiểm tra job nền gửi e-mail cảnh báo nền tảng: hàng đợi job bị kẹt và job chạy quá lâu. Quản trị viên duyệt các giá trị này.",
+    sectionHint_hotels:
+      "Khi nào khách sạn mới bị từ chối hoặc bị hỏi lại vì có thể trùng, khi nào thông tin khách sạn cần xác nhận lại và mức tăng giá nào trong bảng giá được đánh dấu trước khi công bố.",
     unit_hours: "giờ",
     unit_extensions: "lần gia hạn",
     unit_holds: "lần giữ",

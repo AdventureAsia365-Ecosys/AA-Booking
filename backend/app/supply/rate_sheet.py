@@ -18,20 +18,40 @@ Template (:func:`template`; ``GET /booking/rate-sheets/template``):
   numbers are kept on the rate; ``Net`` may then be empty, or must equal the derived net), and on the service sheets
   ``Pax type`` (adult, child, infant; empty = adult) with ``Age min`` / ``Age max`` (a child or infant band, B4).
 
+AA-1153 part 1 (bk-069; S285 advisory r2 hotels T8, T10, B7): a DMC rate sheet for hotels it shares with other DMCs.
+
+- **Hotels the supplier sells**: a hotel row matches a hotel **linked** to the supplier (``hotel_supplier_links``), by
+  the DMC's own code for it first, then the AA code; a room type by its name, then by an alias (the supplier's own
+  alias first, then an any-DMC alias). An unknown room type names the closest room types of the hotel.
+- optional sheet ``Seasons`` (Season, From, To; one season may have several rows): the contract's named seasons
+  (``supplier_contract_seasons``). A rate row naming a season with no dates becomes one rate per range of that season.
+- optional sheet ``Hotel children`` (Hotel code, Age min, Age max, Basis = sharing | extra bed, Meal plan, Net): the
+  DMC's child price per night for the hotel (``hotel_child_policies``).
+- **Business checks** (:mod:`app.supply.rate_checks`): seasons that overlap (an error: nothing is imported), contract
+  days no season covers, a board cheaper than one with fewer meals, a price at least ``rate_sheet_jump_warn_pct`` %
+  above the same rate of the supplier's previous contract (warnings). The dry run lists them with the **diff** against
+  that previous contract (added / changed / removed rates); an import stores both in ``booking.rate_sheet_imports``
+  (file hash and name), and the second person who publishes the draft acknowledges the warnings
+  (``app.suppliers.service``; the live review is :func:`review`).
+
 Items are matched to the supplier's **existing** hotels (by code, ``HTL-000123``, then the room type name, case and
 spaces ignored) and services (by code, ``SVC-000123``): supply facts are entered and checked in the admin (ADR 0004a),
 a rate sheet only prices them. Every problem is reported per sheet, row and column (``errors``) and **nothing is
 written** while one is left; ``dry_run`` validates and previews without writing, and adds the sheet's ``impact``
 (``app.catalog.price_readiness.impact``: the trip plans whose components use the sheet's items, whether each would
 have a rate for every component once the draft is published, and how many would move to priced; a read only).
-Bounded: at most :data:`MAX_BYTES` and :data:`MAX_ROWS` rows. The workbook is read with openpyxl in read-only,
-values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content type and openpyxl never
-executes VBA).
+Bounded: at most :data:`MAX_BYTES` (and :data:`MAX_UNPACKED_BYTES` once unzipped) and :data:`MAX_ROWS` rows, counted
+over the rate sheets, ``Seasons`` and ``Hotel children`` together and again after a season label is expanded into its
+ranges (422 ``rate_sheet_too_many_rows``; AA-1153 review: one upload must not hold the API worker). The workbook is read
+with openpyxl in read-only, values-only mode (no formulas are run, no macros: an ``.xlsm`` is refused by its content
+type and openpyxl never executes VBA).
 """
 
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 import re
 import zipfile
 from dataclasses import dataclass, field
@@ -46,12 +66,18 @@ from app.auth.staff import Staff
 from app.catalog import cost_sheet, price_readiness
 from app.errors import Invalid
 from app.suppliers import service as suppliers
-from app.supply import rates
+from app.supply import rate_checks, rate_review, rate_sheet_match, rates
 
 MAX_BYTES = 2 * 1024 * 1024
 MAX_ROWS = 2000
+MAX_UNPACKED_BYTES = 40 * 1024 * 1024  # technical-constant: zip bomb guard (a 2 MB sheet of 2000 rows unzips far below)
 CONTRACT_SHEET = "Contract"
 HOTEL_SHEET = "Hotel"
+SEASONS_SHEET = rate_review.SEASONS
+CHILDREN_SHEET = rate_review.CHILDREN
+SEASON_COLUMNS = ("Season", "From", "To")
+CHILDREN_COLUMNS = ("Hotel code", "Age min", "Age max", "Basis", "Meal plan", "Net")
+BASES = {"sharing": "sharing", "extra bed": "extra_bed", "extra_bed": "extra_bed"}
 SERVICE_SHEETS = {
     "Transport": "transfer",
     "Guide": "guide",
@@ -132,6 +158,8 @@ class Sheet:
     rows: list[RateRow]
     problems: list[Problem]
     ignored_sheets: list[str]
+    seasons: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: {name, date_from, date_to, sheet, row}
+    children: list[dict[str, Any]] = field(default_factory=list)  # AA-1153: hotel child prices as read
 
 
 # ── Cell values ──────────────────────────────────────────────────────────────
@@ -231,6 +259,13 @@ def _open(data: bytes) -> Any:
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise Invalid("rate_sheet_not_xlsx", "the file is not an .xlsx workbook")
     try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            unpacked = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile:
+        raise Invalid("rate_sheet_not_xlsx", "the file is not an .xlsx workbook") from None
+    if unpacked > MAX_UNPACKED_BYTES:
+        raise Invalid("rate_sheet_too_large", "the rate sheet is too large once unpacked; split it into several sheets")
+    try:
         return load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     except Exception:  # noqa: BLE001 — any parse error of an untrusted file is a 422, never a 500
         raise Invalid("rate_sheet_not_xlsx", "the file could not be read as an .xlsx workbook") from None
@@ -270,6 +305,13 @@ def _applies(label: str, sheet: str) -> bool:
     return sheet != HOTEL_SHEET or label not in ("Pax type", "Age min", "Age max")
 
 
+def _take(budget: list[int], n: int = 1) -> None:
+    """Count ``n`` rows against the workbook's :data:`MAX_ROWS` (rate rows, seasons, child prices, expanded rates)."""
+    budget[0] += n
+    if budget[0] > MAX_ROWS:
+        raise Invalid("rate_sheet_too_many_rows", f"a rate sheet has at most {MAX_ROWS} rows")
+
+
 def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> list[RateRow]:
     rows = ws.iter_rows(values_only=True)
     header = next(rows, None)
@@ -292,9 +334,7 @@ def _rows(ws: Any, sheet: str, problems: list[Problem], budget: list[int]) -> li
     for n, row in enumerate(rows, start=2):
         if row is None or all(v is None or str(v).strip() == "" for v in row):
             continue
-        budget[0] += 1
-        if budget[0] > MAX_ROWS:
-            raise Invalid("rate_sheet_too_many_rows", f"a rate sheet has at most {MAX_ROWS} rate rows")
+        _take(budget)
         rate = RateRow(sheet=sheet, row=n)
         if sheet == HOTEL_SHEET:
             rate.hotel_code = (_text(cell(row, "Hotel code")) or "").upper() or None
@@ -380,6 +420,8 @@ def parse(data: bytes) -> Sheet:
     ignored: list[str] = []
     contract: dict[str, Any] = {}
     rows: list[RateRow] = []
+    seasons: list[dict[str, Any]] = []
+    children: list[dict[str, Any]] = []
     budget = [0]
     names = {_key(n): n for n in wb.sheetnames}
     if _key(CONTRACT_SHEET) not in names:
@@ -391,6 +433,10 @@ def parse(data: bytes) -> Sheet:
                 contract = _contract(ws, problems)
             elif key == _key(HOTEL_SHEET):
                 rows += _rows(ws, HOTEL_SHEET, problems, budget)
+            elif key == _key(SEASONS_SHEET):
+                seasons = _seasons(ws, problems, budget)
+            elif key == _key(CHILDREN_SHEET):
+                children = _children(ws, problems, budget)
             elif sheet := next((s for s in SERVICE_SHEETS if _key(s) == key), None):
                 rows += _rows(ws, sheet, problems, budget)
             else:
@@ -399,17 +445,137 @@ def parse(data: bytes) -> Sheet:
         wb.close()
     if not rows and not any(p.code == "missing_column" for p in problems):
         problems.append(Problem(HOTEL_SHEET, None, None, "no_rates", "the workbook holds no rate rows"))
-    return Sheet(contract=contract, rows=rows, problems=problems, ignored_sheets=ignored)
+    rows = _expand_seasons(rows, seasons, problems)
+    return Sheet(contract, rows, problems, ignored, seasons, children)
+
+
+def _table(
+    ws: Any, sheet: str, columns: tuple[str, ...], problems: list[Problem], budget: list[int]
+) -> list[tuple[int, dict[str, Any]]]:
+    """The rows of a small sheet as ``(row number, {column: raw value})``; every column is required. Each row counts
+    against the workbook's :data:`MAX_ROWS`."""
+    rows = ws.iter_rows(values_only=True)
+    header = next(rows, None)
+    if header is None:
+        return []
+    index = {_key(h): i for i, h in enumerate(header) if h is not None}
+    missing = [c for c in columns if _key(c) not in index]
+    if missing:
+        problems.append(
+            Problem(sheet, 1, ", ".join(missing), "missing_column", f"missing column(s): {', '.join(missing)}")
+        )
+        return []
+    out = []
+    for n, row in enumerate(rows, start=2):
+        if row is None or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        _take(budget)
+        out.append((n, {c: row[index[_key(c)]] if index[_key(c)] < len(row) else None for c in columns}))
+    return out
+
+
+def _seasons(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
+    out = []
+    seen: set[tuple[str, date]] = set()
+    for n, cells in _table(ws, SEASONS_SHEET, SEASON_COLUMNS, problems, budget):
+        try:
+            name, start, end = _text(cells["Season"]), _date(cells["From"]), _date(cells["To"])
+        except ValueError as exc:
+            problems.append(Problem(SEASONS_SHEET, n, None, "invalid_value", str(exc)))
+            continue
+        if not name or len(name) > 80 or start is None or end is None or end < start:
+            problems.append(
+                Problem(SEASONS_SHEET, n, None, "invalid_season", "a season has a name (1-80) and From <= To")
+            )
+            continue
+        if (_key(name), start) in seen:  # the bk-069 key (contract, name, start): one row per range
+            problems.append(Problem(SEASONS_SHEET, n, None, "duplicate_season", f"{name} from {start} is listed twice"))
+            continue
+        seen.add((_key(name), start))
+        out.append({"name": name, "date_from": start, "date_to": end, "sheet": SEASONS_SHEET, "row": n})
+    return out
+
+
+def _children(ws: Any, problems: list[Problem], budget: list[int]) -> list[dict[str, Any]]:
+    out = []
+    seen: set[tuple[str, str | None, str, int]] = set()
+    for n, cells in _table(ws, CHILDREN_SHEET, CHILDREN_COLUMNS, problems, budget):
+        try:
+            age_min, age_max = _age(cells["Age min"]), _age(cells["Age max"])
+            net = _amount(cells["Net"])
+        except ValueError as exc:
+            problems.append(Problem(CHILDREN_SHEET, n, None, "invalid_value", str(exc)))
+            continue
+        basis = BASES.get(_key(cells["Basis"]))
+        board = (_text(cells["Meal plan"]) or "").upper() or None
+        code = (_text(cells["Hotel code"]) or "").upper()
+        if not code or age_min is None or age_max is None or age_max < age_min or net is None or basis is None:
+            problems.append(
+                Problem(
+                    CHILDREN_SHEET,
+                    n,
+                    None,
+                    "invalid_child_price",
+                    "a child price has a hotel code, ages (min <= max), basis sharing or extra bed and a net",
+                )
+            )
+            continue
+        if board is not None and board not in rates.MEAL_PLANS:
+            problems.append(Problem(CHILDREN_SHEET, n, "Meal plan", "unknown_meal_plan", "RO, BB, HB, FB or AI"))
+            continue
+        key = (code, board, basis, age_min)  # the bk-069 key: one price per hotel, board, basis and band start
+        if key in seen:
+            why = "this hotel, meal plan, basis and age min already have a child price"
+            problems.append(Problem(CHILDREN_SHEET, n, None, "duplicate_child_price", why))
+            continue
+        seen.add(key)
+        out.append(
+            {
+                "hotel_code": code,
+                "age_min": age_min,
+                "age_max": age_max,
+                "basis": basis,
+                "meal_plan": board,
+                "net_amount": net,
+                "row": n,
+            }  # fmt: skip
+        )
+    return out
+
+
+def _expand_seasons(rows: list[RateRow], seasons: list[dict[str, Any]], problems: list[Problem]) -> list[RateRow]:
+    """A rate row naming a season of the Seasons sheet, with no dates, becomes one rate per range of that season (at
+    most :data:`MAX_ROWS` rates once expanded: 422 ``rate_sheet_too_many_rows`` as soon as the list passes it)."""
+    if not seasons:
+        return rows
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for season in seasons:
+        by_name.setdefault(_key(season["name"]), []).append(season)
+    out: list[RateRow] = []
+    for rate in rows:
+        name = rate.values.get("season")
+        if not name or "valid_from" in rate.values or "valid_to" in rate.values:
+            out.append(rate)
+            continue
+        ranges = by_name.get(_key(name))
+        if ranges is None:
+            problems.append(
+                Problem(rate.sheet, rate.row, "Season", "unknown_season", f"'{name}' is not on the Seasons sheet")
+            )
+            continue
+        if len(out) + len(ranges) > MAX_ROWS:
+            raise Invalid(
+                "rate_sheet_too_many_rows",
+                f"a rate sheet has at most {MAX_ROWS} rates once its seasons are expanded into their date ranges",
+            )
+        for r in ranges:
+            values = {**rate.values, "season": r["name"], "valid_from": r["date_from"], "valid_to": r["date_to"]}
+            out.append(RateRow(rate.sheet, rate.row, rate.hotel_code, rate.room_type, rate.service_code, values))
+    return out
 
 
 # ── Matching and writing ─────────────────────────────────────────────────────
 
-ROOM_TYPES_SQL = """
-SELECT upper(h.code) AS hotel_code, lower(regexp_replace(btrim(t.name), '\\s+', ' ', 'g')) AS room_type,
-       t.id::text AS id, t.status, h.status AS hotel_status
-FROM booking.hotel_room_types t JOIN booking.hotels h ON h.id = t.hotel_id
-WHERE h.supplier_id = $1::uuid
-"""
 SERVICES_SQL = """
 SELECT upper(s.code) AS code, s.id::text AS id, s.service_type, s.unit, s.status
 FROM booking.services s WHERE s.supplier_id = $1::uuid
@@ -417,65 +583,36 @@ FROM booking.services s WHERE s.supplier_id = $1::uuid
 
 
 async def _match(conn: asyncpg.Connection, supplier_id: str, sheet: Sheet) -> list[dict[str, Any]]:
-    rooms = {(r["hotel_code"], r["room_type"]): r for r in await conn.fetch(ROOM_TYPES_SQL, supplier_id)}
+    rooms = await rate_sheet_match.load(conn, supplier_id)
     services = {r["code"]: r for r in await conn.fetch(SERVICES_SQL, supplier_id)}
     currency = sheet.contract.get("currency")
     out: list[dict[str, Any]] = []
     for rate in sheet.rows:
-        problem = None
-        target: dict[str, Any] = {}
         if rate.sheet == HOTEL_SHEET:
-            found = rooms.get((rate.hotel_code or "", _key(rate.room_type)))
-            if found is None:
-                problem = Problem(
-                    rate.sheet,
-                    rate.row,
-                    "Room type",
-                    "unknown_item",
-                    f"no room type '{rate.room_type}' at hotel {rate.hotel_code} of this supplier",
-                )
-            elif found["status"] != "active" or found["hotel_status"] != "active":
-                problem = Problem(
-                    rate.sheet, rate.row, "Room type", "inactive_item", "the room type or hotel is inactive"
-                )
-            else:
-                target = {"hotel_room_type_id": found["id"], "unit": "room_night"}
+            target, why = rooms.target(rate.hotel_code, rate.room_type)  # AA-1153: linked hotels, aliases
         else:
-            found = services.get(rate.service_code or "")
-            if found is None:
-                problem = Problem(
-                    rate.sheet,
-                    rate.row,
-                    "Service code",
-                    "unknown_item",
-                    f"no service {rate.service_code} of this supplier",
-                )
-            elif found["service_type"] != SERVICE_SHEETS[rate.sheet]:
-                problem = Problem(
-                    rate.sheet,
-                    rate.row,
-                    "Service code",
-                    "wrong_sheet",
-                    f"{rate.service_code} is a {found['service_type']} service, not on the {rate.sheet} sheet",
-                )
-            elif found["status"] != "active":
-                problem = Problem(rate.sheet, rate.row, "Service code", "inactive_item", "the service is inactive")
-            else:
-                target = {"service_id": found["id"], "unit": found["unit"]}
+            target, why = _service_target(services, rate)
         row_currency = rate.values.pop("currency", None)
-        if problem is None and row_currency and currency and row_currency.upper() != currency:
-            problem = Problem(
-                rate.sheet,
-                rate.row,
-                "Currency",
-                "currency_mismatch",
-                f"the contract is in {currency}; this row says {row_currency}",
-            )
-        if problem is not None:
-            sheet.problems.append(problem)
+        if why is None and row_currency and currency and row_currency.upper() != currency:
+            why = ("Currency", "currency_mismatch", f"the contract is in {currency}; this row says {row_currency}")
+        if why is not None:
+            sheet.problems.append(Problem(rate.sheet, rate.row, *why))
             continue
         out.append({"sheet": rate.sheet, "row": rate.row, **target, **rate.values})
     return out
+
+
+def _service_target(services: dict[str, Any], rate: RateRow) -> tuple[dict[str, Any], tuple[str, str, str] | None]:
+    """The service of a service-sheet row, or why not (column, code, message)."""
+    found = services.get(rate.service_code or "")
+    if found is None:
+        return {}, ("Service code", "unknown_item", f"no service {rate.service_code} of this supplier")
+    if found["service_type"] != SERVICE_SHEETS[rate.sheet]:
+        why = f"{rate.service_code} is a {found['service_type']} service, not on the {rate.sheet} sheet"
+        return {}, ("Service code", "wrong_sheet", why)
+    if found["status"] != "active":
+        return {}, ("Service code", "inactive_item", "the service is inactive")
+    return {"service_id": found["id"], "unit": found["unit"]}, None
 
 
 def _preview(rate: dict[str, Any]) -> dict[str, Any]:
@@ -502,14 +639,42 @@ def _preview(rate: dict[str, Any]) -> dict[str, Any]:
     return {k: rate.get(k) for k in keys}
 
 
+def _children_matched(sheet: Sheet, hotels: dict[str, str]) -> list[dict[str, Any]]:
+    out = []
+    for child in sheet.children:
+        if (hotel := hotels.get(child["hotel_code"])) is None:
+            why = f"no hotel {child['hotel_code']} sold by this supplier"
+            sheet.problems.append(Problem(CHILDREN_SHEET, child["row"], "Hotel code", "unknown_item", why))
+            continue
+        out.append({**{k: v for k, v in child.items() if k != "hotel_code"}, "hotel_id": hotel})
+    return out
+
+
 async def import_sheet(
-    conn: asyncpg.Connection, staff: Staff, supplier_ref: str, data: bytes, *, dry_run: bool
+    conn: asyncpg.Connection,
+    staff: Staff,
+    supplier_ref: str,
+    data: bytes,
+    *,
+    dry_run: bool,
+    filename: str | None = None,
 ) -> dict[str, Any]:
     """Validate the workbook against the supplier's items; unless ``dry_run``, create the draft contract and its rates
     (call inside a transaction: any refusal rolls every row back). 422 ``rate_sheet_invalid`` lists every problem."""
     supplier = await suppliers.resolve_supplier(conn, supplier_ref)
     sheet = parse(data)
     matched = await _match(conn, supplier["id"], sheet) if sheet.rows else []
+    hotels = (await rate_sheet_match.load(conn, supplier["id"])).hotel if sheet.children else {}
+    children = _children_matched(sheet, hotels)
+    findings: list[dict[str, Any]] = []
+    diff: dict[str, Any] = {}
+    previous = None
+    if not sheet.problems:
+        # AA-1153: the business checks and the diff against the previous contract (an error blocks the import).
+        found = await rate_review.checks(conn, supplier["id"], sheet.contract, matched, sheet.seasons)
+        findings, diff, previous = found
+        for f in rate_checks.errors(findings):
+            sheet.problems.append(Problem(f.get("sheet") or SEASONS_SHEET, f.get("row"), None, f["code"], f["message"]))
     if sheet.problems:
         raise Invalid(
             "rate_sheet_invalid",
@@ -522,6 +687,12 @@ async def import_sheet(
         "supplier": {"id": supplier["id"], "code": supplier["code"]},
         "contract": {k: sheet.contract.get(k) for k in CONTRACT_FIELDS.values()},
         "rates": [_preview(r) for r in matched],
+        "seasons": [{k: s[k] for k in ("name", "date_from", "date_to")} for s in sheet.seasons],
+        "child_prices": [
+            {k: c[k] for k in ("hotel_id", "age_min", "age_max", "basis", "meal_plan", "net_amount")} for c in children
+        ],  # fmt: skip
+        "checks": findings,
+        "diff": diff,
         "ignored_sheets": sheet.ignored_sheets,
     }
     if dry_run:
@@ -532,6 +703,7 @@ async def import_sheet(
     contract = await suppliers.create_contract(
         conn, staff, supplier["id"], {k: v for k, v in sheet.contract.items() if v is not None}
     )
+    await rate_review.write_parts(conn, staff, contract["id"], sheet.seasons, children, sheet.ignored_sheets)
     for rate in matched:
         data_row = {k: v for k, v in rate.items() if k not in ("sheet", "row", "unit")}
         try:
@@ -544,6 +716,20 @@ async def import_sheet(
                 errors=[Problem(rate["sheet"], rate["row"], None, exc.code, exc.message).out()],
                 ignored_sheets=sheet.ignored_sheets,
             ) from None
+    await conn.execute(
+        "INSERT INTO booking.rate_sheet_imports (supplier_id, supplier_contract_id, previous_contract_id, file_sha256,"
+        " file_name, rate_rows, checks, diff, imported_by)"
+        " VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::jsonb, $8::jsonb, $9)",
+        supplier["id"],
+        contract["id"],
+        previous["id"] if previous else None,
+        hashlib.sha256(data).hexdigest(),
+        (filename or "").strip()[:200] or None,
+        len(matched),
+        json.dumps(rate_review.json_ready(findings)),
+        json.dumps(rate_review.json_ready(diff)),
+        staff.cis_user_id,
+    )
     out["contract"] = {"id": contract["id"], "status": contract["status"], "title": contract["title"]}
     out["imported"] = len(matched)
     return out
@@ -566,8 +752,11 @@ def build_workbook(
     contract: dict[str, Any] | None = None,
     hotel_rows: list[tuple[Any, ...]] | None = None,
     service_rows: dict[str, list[tuple[Any, ...]]] | None = None,
+    season_rows: list[tuple[Any, ...]] | None = None,
+    child_rows: list[tuple[Any, ...]] | None = None,
 ) -> bytes:
-    """An AA rate-sheet workbook: the empty template, or (tests, fixtures) one filled with the given rows."""
+    """An AA rate-sheet workbook: the empty template, or (tests, fixtures) one filled with the given rows (AA-1153:
+    with the Seasons and Hotel children sheets)."""
     wb = Workbook()
     ws = wb.active
     ws.title = CONTRACT_SHEET
@@ -582,6 +771,14 @@ def build_workbook(
         sheet = wb.create_sheet(name)
         sheet.append(list(SERVICE_COLUMNS))
         for row in (service_rows or {}).get(name, []):
+            sheet.append(list(row))
+    for title, columns, extra in (
+        (SEASONS_SHEET, SEASON_COLUMNS, season_rows),
+        (CHILDREN_SHEET, CHILDREN_COLUMNS, child_rows),
+    ):
+        sheet = wb.create_sheet(title)
+        sheet.append(list(columns))
+        for row in extra or []:
             sheet.append(list(row))
     buf = io.BytesIO()
     wb.save(buf)

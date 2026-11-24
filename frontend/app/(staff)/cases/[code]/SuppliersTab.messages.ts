@@ -110,6 +110,9 @@ export const MSG = phrasebook(
     "No supplier on this item": "No supplier on this item",
     "Agency told: declined or cancelled": "Agency told: declined or cancelled",
     "Something went wrong": "Something went wrong",
+    "Hotel ref": "Hotel ref",
+    "Hotel confirmation number (optional)": "Hotel confirmation number (optional)",
+    "The hotel's own number the supplier passes on; travellers check in with it.": "The hotel's own number the supplier passes on; travellers check in with it.",
   },
   {
     "The file could not be read.": "Không đọc được tệp.",
@@ -215,6 +218,9 @@ export const MSG = phrasebook(
     "No supplier on this item": "Mục này chưa có nhà cung cấp",
     "Agency told: declined or cancelled": "Đã báo đại lý: bị từ chối hoặc đã huỷ",
     "Something went wrong": "Đã có lỗi xảy ra",
+    "Hotel ref": "Mã khách sạn",
+    "Hotel confirmation number (optional)": "Mã xác nhận của khách sạn (không bắt buộc)",
+    "The hotel's own number the supplier passes on; travellers check in with it.": "Mã riêng của khách sạn do nhà cung cấp chuyển lại; khách nhận phòng bằng mã này.",
   },
   ),
 );

@@ -73,6 +73,8 @@ class BookingFacts(BaseModel):
     pickup_point: str | None = Field(default=None, max_length=200)
     dropoff_point: str | None = Field(default=None, max_length=200)
     voucher_note: str | None = Field(default=None, max_length=500)
+    # AA-1153 (T11): the hotel's own confirmation number the DMC passes on (travellers check in with it).
+    hotel_confirmation_ref: str | None = Field(default=None, max_length=100)
 
 
 class NewBooking(BookingFacts):
@@ -92,6 +94,7 @@ class ConfirmIn(BaseModel):
 
     confirmation_ref: str = Field(min_length=1, max_length=100)
     voucher_file_id: UUID | None = None
+    hotel_confirmation_ref: str | None = Field(default=None, max_length=100)  # AA-1153 (T11), a room booking
 
 
 class DeclineIn(BaseModel):
@@ -221,6 +224,7 @@ async def confirm_booking(body: ConfirmIn, booking_id: BookingId, staff: CanWrit
             str(booking_id),
             confirmation_ref=body.confirmation_ref,
             voucher_file_id=str(body.voucher_file_id) if body.voucher_file_id else None,
+            hotel_confirmation_ref=body.hotel_confirmation_ref,
         )
 
 
