@@ -11,7 +11,10 @@ tests/integration/test_bk067_schema.py, the HTTP flows tests/integration/test_aa
   tests/unit/test_aa1158_profile_options.py;
 - a contact change by the person who entered the account or by the approver blocks the approval (review S289);
 - fix pass 2 (review S289): a 422 on the entry / decision body never echoes a submitted value (nor logs it); the full
-  details only of a pending or approved row; no Approve for the person who entered a row unless business owner.
+  details only of a pending or approved row; no Approve for the person who entered a row unless business owner;
+- tech lead S289: only the business owner approves, the tech lead (platform owner marker) as the fallback; any other
+  administrator, a capped session and a view-as session get no Approve and 403 ``bank_approver_not_allowed``
+  (:func:`app.suppliers.bank_accounts.approver_kind`; the other tests here stand the caller in as the tech lead).
 
 KMS is a fake key provider; all names and numbers are invented."""
 
@@ -27,13 +30,15 @@ import pytest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi.testclient import TestClient
 
-from app.auth import self_approval
+from app.auth import custom_roles, self_approval
 from app.auth.staff import Staff, current_staff, get_pool
 from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from app.main import create_app
 from app.settings import Settings
 from app.suppliers import bank_accounts, bank_crypto, profile
 from tests.unit.fakes import ScriptedConn, policy_rows
+
+REAL_APPROVER_KIND = bank_accounts.approver_kind  # before the autouse fixture below replaces it
 
 SUPPLIER = "5a000000-0000-4000-8000-0000000011b2"
 ROW = "5b000000-0000-4000-8000-0000000011b2"
@@ -72,6 +77,19 @@ class FakeKms:
             return self.master.decrypt(wrapped[:12], wrapped[12:], json.dumps(context, sort_keys=True).encode())
         except Exception as exc:  # noqa: BLE001 — like KMS: a context mismatch is a refusal
             raise bank_crypto.BankCryptoError("KMS Decrypt failed") from exc
+
+
+@pytest.fixture(autouse=True)
+def tech_lead_approves(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Every holder of supplier_bank.approve stands in as the tech lead (the approver rule has its own tests below)."""
+    asked: list[str] = []
+
+    async def fake(_conn: Any, staff: Staff) -> str | None:
+        asked.append(staff.cis_user_id)
+        return bank_accounts.TECH_LEAD if staff.can("supplier_bank.approve") else None
+
+    monkeypatch.setattr(bank_accounts, "approver_kind", fake)
+    return asked
 
 
 # ── Envelope encryption ──────────────────────────────────────────────────────
@@ -234,21 +252,21 @@ def test_row_actions_by_caller() -> None:
         "reject": False,
         "withdraw": True,
     }
-    checker = bank_accounts.row_out(_row(), CHECKER)["actions"]
+    checker = bank_accounts.row_out(_row(), CHECKER, approver_ok=True)["actions"]
     assert checker["approve"] and checker["reject"] and checker["reveal"] and not checker["withdraw"]
     assert bank_accounts.row_out(_row(), FIN)["actions"]["reveal"] is True
     assert bank_accounts.row_out(_row(), SALES)["actions"] == {k: False for k in own["actions"]}
-    done = bank_accounts.row_out(_row(status="approved"), CHECKER)["actions"]
+    done = bank_accounts.row_out(_row(status="approved"), CHECKER, approver_ok=True)["actions"]
     assert not done["approve"] and not done["reject"]
 
 
 def test_a_recent_contact_change_blocks_the_approve_action() -> None:
-    by_enterer = bank_accounts.row_out(_row(), CHECKER, frozenset({ENTERER.cis_user_id}))
+    by_enterer = bank_accounts.row_out(_row(), CHECKER, frozenset({ENTERER.cis_user_id}), approver_ok=True)
     assert by_enterer["approve_blocked"] == "contacts_recently_changed"
     assert not by_enterer["actions"]["approve"] and by_enterer["actions"]["reject"]
-    by_me = bank_accounts.row_out(_row(), CHECKER, frozenset({CHECKER.cis_user_id}))
+    by_me = bank_accounts.row_out(_row(), CHECKER, frozenset({CHECKER.cis_user_id}), approver_ok=True)
     assert not by_me["actions"]["approve"]
-    someone_else = bank_accounts.row_out(_row(), CHECKER, frozenset({"it-1158p2-third"}))
+    someone_else = bank_accounts.row_out(_row(), CHECKER, frozenset({"it-1158p2-third"}), approver_ok=True)
     assert someone_else["actions"]["approve"] and someone_else["approve_blocked"] is None
     decided = bank_accounts.row_out(_row(status="approved"), CHECKER, frozenset({ENTERER.cis_user_id}))
     assert decided["approve_blocked"] is None
@@ -261,7 +279,7 @@ def test_no_approve_for_the_person_who_entered_unless_business_owner() -> None:
     row = _row(entered_by=ADMIN_ENTERER.cis_user_id)
     plain = bank_accounts.row_out(row, ADMIN_ENTERER)["actions"]
     assert not plain["approve"] and not plain["approve_self"] and not plain["reject"] and plain["withdraw"]
-    owner = bank_accounts.row_out(row, ADMIN_ENTERER, self_ok=True)["actions"]
+    owner = bank_accounts.row_out(row, ADMIN_ENTERER, self_ok=True, approver_ok=True)["actions"]
     assert owner["approve"] and owner["approve_self"]
     # A recent contact change still blocks the business owner's own approval.
     blocked = bank_accounts.row_out(row, ADMIN_ENTERER, frozenset({ADMIN_ENTERER.cis_user_id}), self_ok=True)
@@ -673,3 +691,114 @@ def test_profile_db_round_trip() -> None:
         "role_contacts": [],
         "payment_terms": {"basis": "on_arrival"},
     }
+
+
+# ── Who approves (tech lead S289): the business owner, the tech lead as the fallback ─────────────────────────────
+
+
+SIGNED_IN = Staff("cog:it-1158p2-sub", None, "Admin", "admin", True, None, cognito_sub="it-1158p2-sub")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("markers", "kind"),
+    [
+        ((False, True), "business_owner"),
+        ((True, True), "business_owner"),
+        ((True, False), "tech_lead"),
+        ((False, False), None),
+    ],
+)
+async def test_approver_kind_reads_the_markers(
+    monkeypatch: pytest.MonkeyPatch, markers: tuple[bool, bool], kind: str | None
+) -> None:
+    async def fake_markers(_conn: Any, _staff: Any) -> tuple[bool, bool]:
+        return markers
+
+    monkeypatch.setattr(custom_roles, "markers", fake_markers)
+    assert await REAL_APPROVER_KIND(ScriptedConn(), SIGNED_IN) == kind
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "staff",
+    [
+        Staff("cog:it-1158p2-fin", None, "Fin", "finance", True, None, cognito_sub="it-1158p2-fin"),
+        Staff("it-1158p2-legacy", None, "Legacy", "admin", True, None),  # no WORKFORCE identity
+        Staff("cog:it-1158p2-pv", None, "Pv", "admin", True, None, cognito_sub="it-1158p2-pv", preview=True),
+        Staff("cog:it-1158p2-w", None, "W", "admin", True, None, cognito_sub="it-1158p2-w", e2e_writer="pricing_maker"),
+        Staff(
+            "cog:it-1158p2-e2e",
+            "e2e-owner@e2e-mail.lumiguides.it.com",
+            "E2E owner",
+            "admin",
+            True,
+            None,
+            cognito_sub="it-1158p2-e2e",
+        ),
+    ],
+    ids=["no_capability", "no_identity", "preview", "e2e_writer", "e2e_owner"],
+)
+async def test_approver_kind_never_reads_for_a_capped_session(monkeypatch: pytest.MonkeyPatch, staff: Staff) -> None:
+    async def owner_markers(_conn: Any, _staff: Any) -> tuple[bool, bool]:
+        raise AssertionError("no marker read for a session that never approves")
+
+    monkeypatch.setattr(custom_roles, "markers", owner_markers)
+    assert await REAL_APPROVER_KIND(ScriptedConn(), staff) is None
+
+
+def test_no_approve_action_for_another_administrator() -> None:
+    other = bank_accounts.row_out(_row(), CHECKER)
+    assert other["actions"]["approve"] is False and other["actions"]["reject"] is True
+    assert other["approve_blocked"] == bank_accounts.APPROVER_NOT_ALLOWED
+    # The person who entered it is not told about the approver (their own row has no approval to give).
+    own = bank_accounts.row_out(_row(entered_by=ADMIN_ENTERER.cis_user_id), ADMIN_ENTERER)
+    assert own["approve_blocked"] is None
+    assert bank_accounts.row_out(_row(), SALES)["approve_blocked"] is None
+
+
+@pytest.mark.asyncio
+async def test_another_administrator_is_refused_before_any_write(
+    monkeypatch: pytest.MonkeyPatch, tech_lead_approves: list[str]
+) -> None:
+    async def nobody(_conn: Any, _staff: Staff) -> str | None:
+        return None
+
+    monkeypatch.setattr(bank_accounts, "approver_kind", nobody)
+    conn = decide_conn()
+    with pytest.raises(Forbidden) as err:
+        await bank_accounts.decide(conn, CHECKER, ROW, "approve", "Called the desk on the contract number")
+    assert err.value.code == bank_accounts.APPROVER_NOT_ALLOWED and writes(conn) == []
+    # A rejection stays open to every holder of supplier_bank.approve (it keeps the money where it was).
+    await bank_accounts.decide(decide_conn(), CHECKER, ROW, "reject", "number does not match")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("kind", "suffix"), [("business_owner", ""), ("tech_lead", " by the tech lead")])
+async def test_the_approval_records_who_approved_as(monkeypatch: pytest.MonkeyPatch, kind: str, suffix: str) -> None:
+    async def as_kind(_conn: Any, _staff: Staff) -> str | None:
+        return kind
+
+    monkeypatch.setattr(bank_accounts, "approver_kind", as_kind)
+    lock_row = {"pending": False, "last_approved": NOW, "now": NOW}
+    conn = decide_conn().on("FROM booking.supplier_bank_account a WHERE a.supplier_id", lock_row)
+    await bank_accounts.decide(conn, CHECKER, ROW, "approve", "Called the accounts desk on the contract number")
+    audit = conn.sql("INSERT INTO booking.audit_logs")[0]
+    assert json.loads(audit[7])["approved_as"] == kind
+    assert (" by the tech lead" in str(audit)) is bool(suffix)
+
+
+@pytest.mark.asyncio
+async def test_my_work_and_the_list_filter_are_empty_for_another_administrator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def nobody(_conn: Any, _staff: Staff) -> str | None:
+        return None
+
+    monkeypatch.setattr(bank_accounts, "approver_kind", nobody)
+    where: list[str] = []
+    await bank_accounts.approvable_filter(ScriptedConn(), CHECKER, where, lambda *_: None)
+    assert where == ["false"]
+    conn = ScriptedConn().on("count(*)::int AS count", {"count": 0, "oldest_at": None})
+    await bank_accounts.queue(conn, CHECKER)
+    assert "AND false" in conn.calls[0][0]

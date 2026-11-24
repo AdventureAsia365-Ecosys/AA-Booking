@@ -3,7 +3,8 @@
 // reader sees the masked list (bank, •••• last 4, who entered and approved it). A new account is entered pending
 // (supplier_bank.write); a second person with supplier_bank.approve approves it after calling the supplier back on a
 // number AA already knew (the call-back note is required), never the person who entered it, except the business
-// owner (flagged). Payouts to the supplier wait while a change is pending and for the policy hours after an approval.
+// owner (flagged). Tech lead S289: only the business owner approves (the tech lead as the fallback); the API gives
+// anyone else no Approve action and approve_blocked "bank_approver_not_allowed", shown as a note. Payouts to the supplier wait while a change is pending and for the policy hours after an approval.
 // The full details open only for supplier_bank.read, one read at a time, and every read is audited.
 
 import { useState } from "react";
@@ -176,7 +177,8 @@ function AccountCard({
     <li className="flex flex-col gap-2 rounded-lg border border-line bg-card px-4 py-3 text-[13px] text-body">
       <AccountHead a={a} />
       <AccountHistory a={a} />
-      {a.approve_blocked && <p className="text-warning">{t("Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.")}</p>}
+      {a.approve_blocked === "contacts_recently_changed" && <p className="text-warning">{t("Approval closed: the person who entered this account, or you, changed the supplier's contacts recently. Another person checks the contacts against the contract and approves.")}</p>}
+      {a.approve_blocked === "bank_approver_not_allowed" && <p className="text-muted">{t("Only the business owner approves a bank account change (the tech lead when the business owner cannot). You can still reject it.")}</p>}
       <AccountButtons a={a} onDecide={onDecide} onReveal={onReveal} revealing={revealing} />
     </li>
   );

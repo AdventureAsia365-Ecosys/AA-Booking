@@ -12,7 +12,9 @@
   ``supplier_bank_contact_change_days`` blocks the approval (409 ``contacts_recently_changed``); anyone else's change
   is listed on the approval card; the profile choices are admin-edited data (a retired code stays valid where held);
 - fix pass 2: a 422 on the entry never echoes the submitted number; no Approve action on one's own entry (unless the
-  business owner); the details of a rejected, withdrawn or superseded row are not shown (409 ``bank_account_closed``).
+  business owner); the details of a rejected, withdrawn or superseded row are not shown (409 ``bank_account_closed``);
+- tech lead S289: another administrator (no owner marker) gets no Approve, an empty My work tile and 403
+  ``bank_approver_not_allowed``, may still reject; the business owner approves someone else's entry (not flagged).
 
 KMS is a fake key provider (AES-GCM with a fixed test master key): the database and the API are real. All names,
 numbers and codes are invented."""
@@ -40,7 +42,7 @@ from tests.staff_tokens import LocalCis
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-OWNER_SUB, LEAD_SUB, HOLDER_SUB = (f"d1158000-0000-4000-8000-00000000000{n}" for n in (1, 2, 3))
+OWNER_SUB, LEAD_SUB, HOLDER_SUB, OTHER_SUB = (f"d1158000-0000-4000-8000-00000000000{n}" for n in (1, 2, 3, 4))
 OWNER, LEAD = f"cog:{OWNER_SUB}", f"cog:{LEAD_SUB}"
 MAKER, FIN, CHECKER = "it-1158p2-maker", "it-1158p2-fin", "it-1158p2-checker"
 TOTP = ["pwd", "otp", "mfa"]
@@ -454,3 +456,46 @@ async def test_profile_choices_are_admin_edited_data(
         added["id"],
     )
     assert [r["action"] for r in audit] == ["supplier_profile_option.created", "supplier_profile_option.updated"]
+
+
+async def test_only_the_business_owner_or_the_tech_lead_approves(
+    http: tuple[httpx.AsyncClient, LocalCis, FakeKms], admin: asyncpg.Connection
+) -> None:
+    c, cis, _ = http
+    owner, lead, other = admin_of(cis, OWNER_SUB), admin_of(cis, LEAD_SUB), admin_of(cis, OTHER_SUB)
+    sid = (await ops.supply(admin, "it-1158p2 Willowmere"))["supplier"]
+    decision = {"action": "approve", "note": CALLBACK}
+    entered = await _ok(await c.post(f"/suppliers/{sid}/bank-accounts", json=ACCOUNT, headers=lead), 201)
+
+    # Another administrator (no owner marker in CIS): no Approve, told why, an empty My work tile, refused on the write.
+    row = (await _ok(await c.get(f"/suppliers/{sid}/bank-accounts", headers=other)))["items"][0]
+    assert row["actions"]["approve"] is False and row["actions"]["reject"] is True
+    assert row["approve_blocked"] == "bank_approver_not_allowed"
+    tiles = {t["key"]: t for t in (await _ok(await c.get("/my-work/summary", headers=other)))["tiles"]}
+    assert tiles["supplier_bank_to_approve"]["count"] == 0
+    approvable = await _ok(await c.get("/suppliers", params={"bank": "pending", "approvable": "me"}, headers=other))
+    assert approvable["items"] == []
+    _refused(await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=decision, headers=other),
+             403, "bank_approver_not_allowed")  # fmt: skip
+
+    # The business owner approves the tech lead's entry: a second-person approval, not flagged.
+    listed = (await _ok(await c.get(f"/suppliers/{sid}/bank-accounts", headers=owner)))["items"][0]
+    assert listed["actions"]["approve"] is True and listed["approve_blocked"] is None
+    approved = await _ok(
+        await c.post(f"/supplier-bank-accounts/{entered['id']}/decision", json=decision, headers=owner)
+    )
+    assert approved["status"] == "approved" and approved["owner_self_approved"] is False
+    after = await admin.fetchval(
+        "SELECT after->>'approved_as' FROM booking.audit_logs WHERE entity_id = $1::uuid"
+        " AND action = 'supplier_bank_account.approved'",
+        sid,
+    )
+    assert after == "business_owner"
+
+    # Another administrator still rejects a pending change (it keeps the money where it was).
+    newer = await _ok(
+        await c.post(f"/suppliers/{sid}/bank-accounts", json={**ACCOUNT, "account_number": "VN77 1111 2222 3333"},
+                     headers=lead), 201)  # fmt: skip
+    reject = {"action": "reject", "note": "The number does not match the call-back"}
+    rejected = await _ok(await c.post(f"/supplier-bank-accounts/{newer['id']}/decision", json=reject, headers=other))
+    assert rejected["status"] == "rejected"
