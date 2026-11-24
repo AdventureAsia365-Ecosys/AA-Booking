@@ -3022,6 +3022,14 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   synthetic hotel all of whose DMC links are synthetic, one query `e2e_staff_supply.DESK_ENTRY_SYNTHETIC_SQL`). That one
   request holds `b2b_desk.book` (its `contracting` role lacks it). Checks in `app/auth/e2e_staff_supply.py`
   (`check_record`), body checks in `app/auth/e2e_staff_bodies.py`.
+  A10e-6 (AA-1175 / AA-1158 S290, the band-change and payout live checks): the checker approves or rejects a Pricing ›
+  Policy version (POST `/booking/pricing/policy/{id}/approve`, no body; `/reject`, body exactly a `reason` starting
+  `SYNTHETIC`) only when it is a `price_pax_bands` version the A10h E2E owner proposed; the maker enters a supplier bill
+  (POST `/booking/supplier-bills`: bill number starting `SYNTHETIC`, a trip case, no departure, no notes, plain lines)
+  only for its synthetic supplier and a trip case of an agency CIS marks synthetic (the bk-045 line trigger holds each
+  line to that supplier and case); the checker approves (no body) only a bill the maker entered and last edited, of
+  that supplier, on a synthetic agency's case. No grant: `contracting` holds `bill.write`, `bill.approve` and
+  `pricing_policy.approve`. Checks in `app/auth/e2e_staff_finance.py` (`check_record`).
 - Image scan (AA-879): Trivy in "Docker Build Check" fails on any fixable CRITICAL/HIGH finding (`ignore-unfixed`);
   accepted ones go into `.trivyignore` with a `# reason` line and `exp:YYYY-MM-DD` ≤ 90 days ahead.
 

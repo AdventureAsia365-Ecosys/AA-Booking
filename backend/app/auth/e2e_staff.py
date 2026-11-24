@@ -62,6 +62,10 @@ agency payment recorded by one finance user and approved by another (maker-check
   ``contracting`` role lacks it). Both are checked in :mod:`app.auth.e2e_staff_supply` (:data:`RECORD_CHECKED`); the
   body checks live in :mod:`app.auth.e2e_staff_bodies`.
 
+- **Policy decisions and bills (A10e-6, AA-1175 / AA-1158 S290).** The checker approves or rejects only the E2E owner's
+  (A10h) group-size band changes; the maker enters a bill only for its synthetic supplier on a synthetic agency's case,
+  and the checker approves only those bills (:data:`FINANCE_CHECKED`, checked in :mod:`app.auth.e2e_staff_finance`).
+
 - **The custom-role maker (A10g, AA-1155 T5, root spec R4.3).** The Dev-only address :data:`E2E_CUSTOM_MAKER_EMAIL`
   (groups exactly ``cis-custom`` + ``booking-custom``) holds the custom role CIS grants it (``app.auth.custom_roles``),
   so it proves the custom role with a real session: it reads what the role reads, makes a SYNTHETIC supplier (body
@@ -171,6 +175,11 @@ SUPPLIER_BANK_DECISION = ("POST", "/booking/supplier-bank-accounts/{account_id}/
 # A10e-5 (AA-1153 S289): a second synthetic DMC for the synthetic hotel, and the desk entry that quotes it.
 HOTEL_SUPPLIER_LINK = ("POST", "/booking/hotels/{hotel_ref}/suppliers")
 DESK_ENTRY = ("POST", "/booking/b2b-desk/entries")
+# A10e-6 (AA-1175 / AA-1158 S290): Pricing > Policy decisions of the owner's band changes; synthetic supplier bills.
+POLICY_APPROVE = ("POST", "/booking/pricing/policy/{version_id}/approve")
+POLICY_REJECT = ("POST", "/booking/pricing/policy/{version_id}/reject")
+BILL_CREATE = ("POST", "/booking/supplier-bills")
+BILL_APPROVE = ("POST", "/booking/supplier-bills/{bill}/approve")
 
 # Allowed writes whose body is fixed: anything else in the body is 403 e2e_read_only (no capacity, rule or status
 # change other than the cancel itself).
@@ -191,6 +200,10 @@ BODY_CHECKS: Mapping[tuple[str, str], Callable[[Any], bool]] = MappingProxyType(
         SERVICE_DEACTIVATE: bodies.no_body,
         HOTEL_SUPPLIER_LINK: bodies.link_body_ok,  # A10e-5
         DESK_ENTRY: bodies.desk_entry_body_ok,  # A10e-5
+        POLICY_APPROVE: bodies.no_body,  # A10e-6
+        POLICY_REJECT: bodies.policy_reject_body_ok,  # A10e-6
+        BILL_CREATE: bodies.bill_body_ok,  # A10e-6
+        BILL_APPROVE: bodies.no_body,  # A10e-6
     }
 )
 
@@ -266,6 +279,7 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
                     SERVICE_DEACTIVATE,
                     HOTEL_SUPPLIER_LINK,  # A10e-5: both ends synthetic
                     DESK_ENTRY,  # A10e-5: synthetic agency, room lines on synthetic hotels only
+                    BILL_CREATE,  # A10e-6: its synthetic supplier, a synthetic agency's trip case
                 }
             ),
             # A10e-5: entering a desk booking needs b2b_desk.book (admin, sales), held by this one request only.
@@ -274,7 +288,8 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
         # A10e-2 pricing checker: approves, rejects or withdraws (published: restores the superseded one) a version
         # the pricing maker made on a synthetic plan. A10e-3: publishes or expires a contract of the maker's synthetic
         # supplier (the second person of the contract maker-checker); AA-1158: activates that synthetic supplier (it
-        # starts pending; the second person of the activation).
+        # starts pending; the second person of the activation). A10e-6: decides the E2E owner's band changes and
+        # approves the maker's synthetic bills.
         E2E_PRICING_CHECKER_EMAIL: E2EWriter(
             "pricing_checker",
             frozenset({"booking-contracting"}),
@@ -285,6 +300,9 @@ E2E_WRITERS: Mapping[str, E2EWriter] = MappingProxyType(
                     PRICE_VERSION_WITHDRAW,
                     CONTRACT_STATUS,
                     SUPPLIER_ACTIVATE,
+                    POLICY_APPROVE,
+                    POLICY_REJECT,
+                    BILL_APPROVE,
                 }
             ),
         ),
@@ -407,8 +425,8 @@ CODE_SQL: Mapping[str, tuple[re.Pattern[str], str]] = MappingProxyType(
 )
 _SUPPLY_SQL = (SUPPLIER_SYNTHETIC_SQL, HOTEL_SYNTHETIC_SQL, SERVICE_SYNTHETIC_SQL, CONTRACT_SYNTHETIC_SQL)
 # Route template -> (path parameter, SQL) for the writes checked by a path record. Every allow-listed write is in
-# exactly one of SYNTHETIC_SQL, BODY_SYNTHETIC, BODY_SUPPLIER, CHECKED_IN_ROUTE and NEW_RECORD (a unit test keeps
-# the lists equal).
+# exactly one of SYNTHETIC_SQL, BODY_SYNTHETIC, BODY_SUPPLIER, CHECKED_IN_ROUTE, NEW_RECORD, RECORD_CHECKED and
+# FINANCE_CHECKED (a unit test keeps the lists equal).
 SYNTHETIC_SQL: Mapping[str, tuple[str, str]] = MappingProxyType(
     {
         SUPPLIER_REQUEST[1]: ("booking_id", SUPPLIER_BOOKING_SYNTHETIC_SQL),
@@ -461,6 +479,8 @@ NEW_RECORD: frozenset[str] = frozenset({SUPPLIER_CREATE[1]})
 CHECKED_IN_ROUTE: frozenset[str] = frozenset({PRICE_IMPORT[1]})
 # A10e-5: writes checked by the path and the body together (app.auth.e2e_staff_supply.check_record).
 RECORD_CHECKED: frozenset[str] = frozenset({HOTEL_SUPPLIER_LINK[1], DESK_ENTRY[1]})
+# A10e-6: policy decisions and supplier bills (app.auth.e2e_staff_finance.check_record).
+FINANCE_CHECKED: frozenset[str] = frozenset({POLICY_APPROVE[1], POLICY_REJECT[1], BILL_CREATE[1], BILL_APPROVE[1]})
 _SUPPLY_BY_CODE_SQL = (SUPPLIER_BY_CODE_SQL, HOTEL_BY_CODE_SQL, SERVICE_BY_CODE_SQL)
 # An invoice ``ref`` that is not a UUID is its number (AAS-2026-000001), as app.agency_billing.invoices resolves it.
 INVOICE_BY_NUMBER_SQL = INVOICE_SYNTHETIC_SQL.replace("WHERE i.id = $1::uuid", "WHERE i.number = $1")
@@ -689,6 +709,10 @@ async def is_synthetic_record(
         from app.auth import e2e_staff_supply
 
         return await e2e_staff_supply.check_record(conn, route, params, body)
+    if route in FINANCE_CHECKED:  # A10e-6; same import rule
+        from app.auth import e2e_staff_finance
+
+        return await e2e_staff_finance.check_record(conn, route, params, body)
     field_name = BODY_SYNTHETIC.get(route)
     if field_name is not None:
         keys = body.get(field_name) if isinstance(body, dict) else None
