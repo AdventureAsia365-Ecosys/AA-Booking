@@ -40,6 +40,13 @@ this repo only (CIS keeps the marker either way), so the ADR lives here.
    `owner_payout_after_approval_allowed` (Pricing > Policy, section security, approved by the administrator group).
 9. **Oversight is visible to every auditor**: the audit filter `owner_self_approved=true` and the My work tile
    `owner_self_approvals` are shown to every `audit.read` holder, not only to the marker holder.
+10. **A supplier bank account change is approved by the business owner, the tech lead as the fallback** (tech lead
+    decision S289, 24/11/2026; part 2, bk-071). Of the holders of `supplier_bank.approve` (administrators) only the
+    identity carrying `is_business_owner`, or the platform owner marker `is_owner` (the tech lead), approves another
+    person's entry; anyone else gets 403 `bank_approver_not_allowed` and the database refuses the same
+    (`supplier_bank_account_approver_guard`). Read like decision 2 (uncached, fail closed; never a Preview, view-as or
+    Dev-only E2E session). The enterer never approves (decision 1 still lets the business owner approve her own,
+    flagged). A rejection stays open to any administrator but the enterer. The audit row records `approved_as`.
 
 ## Consequences
 
