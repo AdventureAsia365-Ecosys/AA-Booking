@@ -86,6 +86,7 @@ REQUIRED_SCHEMA_VERSIONS: tuple[str, ...] = (
     "bk-068",  # AA-1151: add-on offers, their places, v_place_addons and two policy values (app.supply.addons); MIG-4
     "bk-069",  # AA-1153: hotel supplier links, aliases, seasons, child prices, rate-sheet log, link guards; MIG-4
     "bk-071",  # AA-1158 S289: a bank account change is approved by the business owner or the tech lead; MIG-4
+    "bk-072",  # AA-1153 part 2: allotment release days default + rate-sheet row cap as pricing policy values; MIG-4
     "bk-073",  # AA-1148: supplier category dmc (1 to 7) and booking.v_supply_suppliers for CIS; MIG-4
 )
 REQUIRED_SCHEMA_VERSION = max(REQUIRED_SCHEMA_VERSIONS)

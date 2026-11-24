@@ -892,7 +892,10 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   plan's `updated_at`). **Held and sold are counted, never stored**: held = seats of `active` holds not past
   `expires_at`, sold = seats of `confirmed` holds whose line is not declined / cancelled; seats = adults + children.
   Holds lock the departure rows (`FOR UPDATE`, id order) before counting, so two holds on the last seat run one after
-  the other and exactly one wins. Line availability (quotes and holds): no departure = `on_request`; a departure with
+  the other and exactly one wins. Line availability (quotes and holds): no departure = `on_request` (AA-1153
+  part 2: a room line covered on every night by its DMC's allotment / free sale = `available`, re-checked at the hold
+  under a lock; per DMC and date only the terms of its newest published contract count, so a re-imported contract
+  replaces the terms it copies instead of doubling them); a departure with
   room that auto-confirms = `available`, that does not = `on_request`; full, cancelled or started = `sold_out`. A
   quote leaves out the seats of the live `active` hold of its own `(partner, proposal_ref, proposal_version)` (AA-950:
   the set a new quote of that version replaces, released by the caller before `POST /holds`; the hold still counts
@@ -1015,7 +1018,9 @@ marker; `docs/adr/0002-three-person-approval-rules.md`; implementation notes `do
   retention window yet (no PII; a DM-7.5 decision when volume needs one).
 - **B2B desk (AA-975, staff `/booking/b2b-desk`, permissions `b2b_desk.read` / `b2b_desk.write`: admin, sales,
   contracting)**: **on request** = lines of confirmed B2B bookings held `on_request` (no departure, or a departure
-  without `auto_confirm`). At confirm each gets `answer_due_at` = `booking.b2b_answer_due(now(), n, tz)` with settings
+  without `auto_confirm`; AA-1153 part 2: a room line not covered by its DMC's allotment / free sale). A room or
+  service line names the supplier whose rate priced it (`component.supplier`, the DMC of the quote line's first rate),
+  not the hotel's first DMC. At confirm each gets `answer_due_at` = `booking.b2b_answer_due(now(), n, tz)` with settings
   policy parameter `b2b_on_request_answer_business_days` (1; due soon `b2b_on_request_due_soon_hours`, 4) and setting `b2b_ops_timezone` (Asia/Ho_Chi_Minh): Mon–Fri, a weekend start
   counts from Monday 00:00, no public holidays; one staff notification `b2b.on_request` per booking. Staff accept
   (`confirmed`) or decline with a code (`sold_out | supplier_unavailable | minimum_not_met | other`; the seats go back
@@ -1481,9 +1486,9 @@ term here is the term the supplier gives AA under an AA supplier contract, never
   component's requested or confirmed supplier bookings (one room per booking and night; a service's pax per day).
   `GET /booking/supply/availability?component_id=…&date_from=…&date_to=…&pax=…&units=…` shows the verdict per date.
   The B2B quote asks it for every night and component of every line (a `tp:` line for its plan's components): a
-  stop-sale puts an available line `on_request` (`price_note.supply.stop_sale` names the dates). An allotment or
-  free-sale term does not lift a line without a departure above `on_request` yet (the hold cannot confirm such a line
-  at once; the supplier booking slice does).
+  stop-sale puts an available line `on_request` (`price_note.supply.stop_sale` names the dates). AA-1153 part 2
+  (B8): an `rt:` room line is lifted to `available` by its DMC's allotment / free sale (hotel section below); a `tp:` /
+  `sv:` line without a departure stays `on_request`. Reads: `app/supply/availability.py`.
 - **Rates** (`app/supply/rates.py`): `pax_type` (adult / child / infant; child and infant per person only, with an
   optional age band). Every lookup asks one pax type (default adult), so a child rate never becomes an adult price; the
   cost sheet spans count adult rates only. **B7**: `net_amount` is the only price any calculation reads; a
@@ -1548,8 +1553,9 @@ implementation notes `docs/implementation-notes/AA-1151.md`).
 ## Hotel contracts through DMCs (AA-1153 part 1, bk-069; S285 advisories r2 hotels T8, T9, T10, T11, B7; Jira PR-30)
 
 AA has no contract with a hotel: the chain is hotel -> DMC (AA's supplier) -> AA, so one hotel is sold to AA by several
-DMCs, each under its own AA supplier contract. Part 2 (later): allotment / release days on quotes (B8) and the Excel
-two-way round trip (facts and room-type sheets, export).
+DMCs, each under its own AA supplier contract. Part 2 (bk-072): allotment / free sale / release days on B2B room lines
+(B8), the two-way rate sheet (export, Inventory sheet) and the policy row cap (implementation notes
+`docs/implementation-notes/AA-1153.md`).
 
 - **Property master** (`app/supply/hotel_master.py`): one `booking.hotels` row per real hotel; the DMCs that sell it
   are `booking.hotel_supplier_links` (the DMC's own code for it, unique per supplier; at most one **preferred** DMC;
@@ -1572,8 +1578,11 @@ two-way round trip (facts and room-type sheets, export).
   (`{"<system>": "<code>"}`, a DMC code or a GIATA id later; no paid code). None of them is a `supply.hotel.v1` fact.
 - **Rates**: a room rate is written (and counted) under a contract whose supplier has an **active link** to the hotel
   (the bk-069 guards `supplier_rate_guard` / `supply_restriction_guard`, `rates.create_rate`, `restrictions`). One rate
-  choice for every caller (`rates.RATES_MANY_SQL`): per supplier as before (newest validity, pax band, lowest net)
-  with the asked board first; across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
+  choice for every caller (`rates.RATES_MANY_SQL`): per supplier the asked board first, then the supplier's newest
+  published contract with a matching rate (`published_at`, then contract id: `supply.newest_contract`, the same order
+  the allotment terms use, so a re-imported contract's new price applies on its dates and the older contract prices
+  only the dates, boards or bands it alone covers; hotel child prices follow the room rate's contract), then as before
+  (newest validity, pax band, lowest net); across suppliers the asked board, the preferred DMC, then the lowest net **in USD** (each
   net at the approved FX rate in force on the night, `booking.fx_rates`; a currency without one sorts last). Each found
   rate names its `supplier_id`. **One DMC per room**: every night and occupancy of one room type on one B2B line (and
   every night of a version item) is priced by the DMC of the first night; a unit another DMC was cheaper for is asked
@@ -1597,8 +1606,8 @@ two-way round trip (facts and room-type sheets, export).
   `supplier_bookings.hotel_confirmation_ref`: the hotel's own number the DMC passes on (confirm body or PATCH, while
   live; rooms only on confirm).
 - **DMC rate sheets** (`app/supply/rate_sheet.py`, `rate_sheet_match.py`, `rate_checks.py`, `rate_review.py`): hotels
-  matched by the DMC's code first, room types by name then alias; at most 2000 rows over the rate, `Seasons` and
-  `Hotel children` sheets and again after the season expansion, 40 MB unpacked; optional `Seasons` (a season row with no dates becomes one rate per range,
+  matched by the DMC's code first, room types by name then alias; at most `rate_sheet_max_rows` rows (policy, part 2)
+  over the rate, `Seasons`, `Hotel children` and `Inventory` sheets and again after the season expansion, 40 MB unpacked; optional `Seasons` (a season row with no dates becomes one rate per range,
   `booking.supplier_contract_seasons`) and `Hotel children` sheets; B7 `Published` + `Commission %` give the net. Checks:
   `season_overlap` (error: nothing imported), `season_gap`, `board_order` (HB below BB), `price_jump` (>=
   `rate_sheet_jump_warn_pct` against the supplier's previous contract) as warnings; the dry run shows them with the
@@ -1607,6 +1616,32 @@ two-way round trip (facts and room-type sheets, export).
   with warnings needs `acknowledge_checks` (409 `checks_unacknowledged`).
 - **Version items**: a room's default net is priced night by night (one cost row per run of nights at one rate; the
   first night's DMC for the whole stay).
+- **Allotment on B2B room lines** (part 2, B8; `app/supply/availability.py`, `app/b2b/room_hold.py`): the terms of
+  `booking.supply_restrictions` are per DMC: a quote's supply ask names the supplier of the rate that priced it and
+  reads only that supplier's terms and stop-sales (the staff check `GET /booking/supply/availability` takes an optional
+  `supplier_id`; without one every supplier's rows and use). An `rt:` line is `available` when every night has an
+  allotment with rooms left and not released (`today <= night - release_days`) or a free-sale term the party fits,
+  else `on_request` with `price_note.supply` (`inventory`: allotment / free_sale / mixed; or the dates per reason
+  `allotment_full` / `released` / `over_max_pax` / `stop_sale`). Allotment use per room type, DMC and night = supplier
+  bookings requested / confirmed (`quantity` rooms, min 1) + rooms of live B2B `rt:` lines held `available` (active
+  and not expired, or confirmed and not cancelled; their own supplier booking is not counted twice) + the earlier
+  lines of the same quote; the quote's own proposal-version hold is left out. The hold re-checks such a line under a
+  transaction advisory lock per room type: still covered = held `available` (confirm confirms it at once, no desk
+  line), else held `on_request`. An allotment term written without release days takes the pricing policy
+  `allotment_release_days_default` (bk-072, seeded 7; stored on the row). With an allotment of 2 rooms and 7 release
+  days, 2 rooms are available, the 3rd (in the line, the quote or after two were held) and any room inside the 7 days
+  is on request. Staff UI: supplier › Rates › "Room and service inventory" (list; add / remove while draft).
+- **Two-way rate sheet** (part 2, T10; `app/supply/rate_sheet_export.py`, `rate_sheet_inventory.py`,
+  `rate_sheet_cells.py`): `GET /booking/contracts/{id}/rate-sheet` (`supply.read`) exports a contract in the import
+  template (rates with the B7 Published + Commission %, Seasons, Hotel children, Inventory; a hotel by the DMC's own
+  code when linked with one). Edited and imported back (`POST …/rate-sheets`, DRY RUN first) it is a new draft whose
+  diff is against the supplier's published contract starting on or before it (a same-day contract counts since part
+  2). Optional sheet `Inventory` (Hotel code, Room type, Service code, Kind, From, To, Units, Release days, Max pax,
+  Notes) writes the allotment / free-sale / on-request terms with the draft (`restrictions.create_term`). The row cap
+  of import and export is the pricing policy `rate_sheet_max_rows` (bk-072, seeded 2000; was the code constant
+  `MAX_ROWS`); a bigger contract is refused at export (422 `rate_sheet_too_many_rows`) so an export always imports
+  back. Staff UI: supplier › Rates › Excel. `GET /booking/supply/options?supplier_id=` also lists the room types of
+  hotels the supplier is linked to as a DMC.
 
 ## Supplier bills and payouts (AA-682 S4, bk-030; S252 design §3.4, §4, §5, critic B4, B6)
 
@@ -2713,6 +2748,17 @@ A **contract** file (a new trigger on an existing table; MIG-4, the code PR rais
 or changes to someone other than the enterer, it must be an active `staff_users` row whose `cognito_sub` carries
 `is_business_owner` or `is_owner` in `shared.v_staff_booking_grant` and whose e-mail is not a Dev-only E2E address;
 else check_violation. Binds every role; an unchanged approval keeps passing after a marker moves. Tech lead S289.
+
+### `bk-073` (AA-1148 supplier category `dmc` and the CIS supplier list — needs `bk-008`, `bk-017`)
+
+A **contract** file (a replaced CHECK on `suppliers` and a cross-owner grant; MIG-4). `suppliers_categories_chk` allows
+`dmc` (destination management company: the DMC that runs a whole program) next to the six service categories, 1 to 7
+of them. The view `booking.v_supply_suppliers` (security barrier; contract `supply.supplier.v1`, root
+`docs/contracts/supply.supplier.v1.md`) lists the identity of every supplier (id, code, company name, categories,
+country, status, updated_at) and nothing else: no contact, notes, legal / tax / payment detail, bank account or price.
+SELECT to `booking` and `cis_app` (AA-CIS-Infra `db/owners.yaml` consumer grant, expected from `bk-073`): the CIS content
+workspace links a source tour to the supplier it comes from (`raw_tours.supplier_id`, a soft key, CIS 478). The Booking
+code PR that accepts `dmc` in the supplier forms raises readiness to `bk-073`.
 
 ## Out of scope today
 

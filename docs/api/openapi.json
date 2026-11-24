@@ -8066,6 +8066,7 @@
                 "type": "null"
               }
             ],
+            "description": "allotment only; empty = the pricing policy default",
             "title": "Release Days"
           },
           "units": {
@@ -23712,6 +23713,56 @@
         ]
       }
     },
+    "/booking/contracts/{contract_id}/rate-sheet": {
+      "get": {
+        "description": "The contract as a filled rate-sheet workbook (rates, seasons, hotel children, inventory terms): edit it and\nimport it back as a new draft contract (DRY RUN first; a second person publishes it).",
+        "operationId": "contract_rate_sheet_booking_contracts__contract_id__rate_sheet_get",
+        "parameters": [
+          {
+            "description": "Contract UUID",
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "description": "Contract UUID",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Contract Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Contract Rate Sheet",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
     "/booking/contracts/{contract_id}/rates": {
       "get": {
         "operationId": "contract_rates_booking_contracts__contract_id__rates_get",
@@ -33824,6 +33875,26 @@
               "minimum": 1,
               "title": "Units",
               "type": "integer"
+            }
+          },
+          {
+            "description": "one supplier's terms and use only (a DMC)",
+            "in": "query",
+            "name": "supplier_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 36,
+                  "minLength": 36,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "one supplier's terms and use only (a DMC)",
+              "title": "Supplier Id"
             }
           }
         ],

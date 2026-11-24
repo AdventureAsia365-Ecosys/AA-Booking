@@ -425,7 +425,7 @@ async def price_lines(
             raise _no_price(ask.line_ref, f"no rate in force on {unit.on.isoformat()}{who}{dmc}")
         line = out[unit.line]
         line.rate_ids.append(rate["id"])
-        line.supply.append(_supply_ask(unit, ask))
+        line.supply.append(_supply_ask(unit, ask, rate))
         policy_pct = (child_pct_by_type or {}).get(str(services.get(unit.service_id or "", {}).get("service_type")))
         cost = _unit_cost(
             unit,
@@ -588,11 +588,13 @@ def _unit_cost(
     return Decimal(str(rate["net_amount"])) * qty, rate["currency"]
 
 
-def _supply_ask(unit: _Unit, ask: LineAsk) -> SupplyAsk:
-    """The availability engine's ask of one rate lookup: a room night (its room count) or a service day (the party)."""
+def _supply_ask(unit: _Unit, ask: LineAsk, rate: dict[str, Any]) -> SupplyAsk:
+    """The availability engine's ask of one rate lookup: a room night (its room count) or a service day (the party),
+    under the supplier of the rate that priced it (AA-1153 part 2: a DMC's own allotment and stop-sales)."""
+    dmc = str(rate["supplier_id"]) if rate.get("supplier_id") else None
     if unit.room_type_id:
-        return SupplyAsk(unit.room_type_id, None, unit.on, ask.party, units=unit.rooms)
-    return SupplyAsk(None, unit.service_id, unit.on, ask.party, units=max(ask.party, 1))
+        return SupplyAsk(unit.room_type_id, None, unit.on, ask.party, units=unit.rooms, supplier_id=dmc)
+    return SupplyAsk(None, unit.service_id, unit.on, ask.party, units=max(ask.party, 1), supplier_id=dmc)
 
 
 Split = dict[int, tuple[dict[str, Any] | None, dict[str, Any] | None]]

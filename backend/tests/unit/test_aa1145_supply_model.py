@@ -15,14 +15,15 @@ from typing import Any
 import pytest
 
 from app.auth.staff import PERMISSIONS, PREVIEW_PERMISSIONS
-from app.b2b import components, departures, quotes
+from app.b2b import components, departures
 from app.errors import Invalid
 from app.pricing import policy_params, policy_values
-from app.supply import child_price, contract_terms, rate_sheet, rates, restrictions
+from app.supply import availability, child_price, contract_terms, rate_sheet, rates, restrictions
 from app.supply.restrictions import Restriction, evaluate
 from tests.unit.fakes import ScriptedConn, policy_rows
 
 DAY = date(2027, 12, 24)
+TP = "tp:00000000-0000-4000-8000-0000000011a6"
 TODAY = date(2027, 11, 1)
 
 
@@ -79,12 +80,10 @@ def test_quote_step_puts_an_available_line_on_request_on_a_stop_sale() -> None:
     stop = restrictions.Verdict("on_request", "stop_sale", "s1")
     free = restrictions.Verdict("available", "free_sale", "f1")
     days = [date(2027, 12, 23), DAY]
-    assert quotes.supply_availability(departures.AVAILABLE, [free, free], days) == (departures.AVAILABLE, None)
-    assert quotes.supply_availability(departures.AVAILABLE, [free, stop], days) == (
-        departures.ON_REQUEST,
-        {"stop_sale": ["2027-12-24"]},
-    )
-    assert quotes.supply_availability(departures.SOLD_OUT, [stop, stop], days)[0] == departures.SOLD_OUT
+    line = availability.line_availability
+    assert line(departures.AVAILABLE, TP, [free, free], days) == (departures.AVAILABLE, None)
+    assert line(departures.AVAILABLE, TP, [free, stop], days) == (departures.ON_REQUEST, {"stop_sale": ["2027-12-24"]})
+    assert line(departures.SOLD_OUT, TP, [stop, stop], days)[0] == departures.SOLD_OUT
 
 
 def test_component_ids() -> None:

@@ -51,7 +51,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.b2b import cancellation, departures, desk, plan_span, quotes, served
+from app.b2b import cancellation, departures, desk, plan_span, quotes, room_hold, served
 from app.b2b.components import PREFIX_PLAN, PREFIX_ROOM, PREFIX_SERVICE, parse_component
 from app.b2b.errors import B2BError
 from app.pricing import engine, policy_values
@@ -494,14 +494,9 @@ async def _create(
     for ask, (availability, _, why) in zip(asks, result, strict=True):
         if availability == departures.SOLD_OUT:
             raise B2BError("sold_out", f"line {ask.line_ref}: {why}")
-    # AA-1091 (root ADR 0005b Q9): a line the quote answered on request (e.g. a group of the policy's size) is held on
-    # request too, never auto-confirmed because its departure has seats.
-    result = [
-        (departures.ON_REQUEST, dep_id, why)
-        if availability == departures.AVAILABLE and r.get("availability") == departures.ON_REQUEST
-        else (availability, dep_id, why)
-        for r, (availability, dep_id, why) in zip(lines, result, strict=True)
-    ]
+    # AA-1091 (ADR 0005b Q9): a quote's on-request line is held on request; AA-1153 B8: a room line the quote answered
+    # available is held available only while its DMC's allotment / free sale still holds it (app.b2b.room_hold).
+    result = await room_hold.held(conn, quote["id"], lines, result, today=now.astimezone(UTC).date())
     expires_at = now + timedelta(hours=(await hold_policy(conn, now.astimezone(UTC).date())).b2b_hold_hours)
     for dep_id in {d for _, d, _ in result if d}:
         expires_at = min(expires_at, departures.start_of(locked[dep_id]["start_date"]))

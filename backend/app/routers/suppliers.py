@@ -24,7 +24,7 @@ from app.auth.staff import Staff, get_pool, require
 from app.errors import Invalid
 from app.routers.trip_cases import Email
 from app.suppliers import service
-from app.supply import rate_review, rate_sheet
+from app.supply import rate_review, rate_sheet, rate_sheet_export
 
 router = APIRouter(prefix="/booking", tags=["suppliers"])
 
@@ -265,6 +265,15 @@ async def rate_sheet_template(_: CanRead) -> Response:
         media_type=XLSX,
         headers={"Content-Disposition": 'attachment; filename="aa-rate-sheet-template.xlsx"'},
     )
+
+
+@router.get("/contracts/{contract_id}/rate-sheet")
+async def contract_rate_sheet(contract_id: ContractId, _: CanRead, pool: Pool) -> Response:
+    """The contract as a filled rate-sheet workbook (rates, seasons, hotel children, inventory terms): edit it and
+    import it back as a new draft contract (DRY RUN first; a second person publishes it)."""
+    async with pool.acquire() as conn:
+        data, name = await rate_sheet_export.export(conn, contract_id)
+    return Response(content=data, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 class RateSheetUpload(BaseModel):

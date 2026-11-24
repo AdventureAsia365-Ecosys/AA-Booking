@@ -51,11 +51,14 @@
 - **Supply restrictions** (AA-1145, bk-060, :mod:`app.supply.restrictions`): the one availability engine is asked for
   every night and component of every line (a ``tp:`` line for each component of its plan on its date). A stop-sale in
   effect on any of them (pending or approved, not ended: T13) puts an available line ``on_request`` and its
-  ``price_note.supply`` names the stop-sale dates; a sold-out line stays sold out. An allotment or free-sale term
-  does not lift a line without a departure above ``on_request`` yet: the hold cannot confirm such a line at once
-  (the supplier booking slice). **Children on an ``sv:`` line** (B4, :mod:`app.supply.child_price`): the supplier's
-  child rate, else the contract's child %, else the policy's ``child_price_pct_by_service_type``, else the adult
-  price; ``price_note.child`` says which (not hashed: the price is).
+  ``price_note.supply`` names the stop-sale dates; a sold-out line stays sold out. AA-1153 part 2 (B8): an ``rt:``
+  room line is ``available`` when every night has an allotment of the pricing DMC with rooms left and not released
+  (rooms held by others and by earlier lines of the quote counted) or a free-sale term the party fits, else
+  ``on_request`` (``price_note.supply`` says why); a ``tp:`` / ``sv:`` line without a departure stays on request
+  (:func:`app.supply.availability.line_availability`). **Children on an ``sv:`` line** (B4,
+  :mod:`app.supply.child_price`): the supplier's child rate, else the contract's child %, else the policy's
+  ``child_price_pct_by_service_type``, else the adult price; ``price_note.child`` says which (not hashed: the price
+  is).
 - **Board basis and hotel children** (AA-1153, bk-069, :mod:`app.b2b.components`): a line may ask a board
   (``meal_plan``: RO, BB, HB, FB, AI; default BB, or the tour night's) and give the children's ages (``child_ages``);
   both are hashed only when sent, so a request without them hashes as before. ``price_note.board`` keeps the board and
@@ -81,7 +84,8 @@ from app.b2b.components import PREFIX_PLAN, PREFIX_SERVICE, LineAsk, LineCost, p
 from app.b2b.errors import B2BError
 from app.catalog import operability
 from app.pricing import engine, policy_values, repository, seasons
-from app.supply import addon_rules, restrictions
+from app.supply import addon_rules
+from app.supply import availability as supply
 
 log = logging.getLogger(__name__)
 
@@ -265,21 +269,6 @@ def _child_age_max(policy: policy_values.Policy) -> int | None:
         return policy.age_bands[0]
     except policy_values.PolicyUnavailable:
         return None
-
-
-def supply_availability(
-    availability: str, verdicts: list[restrictions.Verdict], days: list[date]
-) -> tuple[str, dict[str, Any] | None]:
-    """AA-1145 (bk-060): an available line with a stop-sale in effect on any of its nights or components is quoted on
-    request (the note names the dates); a sold-out or on-request line keeps its availability. Engine precedence:
-    stop_sale > allotment / free_sale > on_request (:func:`app.supply.restrictions.evaluate`)."""
-    stops = sorted({d.isoformat() for d, v in zip(days, verdicts, strict=True) if v.reason == restrictions.R_STOP})
-    if not stops:
-        return availability, None
-    note = {"stop_sale": stops}
-    if availability == departures.AVAILABLE:
-        return departures.ON_REQUEST, note
-    return availability, note
 
 
 async def check_addon_rules(conn: asyncpg.Connection, asks: list[LineAsk], now: datetime) -> None:
@@ -581,11 +570,11 @@ async def quote_in(
         child_age_max=_child_age_max(pricing_policy),
         default_board=pricing_policy.hotel_default_board,
     )
-    # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip.
-    supply_asks = [a for lc in costs for a in lc.supply]
-    verdicts = iter(await restrictions.availability_many(conn, supply_asks, today=on))
-    supply_by_line = [[next(verdicts) for _ in lc.supply] for lc in costs]
     own_hold = await conn.fetchval(OWN_HOLD_SQL, partner_id, proposal_ref, proposal_version)
+    # AA-1145 (bk-060): the availability engine for every night and component of every line, in one round trip;
+    # AA-1153 B8: per DMC; an allotment counts rooms held by others and by earlier lines (app.supply.availability).
+    verdicts = iter(await supply.many(conn, [a for lc in costs for a in lc.supply], today=on, exclude_hold=own_hold))
+    supply_by_line = [[next(verdicts) for _ in lc.supply] for lc in costs]
     seats = await departures.availability(
         conn,
         [
@@ -623,7 +612,8 @@ async def quote_in(
         ask = line.ask
         plan = _line_plan(ask.component_id)
         season = calendars[plan].season_on(ask.service_date) if plan in calendars else None
-        availability, supply_note = supply_availability(availability, supply_by_line[no - 1], [a.on for a in lc.supply])
+        verdicts_of_line, days = supply_by_line[no - 1], [a.on for a in lc.supply]
+        availability, supply_note = supply.line_availability(availability, ask.component_id, verdicts_of_line, days)
         availability = group_availability(
             season_availability(availability, ask.component_id, season),
             ask.component_id,

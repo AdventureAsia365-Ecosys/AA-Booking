@@ -44,6 +44,7 @@ import "@/app/(staff)/suppliers/_parts/DestinationPicker.messages";
 import "@/app/(staff)/suppliers/_parts/EditSupplierView.messages";
 import "@/app/(staff)/suppliers/_parts/RateDrawer.messages";
 import "@/app/(staff)/suppliers/_parts/RateReview.messages";
+import "@/app/(staff)/suppliers/_parts/InventoryTerms.messages";
 import "@/app/(staff)/suppliers/_parts/RateSheetDrawer.messages";
 import "@/app/(staff)/suppliers/_parts/RatesTab.messages";
 import "@/app/(staff)/suppliers/_parts/SupplierBankContactChanges.messages";

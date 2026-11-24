@@ -19,6 +19,7 @@ import { useT } from "@/ui/core/useI18n";
 import { useTx } from "@/ui/local/useTx";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
 import { MSG } from "./RateSheetDrawer.messages";
+import { InventoryPreview } from "./InventoryTerms";
 import { SheetReview } from "./RateReview";
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -136,7 +137,8 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
       width={560}
     >
       <p className="text-[13px] text-muted">
-        {t("One sheet per service type (Hotel, Transport, Guide, Entrance, Activity, Meal) and a Contract sheet. Items are matched by their hotel code and room type, or their service code. The import creates a draft contract; a second person publishes it.")}
+        {t("One sheet per service type (Hotel, Transport, Guide, Entrance, Activity, Meal) and a Contract sheet. Items are matched by their hotel code and room type, or their service code. The import creates a draft contract; a second person publishes it.")}{" "}
+        {t("Optional sheets: Seasons, Hotel children and Inventory (allotment, free sale, on request). To change a contract, download it from the Rates tab (Excel), edit it and import it here.")}
       </p>
       <LinkButton className="self-start" onClick={downloadTemplate}>
         <Download size={14} /> {t("Download the template")}
@@ -181,6 +183,7 @@ export function RateSheetDrawer({ supplierRef, onClose }: { supplierRef: string;
             ))}
             {preview.rates.length > 12 && <li>{t("… and {0} more", preview.rates.length - 12)}</li>}
           </ul>
+          <InventoryPreview rows={preview.inventory} />
           {preview.ignored_sheets.length > 0 && <p className="text-muted">{t("Not read:")} {preview.ignored_sheets.join(", ")}</p>}
         </div>
       )}
