@@ -85,7 +85,7 @@ def _detail(r: Any) -> Any:
 # ── the module ──────────────────────────────────────────────────────────────────────────────────
 
 
-def test_the_pair_shares_only_the_decisions_and_holds_no_grant() -> None:
+def test_the_pair_shares_only_the_decisions_and_holds_one_grant() -> None:
     maker, checker = e2e_staff.E2E_WRITERS[MAKER], e2e_staff.E2E_WRITERS[CHECKER]
     assert maker.writes & checker.writes == {
         e2e_staff.PRICE_VERSION_APPROVE,
@@ -93,7 +93,8 @@ def test_the_pair_shares_only_the_decisions_and_holds_no_grant() -> None:
         e2e_staff.PRICE_VERSION_WITHDRAW,
         e2e_staff.CONTRACT_STATUS,  # A10e-3: the service refuses the draft's maker (403 maker_checker)
     }
-    assert not maker.grants and not checker.grants
+    # A10e-5 (AA-1153 S289): the maker's only grant is b2b_desk.book on its synthetic desk entry; the checker has none.
+    assert dict(maker.grants) == {e2e_staff.DESK_ENTRY: frozenset({"b2b_desk.book"})} and not checker.grants
     # AA-1158: the checker (never the maker) activates the maker's synthetic supplier, which starts pending.
     assert e2e_staff.SUPPLIER_ACTIVATE in checker.writes and e2e_staff.SUPPLIER_ACTIVATE not in maker.writes
     assert e2e_staff.SYNTHETIC_SQL[e2e_staff.SUPPLIER_ACTIVATE[1]] == ("supplier_ref", e2e_staff.SUPPLIER_SYNTHETIC_SQL)

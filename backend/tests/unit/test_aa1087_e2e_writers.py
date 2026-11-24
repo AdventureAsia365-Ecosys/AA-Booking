@@ -121,6 +121,10 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
                     e2e_staff.ROOM_TYPE_CREATE,
                     e2e_staff.SERVICE_CREATE,
                     e2e_staff.SERVICE_DEACTIVATE,
+                    # A10e-5 (AA-1153 S289): a second synthetic DMC and a desk entry of synthetic hotel rooms;
+                    # tests/unit/test_aa1153_e2e_hotel_quote.py.
+                    e2e_staff.HOTEL_SUPPLIER_LINK,
+                    e2e_staff.DESK_ENTRY,
                 }
             ),
         ),
@@ -149,12 +153,13 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
     }
     # The maker and the checker never share a write (maker-checker by identity).
     assert not (e2e_staff.E2E_WRITERS[MAKER].writes & e2e_staff.E2E_WRITERS[CHECKER].writes)
-    # A10e-1: the only extra permission any identity ever holds, on exactly one write with a fixed body.
+    # A10e-1 / A10e-5: the only extra permissions any identity ever holds, each on exactly one write whose body is fixed
+    # or checked.
     assert {email: dict(w.grants) for email, w in e2e_staff.E2E_WRITERS.items()} == {
         STAFF: {e2e_staff.DEPARTURE_CANCEL: frozenset({"trip_plan.write"})},
         MAKER: {},
         CHECKER: {},
-        PRICING_MAKER: {},
+        PRICING_MAKER: {e2e_staff.DESK_ENTRY: frozenset({"b2b_desk.book"})},
         PRICING_CHECKER: {},
         CUSTOM_MAKER: {},
     }
@@ -169,10 +174,12 @@ def test_the_identities_and_their_writes_are_exactly_the_reviewed_ones() -> None
         e2e_staff.SUPPLIER_DEACTIVATE,
         e2e_staff.HOTEL_DEACTIVATE,
         e2e_staff.SERVICE_DEACTIVATE,
+        e2e_staff.HOTEL_SUPPLIER_LINK,
+        e2e_staff.DESK_ENTRY,
     }
     for writer in e2e_staff.E2E_WRITERS.values():
         assert set(writer.grants) <= writer.writes
-        assert set(writer.grants) <= set(e2e_staff.BODY_RULES)
+        assert set(writer.grants) <= set(e2e_staff.BODY_RULES) | set(e2e_staff.BODY_CHECKS)
 
 
 def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
@@ -185,18 +192,20 @@ def test_every_allowed_write_is_a_real_route_with_a_synthetic_check() -> None:
             param, sql = e2e_staff.SYNTHETIC_SQL[route]
             assert "{" + param + "}" in route and "is_synthetic" in sql and "$1" in sql
     # Every allowed write is checked exactly one way: by its path record, by the plans or the supplier its body names,
-    # in the route, or (a new synthetic supplier) by its body check alone.
+    # in the route, (a new synthetic supplier) by its body check alone, or (A10e-5) by its path and body together.
     ways = [
         set(e2e_staff.SYNTHETIC_SQL),
         set(e2e_staff.BODY_SYNTHETIC),
         set(e2e_staff.BODY_SUPPLIER),
         set(e2e_staff.CHECKED_IN_ROUTE),
         set(e2e_staff.NEW_RECORD),
+        set(e2e_staff.RECORD_CHECKED),
     ]
     assert set().union(*ways) == {route for _, route in allowed}
     assert sum(len(w) for w in ways) == len(set().union(*ways))  # disjoint
     # A write checked by its body alone has a body check.
     assert {(m, r) for m, r in allowed if r in e2e_staff.NEW_RECORD} <= set(e2e_staff.BODY_CHECKS)
+    assert {(m, r) for m, r in allowed if r in e2e_staff.RECORD_CHECKED} <= set(e2e_staff.BODY_CHECKS)
 
 
 @pytest.mark.parametrize("email", [STAFF, STAFF.upper(), f"  {MAKER} ", CHECKER])
