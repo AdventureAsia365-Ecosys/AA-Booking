@@ -156,6 +156,26 @@ async def run_062_keeping_later_caps(conn: asyncpg.Connection, sql: str) -> None
         await conn.execute(LATER_062_CAPS_IN, row["role_code"], row["capability"], row["created_by"])
 
 
+# bk-068 creates booking.v_place_addons; bk-070 (AA-1152) appends the column title. CREATE OR REPLACE VIEW cannot drop a
+# column, so a re-run of bk-068 after bk-070 would fail ("cannot drop columns from view"). DB Migrate never re-runs a
+# registered file, so only the re-runs here drop the view right before bk-068: bk-068 recreates it with its grants and
+# comments, and bk-070, later in the same pass, appends the column again. A later file that appends a column adds it
+# to LATER_068_VIEW_COLUMNS.
+LATER_068_VIEW_COLUMNS = ("title",)
+LATER_068_VIEW_HAS_COLUMNS = """
+SELECT EXISTS (SELECT 1 FROM pg_attribute
+                WHERE attrelid = to_regclass('booking.v_place_addons') AND attname = ANY ($1::text[])
+                  AND NOT attisdropped) AS later
+"""
+
+
+async def run_068_dropping_later_view(conn: asyncpg.Connection, sql: str) -> None:
+    """Run the bk-068 text after dropping booking.v_place_addons if a later file appended columns to it."""
+    if await conn.fetchval(LATER_068_VIEW_HAS_COLUMNS, list(LATER_068_VIEW_COLUMNS)):
+        await conn.execute("DROP VIEW booking.v_place_addons")
+    await conn.execute(sql)
+
+
 async def apply_migrations(
     conn: asyncpg.Connection,
     *,
@@ -186,6 +206,8 @@ async def apply_migrations(
         try:
             if path.name.startswith("062_"):
                 await run_062_keeping_later_caps(conn, path.read_text(encoding="utf-8"))
+            elif path.name.startswith("068_"):
+                await run_068_dropping_later_view(conn, path.read_text(encoding="utf-8"))
             else:
                 await conn.execute(path.read_text(encoding="utf-8"))
             if path.name.startswith("051_") and not keep_s278_seed:
