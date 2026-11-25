@@ -149,6 +149,16 @@ jobs:
           pip-audit -r requirements.txt
           pip-audit -r requirements-dev.txt
 
+      # AA-1111 (S294): the staff admin's npm dependencies (runtime and dev), from the lockfile, failing on high or
+      # critical, as in the AA-Partner CRM web (AA-935, S284). Through .github/scripts/npm_audit_gate.py, so one
+      # advisory with no patched version can be accepted with a reason and an expiry (.github/npm-audit-allow.json, at
+      # most 90 days) instead of blocking every pull request. Any other high or critical advisory fails.
+      - name: npm audit (staff admin, failing on high)
+        working-directory: frontend
+        run: |
+          npm audit --json > ../npm-audit.json || true
+          python3 ../.github/scripts/npm_audit_gate.py ../.github/npm-audit-allow.json < ../npm-audit.json
+
   # S271: skipped only for a docs-only pull request (Lint's scope output tests=false); a failed scope runs it.
   test-unit:
     name: Unit Tests
