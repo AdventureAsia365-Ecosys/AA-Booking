@@ -2,7 +2,7 @@
 
 Adventure Asia sells to partner agencies (tenants) only and keeps no end-traveller record of its own. The B2C code
 is gone: the customer routes and tables (customers, traveller sign-in, My Payments ``booking.customer.v1``), the
-customer invoices and payments, the TripPlanner inquiry intake and its staff e-mail. Booking bk-045 (destructive)
+customer invoices and payments, the TripPlanner inquiry intake and its staff e-mail. Booking bk-076 (destructive)
 drops their tables after this build is deployed; its money rows are archived in ``booking.retired_b2c_record``.
 
 What stays is history: the ``b2c`` trip cases and every row about them (versions, supplier bookings, bills, payouts,
@@ -31,7 +31,7 @@ import asyncpg
 from app.errors import Gone
 
 # The kinds of the B2C half (the TripPlanner inquiry intake and the staff e-mail of a new inquiry): no handler since
-# AA-1046; Booking bk-045 refuses to apply while an intake job is queued or running.
+# AA-1046; Booking bk-076 refuses to apply while an intake job is queued or running.
 RETIRED_KINDS: frozenset[str] = frozenset({"bk_inquiry_pull", "bk_inquiry_process", "bk_notify_email"})
 
 CODE = "b2b_only"

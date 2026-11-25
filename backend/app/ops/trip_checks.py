@@ -8,7 +8,7 @@ required). Life: ``open`` → ``done`` | ``not_applicable``, and back to ``open`
 
 Next to the stored checks a case has two **derived** checks, never stored (``booking.v_trip_check_board``):
 ``suppliers_confirmed`` (supply state ``booked`` or ``none``, bk-026) and ``payment_verified`` (``None`` on every case
-since the customer invoices retired with the B2C half, AA-1046 / bk-045; agency money is agency billing).
+since the customer invoices retired with the B2C half, AA-1046 / bk-076; agency money is agency billing).
 
 **Emergency contact** (name + phone of a third person, ``pii:emergency_contact``): B2C cases only. On a B2B case the
 row stays ``not_applicable`` without contact fields (DM-6.8: the agency keeps traveller data); the database refuses
@@ -163,7 +163,7 @@ def derived_checks(board: dict[str, Any] | None) -> list[dict[str, Any]]:
             if board is None or board["payment_verified"] is None
             else ("done" if board["payment_verified"] else "open"),
             "detail": None,
-            # NULL on every case since bk-045 (AA-1046): the customer invoice retired with the B2C half.
+            # NULL on every case since bk-076 (AA-1046): the customer invoice retired with the B2C half.
             "available": board is not None and board["payment_verified"] is not None,
         },
     ]
