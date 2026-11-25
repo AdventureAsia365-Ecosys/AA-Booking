@@ -4,7 +4,7 @@ supply track (bk-026) from the facts, through the DB-checked edges.
 ``supplier_confirming`` while a supplier was asked (requested or confirmed booking), else ``confirmed``; a
 ``supplier_confirming`` case keeps its status while any booking is live (the S1 rule). The money track of a B2C case
 (``invoice_sent`` / ``payment_pending`` / ``paid`` from the customer invoice, bk-028) is gone with the customer
-invoices (AA-1046): no case takes a money status (``trip_cases_post_sale_guard`` refuses one since bk-045). Travel
+invoices (AA-1046): no case takes a money status (``trip_cases_post_sale_guard`` refuses one since bk-076). Travel
 statuses (``pre_departure`` onwards) belong to the lifecycle job and never step back here (critic note 12). Every move
 is a system UPDATE (empty ``booking.actor``, status note "Auto: …", audit actor ``aa682:advance_case``) that
 ``trip_cases_post_sale_guard`` checks again.

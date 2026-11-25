@@ -215,8 +215,8 @@ async def test_extend_and_cancellation_checks(admin: asyncpg.Connection) -> None
                 SEED,
             )
             case = await admin.fetchval(
-                "INSERT INTO booking.trip_cases (customer_id, status, source_system, source_id, channel,"
-                " party_tenant_id) VALUES (NULL, 'confirmed', 'crm', 'p-21', 'b2b', $1::uuid) RETURNING id::text",
+                "INSERT INTO booking.trip_cases (status, source_system, source_id, channel,"
+                " party_tenant_id) VALUES ('confirmed', 'crm', 'p-21', 'b2b', $1::uuid) RETURNING id::text",
                 tenant,
             )
 
@@ -285,8 +285,8 @@ async def test_backfill_locks_the_seed_policy_on_confirmed_holds(admin: asyncpg.
                 case = None
                 if status == "confirmed":
                     case = await admin.fetchval(
-                        "INSERT INTO booking.trip_cases (customer_id, status, source_system, source_id, channel,"
-                        " party_tenant_id) VALUES (NULL, 'confirmed', 'crm', $1, 'b2b', $2::uuid) RETURNING id::text",
+                        "INSERT INTO booking.trip_cases (status, source_system, source_id, channel,"
+                        " party_tenant_id) VALUES ('confirmed', 'crm', $1, 'b2b', $2::uuid) RETURNING id::text",
                         f"p-21b-{version}",
                         tenant,
                     )

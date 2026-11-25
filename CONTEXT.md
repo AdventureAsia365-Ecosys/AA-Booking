@@ -519,8 +519,8 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
 (an old value in the task definition is ignored). B2B cases come only from the B2B confirm path
 (`POST /booking/b2b/v1/holds/{id}/confirm`).
 
-- **The tables go next**: the B2C drop file (planned as bk-045; bk-045 went to the finance file first, so the drop takes
-  the next free bk- number) (`-- migrate: destructive`, DRY RUN + tech-lead approval, root
+- **The tables go next**: the B2C drop file `bk-076` (`migrations/076_aa1037_retire_b2c.sql`; planned as bk-045, which
+  went to the finance file first, AA-1061) (`-- migrate: destructive`, DRY RUN + tech-lead approval, root
   `docs/audits/2026-11-05-S270-aa1037-b2c-drop-dryrun/`) drops the customer and customer money tables, archives the
   money rows whole into the owner-only `booking.retired_b2c_record` (10 years, DM-7.1 accounting exception), drops
   `trip_cases.customer_id`, and lets a new trip case in only as b2b. This build reads none of the dropped objects, so
@@ -2798,6 +2798,17 @@ code PR that accepts `dmc` in the supplier forms raises readiness to `bk-073`.
 A **contract** file (config rows in existing tables; MIG-4, the code PR raises readiness to bk-074). Pricing policy
 parameter `contract_expiry_mail_roles` version 1 = `["admin", "contracting"]` (codes, the built-in staff roles), made by
 `seed:bk-074`, submitted and approved by another actor (Jira PR-31: remind the admins before a supplier contract ends).
+
+### `bk-076` (AA-1061 the B2C drop — needs `bk-020`, `bk-025`, `bk-027`, `bk-028`, `bk-030`, `bk-036`; applied after the DRY RUN)
+
+A **destructive** file (`-- migrate: destructive`: DB Migrate takes the RDS snapshot first; Migration Apply never
+applies it). It retires the B2C tables as "The B2C part is retired" describes: archives the customer money rows whole
+into the owner-only `booking.retired_b2c_record`, rewrites `v_trip_check_board`, `v_ops_data_totals`,
+`trip_cases_post_sale_guard` and `ops_files_guard` without B2C, drops the B2C views, tables, sequences and
+`trip_cases.customer_id`, and swaps `trip_cases_channel_chk` for "b2b, or b2c created before the drop". It refuses
+while a B2C row is younger than 30 days, while an intake job is queued or running, when another object depends on a
+dropped one, and, on a database that holds a B2C row, until the DRY RUN pins are pasted into it (nulls = refuse). No
+code PR follows: this build reads none of the dropped objects and runs on either side of it (no readiness raise).
 
 ## Out of scope today
 

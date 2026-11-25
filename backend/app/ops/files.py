@@ -20,7 +20,7 @@
   trip, which never enter ``booking.*``): 422 ``document_not_allowed_b2b``; bk-026 refuses it too.
 
 - **Customer payment evidence** (bk-028, entity ``payment``) is retired with the customer payments (AA-1046): its
-  rows and S3 objects are kept under the accounting exception (DM-7.1; bk-045 freezes them, the payments are archived
+  rows and S3 objects are kept under the accounting exception (DM-7.1; bk-076 freezes them, the payments are archived
   in ``booking.retired_b2c_record``), and no route reads, adds or removes one any more (403: no permission covers the
   entity ``payment``).
 
