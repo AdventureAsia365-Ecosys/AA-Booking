@@ -12,7 +12,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_VERSION=${APP_VERSION}
 
 # Security fixes the base image does not carry yet (Trivy fails the build on a fixable HIGH/CRITICAL finding):
-# upgrade the Debian packages already installed, install nothing new.
+# upgrade the Debian packages already installed, install nothing new. The deploy and the CI build pull the base tag
+# (`docker build --pull`) on a fresh runner with no layer cache, so every new commit's image re-runs this layer against
+# that day's Debian archive (S294: a Debian fix published after the last deploy is picked up by the next build; the
+# nightly Image Scan of the running images reports the ones still on an older build).
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

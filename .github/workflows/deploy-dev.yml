@@ -199,7 +199,8 @@ jobs:
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "image for ${GITHUB_SHA} already in ECR: reusing it (no build, no push)"
           else
-            docker build --build-arg GIT_SHA="${GITHUB_SHA}" --build-arg APP_VERSION="${APP_VERSION}" -t "$IMAGE" backend
+            # --pull and no layer cache (S294): the base tag and the apt upgrade layer are always read fresh.
+            docker build --pull --build-arg GIT_SHA="${GITHUB_SHA}" --build-arg APP_VERSION="${APP_VERSION}" -t "$IMAGE" backend
             docker push "$IMAGE"
           fi
           echo "DEPLOY_IMAGE=$IMAGE" >> "$GITHUB_ENV"

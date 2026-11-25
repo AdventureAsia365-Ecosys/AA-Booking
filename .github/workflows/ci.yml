@@ -297,7 +297,7 @@ jobs:
       # AA-891: the release version comes from the manifest at the repo root, like the Deploy Dev build.
       - name: Build image
         run: |
-          docker build \
+          docker build --pull \
             --build-arg GIT_SHA=${{ github.sha }} \
             --build-arg APP_VERSION="$(jq -r '."."' ../.release-please-manifest.json)" \
             --tag aa-booking-api:ci-${{ github.sha }} \
