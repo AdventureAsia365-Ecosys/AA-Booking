@@ -450,7 +450,7 @@ async def test_draft_refuses_without_pins_on_a_moved_count_and_on_changed_rows(w
     # same count, a pinned code changed, write time untouched (triggers off): only the pin hash sees it
     await _touch(
         conn,
-        "UPDATE booking.customers SET verified = NOT verified"
+        "UPDATE booking.customers SET verified = NOT verified"  # order-ok: any one customer row will do
         " WHERE id = (SELECT id FROM booking.customers ORDER BY id LIMIT 1)",
     )
     with pytest.raises(asyncpg.RaiseError, match="rows of customers changed since the DRY RUN"):
@@ -466,7 +466,7 @@ async def test_draft_refuses_without_pins_on_a_moved_count_and_on_changed_rows(w
     # an app write moves updated_at (set_updated_at), which the pin and the 30-day guard both see
     await _touch(
         conn,
-        "UPDATE booking.customers SET name = 'Invented Traveller B'"
+        "UPDATE booking.customers SET name = 'Invented Traveller B'"  # order-ok: any one customer row will do
         " WHERE id = (SELECT id FROM booking.customers ORDER BY id LIMIT 1)",
     )
     assert (await _pins(conn))["customers"] == repinned["customers"]
