@@ -13,7 +13,7 @@
 //     security headers (CSP frame-ancestors, HSTS, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy);
 //     no X-Powered-By. AA-1111 (S284): plus COOP; the CSP comes from proxy.ts with a per-response nonce (scripts by
 //     nonce, no 'unsafe-inline' for scripts, default-src 'self'), so the page loading without a console error also
-//     proves every script it needs carries the nonce. /robots.txt, a 404 and the BFF carry the set too.
+//     proves every script it needs carries the nonce. /, /robots.txt, /sitemap.xml, a 404 and the BFF carry the set too.
 // A full-page screenshot lands in SMOKE_SHOTS_DIR (default e2e/smoke-public/results), uploaded by the workflow.
 import fs from "node:fs";
 import path from "node:path";
@@ -99,7 +99,8 @@ test("GET /login renders with the security headers and no errors", async ({ page
 });
 
 // AA-1111 (S284, ZAP baseline): a static route, a 404 (the gate sends it to /login: a 307) and the BFF carry the set.
-for (const target of ["/robots.txt", "/aa1111-no-such-page", "/api/auth/session"]) {
+// S294 (ZAP re-run): the host root and /sitemap.xml too, the paths the scan requests first (both redirects to /login).
+for (const target of ["/", "/robots.txt", "/sitemap.xml", "/aa1111-no-such-page", "/api/auth/session"]) {
   test(`GET ${target} carries the security headers`, async ({ request }) => {
     const res = await request.get(target, { maxRedirects: 0 });
     const got = res.headers();

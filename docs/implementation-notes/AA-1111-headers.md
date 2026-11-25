@@ -37,3 +37,14 @@ as the CIS admin and API (AA-CIS-App `docs/implementation-notes/AA-1111-headers.
   secret (expected; the deployed host has it).
 - The 403s ZAP saw from `awselb` on `booking.` are WAF block responses: AA-CIS-Infra adds the headers to the WAF
   custom responses and to the API Gateway gateway responses in the same wave.
+
+## S294 (lane l16-sec-headers, ZAP re-run of 25/11)
+
+- **Decisions:** no header change in the staff admin. Live `curl` on `/`, `/login`, `/robots.txt`, `/sitemap.xml` and a
+  404 shows the full set already (nonce CSP, HSTS two years with sub-domains, Permissions-Policy, COOP, no
+  `X-Powered-By`, no `Server`).
+- **Root cause of the S294 ZAP alerts** on `booking.` (`/`, `/robots.txt`, `/sitemap.xml` "not set" and
+  `Server: awselb/2.0`): ZAP's first requests carry no `User-Agent`; the WAF managed rule `NoUserAgent_HEADER` blocks
+  them with the ALB's plain 403 (WAF sampled requests of the scan window). The managed rule group has no custom
+  response yet: AA-CIS-Infra follow-up.
+- **Changed:** the public smoke also checks `/` and `/sitemap.xml` (the scan's first paths).
