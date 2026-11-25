@@ -99,7 +99,7 @@ async def _clean(conn: asyncpg.Connection) -> None:
         NOTE,
     )
     await conn.execute("DELETE FROM booking.trip_cases WHERE notes = $1", NOTE)
-    if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-045 (AA-1046)
+    if await conn.fetchval("SELECT to_regclass('booking.customers')") is not None:  # before bk-076 (AA-1046)
         await conn.execute("DELETE FROM booking.customers WHERE email LIKE 'it-682-it-835-media-%'")
     await conn.execute("DELETE FROM booking.supplier_contracts")
     await conn.execute("DELETE FROM booking.suppliers")

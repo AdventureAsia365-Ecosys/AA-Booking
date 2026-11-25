@@ -15,6 +15,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from tests.integration import ops
 from tests.integration.supply import purge_supply
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -302,10 +303,7 @@ async def test_version_item_references_one_supply(app_conn: asyncpg.Connection, 
     room = await _room(app_conn, await _hotel(app_conn, sid))
     svc = await _service(app_conn, sid)
     rate = await _rate(app_conn, cid, service_id=svc, unit="person")
-    customer_id = await admin.fetchval(
-        "INSERT INTO booking.customers (email) VALUES ('it-823-schema@example.test') RETURNING id"
-    )
-    case_id = await admin.fetchval("INSERT INTO booking.trip_cases (customer_id) VALUES ($1) RETURNING id", customer_id)
+    case_id = (await ops.insert_b2c_case(admin, tag="it-823-schema", status="new_inquiry", start=None, end=None))["id"]
     version_id = await admin.fetchval(
         "INSERT INTO booking.trip_case_versions (trip_case_id, version_number) VALUES ($1, 1) RETURNING id", case_id
     )
@@ -330,7 +328,6 @@ async def test_version_item_references_one_supply(app_conn: asyncpg.Connection, 
         await purge_supply(admin)
         await admin.execute("DELETE FROM booking.trip_case_versions WHERE trip_case_id = $1", case_id)
         await admin.execute("DELETE FROM booking.trip_cases WHERE id = $1", case_id)
-        await admin.execute("DELETE FROM booking.customers WHERE id = $1", customer_id)
 
 
 async def test_commercial_columns_are_tagged(app_conn: asyncpg.Connection) -> None:

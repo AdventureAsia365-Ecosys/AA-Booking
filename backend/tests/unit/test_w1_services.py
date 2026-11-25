@@ -253,7 +253,7 @@ async def test_list_cases_w1_filters_and_shape() -> None:
     assert item["trip_end_date"] == date(2027, 3, 4) and item["countries"] == ["VN"]
     sql, args = conn.calls[-1]
     assert "ORDER BY tc.start_date ASC NULLS LAST" in sql and args[0] == "%ann%"
-    # AA-1046: no customer join (booking.customers is dropped by bk-045), the search is the case code only
+    # AA-1046: no customer join (booking.customers is dropped by bk-076), the search is the case code only
     assert "booking.customers" not in sql and "customer_id" not in sql and "tc.code ILIKE $1" in sql
     for bad in ({"source": "fax"}, {"sort": "price"}):
         with pytest.raises(Invalid):
