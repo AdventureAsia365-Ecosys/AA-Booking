@@ -193,7 +193,6 @@
   "backend/app/pricing/policy_params.py": 826,
   "backend/app/routers/b2b.py": 933,
   "backend/app/trip_cases/versions.py": 914,
-  "backend/tests/integration/test_bk028_schema.py": 814,
   "backend/tests/unit/test_aa682_supplier_bills.py": 1116,
   "backend/tests/unit/test_aa682_supplier_bookings_flows.py": 804,
   "backend/tests/unit/test_b2b_hold_flow.py": 983,
