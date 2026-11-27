@@ -292,18 +292,15 @@ async def _attach(conn: asyncpg.Connection, offers: list[dict[str, Any]]) -> lis
     return offers
 
 
-async def list_offers(
-    conn: asyncpg.Connection,
+def _offer_where(
     *,
     status: str | None = None,
     destination_id: str | None = None,
     supplier_id: str | None = None,
     q: str | None = None,
     approvable_by: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> dict[str, Any]:
-    """Offers, newest change first. ``approvable_by``: drafts with a place that this staff key wrote none of."""
+) -> tuple[list[str], list[Any]]:
+    """The WHERE fragments and arguments of the offer list (one builder for the list and the My work tile)."""
     where = ["true"]
     args: list[Any] = []
 
@@ -327,6 +324,36 @@ async def list_offers(
         add("(s.title ILIKE ${n} OR s.code ILIKE ${n} OR sp.company_name ILIKE ${n})", paging.contains(q))
     if approvable_by:
         add("o.status = 'draft' AND NOT (${n} = ANY (o.writers))", approvable_by)
+    return where, args
+
+
+async def publish_queue(conn: asyncpg.Connection, *, approvable_by: str) -> dict[str, Any]:
+    """AA-1190 My work: the drafts ``approvable_by`` may publish (the list's ``approvable=me`` view) and when the
+    oldest of them last changed."""
+    where, args = _offer_where(approvable_by=approvable_by)
+    listed = f"{OFFER_SQL} WHERE {' AND '.join(where)}"  # noqa: S608 — fragments are constants
+    row = await conn.fetchrow(
+        f"SELECT count(*)::int AS count, min(t.updated_at) AS oldest_at FROM ({listed}) t",  # noqa: S608
+        *args,
+    )
+    return {"count": row["count"], "oldest_at": row["oldest_at"]}
+
+
+async def list_offers(
+    conn: asyncpg.Connection,
+    *,
+    status: str | None = None,
+    destination_id: str | None = None,
+    supplier_id: str | None = None,
+    q: str | None = None,
+    approvable_by: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Offers, newest change first. ``approvable_by``: drafts with a place that this staff key wrote none of."""
+    where, args = _offer_where(
+        status=status, destination_id=destination_id, supplier_id=supplier_id, q=q, approvable_by=approvable_by
+    )
     sql = f"{OFFER_SQL} WHERE {' AND '.join(where)}"  # noqa: S608 — fragments are constants
     total = await conn.fetchval(f"SELECT count(*) FROM ({sql}) t", *args)  # noqa: S608
     rows = await conn.fetch(

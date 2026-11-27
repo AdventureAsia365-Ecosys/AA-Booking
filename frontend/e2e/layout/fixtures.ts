@@ -60,7 +60,7 @@ import type { CountryDetail, CountryItem, CountryList, DestinationDetail, Destin
 import type { Page as BillingPage } from "../../lib/api/billing";
 import type { LifecycleRun, TripCheck, TripCheckPage } from "../../lib/api/tripChecks";
 import type { SupplierBookingSummary } from "../../lib/api/supplierBookings";
-import type { MyWorkSummary } from "../../lib/api/myWork";
+import type { MyWorkSummary, PriceSetupProgress } from "../../lib/api/myWork";
 import type { StopSale, StopSalePage } from "../../lib/api/stopSales";
 import type { AddonOffer, AddonPage, ExpiringContract } from "../../lib/api/addons";
 import type { SupplierBill, SupplierBillsSummary } from "../../lib/api/supplierBills";
@@ -2110,7 +2110,9 @@ const MY_WORK: MyWorkSummary = {
   generated_at: "2026-10-23T01:55:00Z",
   tiles: [
     { key: "my_open_cases", capability: "trip_case.read", group: "work", filter: { tab: "mine", status: "discovery,building" }, available: true, count: 4, oldest_at: "2026-09-02T03:00:00Z", earliest_due: null, days: null },
-    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-10-12", days: null },
+    { key: "trip_checks_overdue", capability: "ops.read", group: "work", filter: { due: "overdue", owner: "me" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-10-12", days: null },
+    // AA-1190: the overdue checks nobody owns
+    { key: "trip_checks_unassigned", capability: "ops.write", group: "work", filter: { due: "overdue", owner: "none" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-10-10", days: null },
     { key: "b2b_on_request", capability: "b2b_desk.read", group: "work", filter: {}, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
     { key: "supplier_bills_overdue", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "overdue" }, available: true, count: 1, oldest_at: null, earliest_due: "2026-10-01", days: null },
     { key: "supplier_bills_due_soon", capability: "bill.read", group: "work", filter: { bill_status: "open", bill_due: "soon" }, available: true, count: 3, oldest_at: null, earliest_due: "2026-10-24", days: 3 },
@@ -2120,7 +2122,21 @@ const MY_WORK: MyWorkSummary = {
     { key: "supplier_bills_to_pay", capability: "payout.write", group: "approve", filter: { bill_status: "approved", approvable: "me" }, available: true, count: 2, oldest_at: null, earliest_due: "2026-11-05", days: null },
     { key: "agency_payments_to_approve", capability: "agency_payment.approve", group: "approve", filter: { tab: "payments", approvable: "me" }, available: true, count: 1, oldest_at: "2026-10-21T02:00:00Z", earliest_due: null, days: null },
     { key: "stop_sales_to_review", capability: "stop_sale.approve", group: "approve", filter: { review: "me" }, available: true, count: 2, oldest_at: "2026-10-20T04:00:00Z", earliest_due: null, days: null },
+    // AA-1190: the price version, add-on, season and holiday approvals (zero tiles fold into one line)
+    { key: "price_versions_to_approve", capability: "price_version.approve", group: "approve", filter: { pending_versions: "me" }, available: true, count: 2, oldest_at: "2026-10-19T02:00:00Z", earliest_due: null, days: null },
+    { key: "addons_to_publish", capability: "addon.approve", group: "approve", filter: { approvable: "me" }, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
+    { key: "season_changes_to_approve", capability: "season.approve", group: "approve", filter: {}, available: true, count: 1, oldest_at: "2026-10-18T02:00:00Z", earliest_due: null, days: null },
+    { key: "holiday_events_to_approve", capability: "season.approve", group: "approve", filter: { state: "waiting" }, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
   ],
+};
+
+// AA-1190: the price setup progress card (trip plans per next step of the workbench).
+const PRICE_SETUP: PriceSetupProgress = {
+  steps: ["not_served", "add_components", "fix_inactive", "load_rates", "approve_fx", "approve_rule", "recompute", "make_sellable", "done"],
+  by_next_step: { not_served: 3, add_components: 12, fix_inactive: 0, load_rates: 7, approve_fx: 0, approve_rule: 0, recompute: 4, make_sellable: 2, done: 30 },
+  total: 58,
+  degraded: false,
+  generated_at: "2026-10-23T01:55:00Z",
 };
 
 // AA-1159: stop-sales waiting for a second person (invented suppliers, hotels and dates).
@@ -2303,6 +2319,7 @@ export function answer(method: string, path: string, query: URLSearchParams): Fi
   if (p === "trip-checks") return ok({ items: range(ROWS).map(tripCheck), total: 73, limit: ROWS, offset: 0 } satisfies TripCheckPage);
   if (p === "case-lifecycle/runs") return ok({ items: LIFECYCLE_RUNS, scheduled_mode: "live", schedule_utc_hour: 1 });
   if (p === "my-work/summary") return ok(MY_WORK);
+  if (p === "my-work/price-setup") return ok(PRICE_SETUP);
   if (p === "supply/restrictions" && query.get("kind") === "stop_sale") {
     const items = range(3).map(stopSale).filter((s) => query.get("review") !== "me" || s.created_by !== "u-layout");
     return ok({ items, total: items.length } satisfies StopSalePage);

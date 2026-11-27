@@ -10,6 +10,7 @@
 //   GET|PUT /booking/catalog/trip-plans/{source_id}/season-calendar    the plan's calendar / ask for a change (reason)
 //   POST /booking/catalog/trip-plans/{source_id}/season-calendar/approve|reject|withdraw   a second person decides
 //   GET  /booking/catalog/price-versions?status=pending                every version waiting for approval
+//                                       &approvable=me                 AA-1190: only those the caller may approve
 //   GET|PUT /booking/catalog/price-versions/{id}                       one version / the maker saves a draft
 //   POST /booking/catalog/price-versions/{id}/submit|approve|reject|withdraw, GET …/withdraw-preview
 //   GET|POST /booking/pricing/season-calendars, GET …/{id}?year=, POST …/{id}/ranges, …/{id}/default[/approve|reject]
@@ -132,7 +133,9 @@ export const priceVersionsApi = {
   list: (sourceId: string) => bkGet<VersionList>(`catalog/trip-plans/${enc(sourceId)}/price-versions`),
   create: (sourceId: string, body: Partial<DraftFacts> & { copy_from?: string }) =>
     bkSend<VersionDetail>(`catalog/trip-plans/${enc(sourceId)}/price-versions`, { body }),
-  pending: () => bkGet<{ items: PriceVersion[] }>("catalog/price-versions", { status: "pending" }),
+  // AA-1190: approvable "me" = only the versions the caller may approve (the My work tile's view)
+  pending: (approvable?: "me") =>
+    bkGet<{ items: PriceVersion[] }>("catalog/price-versions", { status: "pending", ...(approvable ? { approvable } : {}) }),
   get: (id: string) => bkGet<VersionDetail>(`catalog/price-versions/${enc(id)}`),
   save: (id: string, body: DraftFacts & { items: PriceRowBody[]; below_floor_reason?: string | null }) =>
     bkSend<VersionDetail>(`catalog/price-versions/${enc(id)}`, { method: "PUT", body }),

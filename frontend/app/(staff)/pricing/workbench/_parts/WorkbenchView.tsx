@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Check, Download, FileUp, Minus, X } from "lucide-react";
 import { READINESS_STATUSES } from "@/lib/api/priceReadiness";
+import { priceVersionsApi } from "@/lib/api/priceVersions";
 import {
   NEXT_STEPS,
   WORKBENCH_CHECKS,
@@ -26,12 +27,14 @@ import { outOfCatalog, skippedReasons, stepHref, tourName } from "@/ui/booking/p
 import {
   Button,
   DataTable,
+  DateText,
   FilterBar,
   KpiTile,
   LinkButton,
   Money,
   PageFrame,
   Pill,
+  Pressable,
   Section,
   useCan,
   useT,
@@ -295,6 +298,12 @@ function Workbench() {
         <KpiTile label={t("kpiRates")} value={summary?.by_next_step.load_rates} hintTone="warning" />
         <KpiTile label={t("kpiProvisional")} value={summary?.provisional} hint={t("kpiProvisionalHint")} />
       </div>
+      <PendingVersions
+        onOpen={(tourKey) => {
+          setComponents({ tour_key: tourKey, title: null });
+          setTab("versions");
+        }}
+      />
       {data && data.rules.length === 0 && (
         <div className="rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-[13px] text-body" role="status">
           {t("noRule")}{" "}
@@ -415,6 +424,60 @@ function Workbench() {
       )}
 
     </PageFrame>
+  );
+}
+
+/** AA-1190: `?pending_versions=me` (the My work tile "Price versions to approve"): the pending versions the viewer may
+ *  approve (GET /booking/catalog/price-versions?status=pending&approvable=me, the tile's own count), oldest first; a
+ *  row opens that tour's Versions tab, where the diff is approved. */
+function PendingVersions({ onOpen }: { onOpen: (tourKey: string) => void }) {
+  const { get, set } = useUrlFilters();
+  const shown = get("pending_versions") === "me";
+  return shown ? <PendingVersionsList onOpen={onOpen} onClose={() => set("pending_versions", null)} /> : null;
+}
+
+function PendingVersionsList({ onOpen, onClose }: { onOpen: (tourKey: string) => void; onClose: () => void }) {
+  const t = useT(M);
+  const q = useQuery({ queryKey: ["price-versions", "pending", "me"], queryFn: () => priceVersionsApi.pending("me") });
+  const items = q.data?.items ?? [];
+  return (
+    <Section
+      testId="pending-versions"
+      title={q.data ? t("pendingTitle", items.length) : t("pendingTitleLoading")}
+      description={t("pendingDescription")}
+      actions={
+        <Button size="sm" variant="ghost" onClick={onClose} testId="pending-versions-close">
+          {t("pendingClose")}
+        </Button>
+      }
+      padded={false}
+    >
+      {q.isError ? (
+        <p className="px-5 py-4 text-[13px] text-danger">{(q.error as Error).message}</p>
+      ) : !q.data ? (
+        <p className="px-5 py-4 text-[13px] text-muted">{t("pendingLoading")}</p>
+      ) : items.length === 0 ? (
+        <p className="px-5 py-4 text-[13px] text-muted">{t("pendingEmpty")}</p>
+      ) : (
+        <ul>
+          {items.map((v) => (
+            <li key={v.id} className="border-b border-line2 last:border-b-0">
+              <Pressable onClick={() => onOpen(v.source_id)} testId={`pending-version-${v.id}`}>
+                <span className="flex w-full flex-wrap items-center justify-between gap-2 px-5 py-3 text-left hover:bg-bg">
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="break-words text-[13px] font-semibold text-ink">
+                      {v.source_id} · v{v.version_no} · {v.label}
+                    </span>
+                    <span className="text-xs text-muted">{t("pendingBy", v.created_by?.name ?? v.created_by?.id ?? "")}</span>
+                  </span>
+                  {v.submitted_at ? <DateText value={v.submitted_at} relative className="text-xs text-muted" /> : null}
+                </span>
+              </Pressable>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 

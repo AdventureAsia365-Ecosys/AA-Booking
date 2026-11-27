@@ -6,7 +6,7 @@
 // made from the name and stays the same every year). Text in ../../seasons/_parts/messages.ts (one catalogue for the
 // two season pages); own language switch.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { seasonsApi, type ChangeAction, type HolidayEvent } from "@/lib/api/priceVersions";
@@ -29,6 +29,9 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
+
+/** AA-1190: the states of an event waiting for a second person (backend seasons_admin.WAITING_STATES). */
+const WAITING_STATES: readonly string[] = ["pending", "ending"];
 import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
@@ -113,7 +116,14 @@ function HolidayEvents() {
   const country = get("country") ?? undefined;
   const year = get("year") ? Number(get("year")) : undefined;
   const [creating, setCreating] = useState(false);
+  // AA-1190: `?state=waiting` (the My work tile "Holiday events to approve"): only the events waiting for a second
+  // person (proposed, or removal asked: state pending / ending), the rows the tile counts.
+  const waitingOnly = get("state") === "waiting";
   const list = useQuery({ queryKey: ["holiday-events", country, year], queryFn: () => seasonsApi.events(country, year) });
+  const rows = useMemo(
+    () => (list.data?.items ?? []).filter((e) => !waitingOnly || WAITING_STATES.includes(e.state)),
+    [list.data, waitingOnly],
+  );
   const act = useMutation({
     mutationFn: ({ id, action, reason }: { id: string; action: ChangeAction; reason?: string }) =>
       seasonsApi.decideEvent(id, action, reason),
@@ -206,6 +216,13 @@ function HolidayEvents() {
                   width: 190,
                 },
                 {
+                  key: "state",
+                  label: t("filterState"),
+                  allLabel: t("allStates"),
+                  options: [{ value: "waiting", label: t("stateWaiting") }],
+                  width: 190,
+                },
+                {
                   key: "year",
                   label: t("filterYear"),
                   allLabel: t("allYears"),
@@ -217,7 +234,7 @@ function HolidayEvents() {
           }
           searchable={false}
           tableId="holiday-events"
-          data={list.data?.items ?? []}
+          data={rows}
           columns={columns}
           getRowId={(r) => r.id}
           loading={list.isLoading}

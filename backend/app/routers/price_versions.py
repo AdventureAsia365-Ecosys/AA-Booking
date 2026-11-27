@@ -160,10 +160,15 @@ async def decide_plan_calendar(
 
 @router.get("/booking/catalog/price-versions")
 async def pending_versions(
-    staff: CanReadPrices, pool: Pool, status: Annotated[Literal["pending"], Query()] = "pending"
+    staff: CanReadPrices,
+    pool: Pool,
+    status: Annotated[Literal["pending"], Query()] = "pending",
+    approvable: Annotated[
+        Literal["me"] | None, Query(description="only the versions the caller may approve (AA-1190 My work)")
+    ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await price_versions.pending(conn, staff)
+        return await price_versions.pending(conn, staff, approvable=approvable == "me")
 
 
 @router.get("/booking/catalog/price-versions/{version_id}")

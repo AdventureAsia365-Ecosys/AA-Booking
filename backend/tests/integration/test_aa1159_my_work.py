@@ -8,6 +8,8 @@
   one of them approved), and give one person an open case.
 - The approval tiles count only what the caller may act on (maker-checker): the maker of every bill sees none to
   approve, the checker sees them all; stop-sales the caller entered or asked to end are left out too.
+- AA-1190: overdue trip checks split into the caller's own and the unowned ones; the price version, add-on, season
+  and holiday tiles equal their lists; the price setup card equals the price workbench's summary.
 """
 
 from __future__ import annotations
@@ -39,7 +41,8 @@ MAKER, CHECKER, ADMIN, FINANCE, CREATOR = (
 CIS_ROLE = {MAKER: "reviewer", CHECKER: "reviewer", ADMIN: "admin", FINANCE: "reviewer", CREATOR: "content"}
 Client = tuple[httpx.AsyncClient, LocalCis]
 
-WORK_TILES = ("my_open_cases", "trip_checks_overdue", "b2b_on_request", "supplier_bills_overdue",
+WORK_TILES = ("my_open_cases", "trip_checks_overdue", "trip_checks_unassigned", "b2b_on_request",
+              "supplier_bills_overdue",
               "supplier_bills_due_soon", "agency_invoices_overdue",
               "contracts_ending_soon")  # fmt: skip  # AA-1177
 APPROVE_TILES = (
@@ -50,6 +53,10 @@ APPROVE_TILES = (
     "suppliers_to_activate",  # AA-1158
     "billing_changes_to_approve",
     "supplier_bank_to_approve",  # AA-1158 part 2
+    "price_versions_to_approve",  # AA-1190
+    "addons_to_publish",
+    "season_changes_to_approve",
+    "holiday_events_to_approve",
 )
 OVERSIGHT_TILES = ("owner_self_approvals",)  # AA-1158: every audit.read holder (group work, listed last)
 
@@ -130,6 +137,13 @@ async def _seed(conn: asyncpg.Connection) -> dict[str, str]:
         case["id"],
         MAKER,
     )
+    # AA-1190: one overdue check MAKER owns (the unowned one above is the "no owner" tile's)
+    await conn.execute(
+        "INSERT INTO booking.trip_case_checks (trip_case_id, code, title, due_date, assignee_ref, created_by)"
+        " VALUES ($1::uuid, 'custom', 'Confirm the invented ferry', current_date - 1, $2, $2)",
+        case["id"],
+        MAKER,
+    )
     sup = await ops.supply(conn, "Kestrel")
     today = date.today()
     late = await ops.bill(conn, sup["supplier"], by=MAKER, number="KS-1", tag="1159-a")
@@ -196,10 +210,25 @@ async def _list_total(c: httpx.AsyncClient, headers: dict[str, str], key: str, t
             await c.get("/trip-cases", params={"assignee": "me", "status": f["status"], "limit": 1}, headers=headers)
         )
         return body["total"]
-    if key == "trip_checks_overdue":
-        assert f == {"due": "overdue"}
-        body = await _ok(await c.get("/trip-checks", params={"limit": 1}, headers=headers))
-        return body["counts"]["overdue"]  # the Overdue tab's badge
+    if key in ("trip_checks_overdue", "trip_checks_unassigned"):
+        assert f == {"due": "overdue", "owner": "me" if key == "trip_checks_overdue" else "none"}
+        body = await _ok(await c.get("/trip-checks", params={"assignee": f["owner"], "limit": 1}, headers=headers))
+        return body["counts"]["overdue"]  # the Overdue tab's badge under the owner filter
+    if key == "price_versions_to_approve":
+        assert f == {"pending_versions": "me"}
+        params = {"status": "pending", "approvable": "me"}
+        return len((await _ok(await c.get("/catalog/price-versions", params=params, headers=headers)))["items"])
+    if key == "addons_to_publish":
+        assert f == {"approvable": "me"}
+        return (await _ok(await c.get("/add-ons", params={"approvable": "me", "limit": 1}, headers=headers)))["total"]
+    if key == "season_changes_to_approve":  # the Seasons page's "Waiting" tile
+        assert f == {}
+        items = (await _ok(await c.get("/pricing/season-calendars", headers=headers)))["items"]
+        return sum(i["waiting"] + (1 if i["pending_default_season"] else 0) for i in items)
+    if key == "holiday_events_to_approve":  # the Holiday events page's ?state=waiting view
+        assert f == {"state": "waiting"}
+        items = (await _ok(await c.get("/pricing/holiday-events", headers=headers)))["items"]
+        return sum(1 for i in items if i["state"] in ("pending", "ending"))
     if key == "b2b_on_request":
         assert f == {}
         body = await _ok(await c.get("/b2b-desk/on-request", params={"state": "open", "limit": 1}, headers=headers))
@@ -268,6 +297,7 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
     assert list(tiles) == [
         "my_open_cases",
         "trip_checks_overdue",
+        "trip_checks_unassigned",  # AA-1190
         "b2b_on_request",
         "supplier_bills_overdue",
         "supplier_bills_due_soon",
@@ -275,6 +305,10 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
         "supplier_bills_to_approve",
         "stop_sales_to_review",
         "suppliers_to_activate",
+        "price_versions_to_approve",  # AA-1190
+        "addons_to_publish",
+        "season_changes_to_approve",
+        "holiday_events_to_approve",
     ]
 
     # Finance: reads cases, operations and bills; agency billing and its payment approvals; no bill approval.
@@ -304,8 +338,11 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
     other = _tiles(await _ok(await c.get("/my-work/summary", headers=_as(cis, CHECKER))))
     assert mine["my_open_cases"]["count"] == 1 and other["my_open_cases"]["count"] == 0
     assert mine["my_open_cases"]["oldest_at"] is not None
-    assert mine["trip_checks_overdue"]["count"] >= 1
-    assert mine["trip_checks_overdue"]["earliest_due"] <= (date.today() - timedelta(days=2)).isoformat()
+    # AA-1190: MAKER owns one overdue check (due yesterday); CHECKER owns none; the unowned one is in "no owner"
+    assert mine["trip_checks_overdue"]["count"] == 1 and other["trip_checks_overdue"]["count"] == 0
+    assert mine["trip_checks_overdue"]["earliest_due"] == (date.today() - timedelta(days=1)).isoformat()
+    assert mine["trip_checks_unassigned"]["count"] >= 1
+    assert mine["trip_checks_unassigned"]["earliest_due"] <= (date.today() - timedelta(days=2)).isoformat()
     assert mine["supplier_bills_overdue"]["count"] == 1
     assert mine["supplier_bills_overdue"]["earliest_due"] == (date.today() - timedelta(days=3)).isoformat()
     soon = mine["supplier_bills_due_soon"]
@@ -326,3 +363,16 @@ async def test_tiles_follow_capabilities_and_equal_their_lists(client: Client, a
     assert [r["status"] for r in waiting["items"]].count("approved") == 1
     asked = next(r for r in waiting["items"] if r["status"] == "approved")
     assert asked["end_requested_by"] == MAKER and asked["created_by_name"]
+
+
+async def test_the_price_setup_card_equals_the_workbench(client: Client, admin: asyncpg.Connection) -> None:
+    """AA-1190: the card counts the plans per next step of the price workbench (its own summary), for the price setup
+    makers only."""
+    c, cis = client
+    card = await _ok(await c.get("/my-work/price-setup", headers=_as(cis, MAKER)))
+    bench = await _ok(await c.get("/catalog/price-workbench", headers=_as(cis, MAKER)))
+    assert card["by_next_step"] == bench["summary"]["by_next_step"]
+    assert card["total"] == sum(bench["summary"]["by_next_step"].values())
+    assert card["steps"][0] == "not_served" and card["steps"][-1] == "done"
+    r = await c.get("/my-work/price-setup", headers=_as(cis, FINANCE))
+    assert r.status_code == 403 and r.json()["detail"] == "forbidden", r.text

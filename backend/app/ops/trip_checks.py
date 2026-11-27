@@ -294,14 +294,15 @@ COUNT_WHERE = (
 )
 
 
-async def overdue_queue(conn: asyncpg.Connection) -> dict[str, Any]:
-    """AA-1159 My work: the Overdue tab of /trip-checks with no other filter (its badge count, :data:`COUNTS`) and the
-    earliest due date among those checks."""
+async def overdue_queue(conn: asyncpg.Connection, *, assignee: str | None = None) -> dict[str, Any]:
+    """AA-1159 My work: the Overdue tab of /trip-checks (its badge count, :data:`COUNTS`) and the earliest due date
+    among those checks. AA-1190: ``assignee`` is the tab's owner filter (a staff key, or ``none`` for the checks
+    nobody owns), so the tiles "assigned to you" and "unassigned" equal the tab with ``owner=me`` / ``owner=none``."""
     row = await conn.fetchrow(
         f"SELECT count(*)::int AS count, min(k.due_date) AS earliest_due {CHECK_FROM}"  # noqa: S608 — constants only
         f" WHERE {COUNT_WHERE} AND {OVERDUE}",
         list(BOARD_STATUSES),
-        None,
+        assignee,
         None,
         None,
         None,

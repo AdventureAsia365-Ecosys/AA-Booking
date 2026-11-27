@@ -46,7 +46,7 @@ import asyncpg
 from app import audit
 from app.auth import people, self_approval
 from app.auth.staff import Staff
-from app.catalog import cost_sheet, trip_plan_prices, version_matrix
+from app.catalog import cost_sheet, price_version_queue, trip_plan_prices, version_matrix
 from app.errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from app.pricing import engine, policy_values, repository, seasons
 
@@ -335,10 +335,10 @@ def _json(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
-async def pending(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    """Every pending version (the checker's queue), oldest first."""
+async def pending(conn: asyncpg.Connection, staff: Staff, *, approvable: bool = False) -> dict[str, Any]:
+    """Every pending version, oldest first; ``approvable``: those the caller may approve (AA-1190, the queue module)."""
     _can_read(staff)
-    rows = await conn.fetch(VERSION_SQL + " WHERE v.status = 'pending' ORDER BY v.submitted_at")
+    rows = await price_version_queue.pending_rows(conn, staff, VERSION_SQL, approvable=approvable)
     return {"items": await versions_out(conn, rows)}
 
 

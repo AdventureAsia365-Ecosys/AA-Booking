@@ -148,7 +148,7 @@ def test_every_route_reaches_its_service_with_converted_values(calls: list[Any],
         ((MAKER, SOURCE, None, "No seasons"), {}),
     ]
     assert by_name["decide_plan_calendar"] == [((MAKER, SOURCE, "withdraw", "Changed my mind"), {})]
-    assert by_name["pending"] == [((MAKER,), {})]
+    assert by_name["pending"] == [((MAKER,), {"approvable": False})]  # AA-1190: approvable=me is off by default
     assert by_name["get_version"] == [((MAKER, VID), {})]
     saved = by_name["save_draft"][0][0][2]
     assert str(saved["travel_to"]) == "2031-10-31" and saved["items"][0]["pax_min"] == 2

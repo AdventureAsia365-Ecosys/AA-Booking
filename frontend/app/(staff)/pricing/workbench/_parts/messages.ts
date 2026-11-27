@@ -7,6 +7,13 @@ import { defineMessages } from "@/ui";
 export const M = defineMessages(
   {
     title: "Price setup",
+    pendingTitle: (n: number) => `Price versions waiting for your approval: ${n}`,
+    pendingTitleLoading: "Price versions waiting for your approval",
+    pendingDescription: "Submitted by another person (or by you, when the business owner may approve their own work). Open a row to see the diff and approve or reject it on the tour's Versions tab.",
+    pendingLoading: "Loading the versions…",
+    pendingEmpty: "No price version waits for your approval.",
+    pendingClose: "Close this list",
+    pendingBy: (who: string) => `Submitted by ${who}`,
     description:
       "Everything a tour needs before an agency can buy it, in one place: hotels and services per day, supplier rates, an exchange rate, a pricing rule, the sellable switch and departures. Pick a step to see the tours that wait for it.",
     language: "Language",
@@ -169,6 +176,13 @@ export const M = defineMessages(
   },
   {
     title: "Thiết lập giá",
+    pendingTitle: (n: number) => `Phiên bản giá chờ bạn duyệt: ${n}`,
+    pendingTitleLoading: "Phiên bản giá chờ bạn duyệt",
+    pendingDescription: "Do người khác nộp (hoặc của chính bạn, khi chủ doanh nghiệp được tự duyệt). Mở một dòng để xem phần thay đổi rồi duyệt hoặc từ chối ở tab Phiên bản của tour.",
+    pendingLoading: "Đang tải các phiên bản…",
+    pendingEmpty: "Không có phiên bản giá nào chờ bạn duyệt.",
+    pendingClose: "Đóng danh sách này",
+    pendingBy: (who: string) => `Người nộp: ${who}`,
     description:
       "Mọi thứ một tour cần trước khi đại lý mua được, ở một chỗ: khách sạn và dịch vụ theo ngày, giá nhà cung cấp, tỷ giá, quy tắc giá, công tắc mở bán và ngày khởi hành. Chọn một bước để xem các tour đang chờ bước đó.",
     language: "Ngôn ngữ",

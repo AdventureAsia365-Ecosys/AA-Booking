@@ -351,7 +351,7 @@ async def test_get_version_decodes_the_frozen_diff_and_impact() -> None:
     out = await pv.get_version(conn, SALES, VID)
     assert out["diff"] == diff and out["impact"] == {"departures": 2}
     assert [(i["valid_to"], i["amount"]) for i in out["items"]] == [(date(2031, 4, 30), "560.00")]
-    conn.on("WHERE v.status = 'pending' ORDER BY v.submitted_at", [version(status="pending")])
+    conn.on("ORDER BY v.submitted_at", [version(status="pending")])  # AA-1190: WHERE {PENDING_WHERE}
     assert [i["id"] for i in (await pv.pending(conn, SALES))["items"]] == [VID]
 
 

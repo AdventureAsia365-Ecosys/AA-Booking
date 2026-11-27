@@ -55,18 +55,20 @@ ONE_DAY = timedelta(days=1)
 REASON_MAX = 300
 NAME_MAX = season_sync.NAME_MAX
 
-CALENDARS_SQL = """
+# A range change waiting for a second person: a proposed range, or the removal of an approved one (the Seasons page's
+# "Waiting" column and tile; AA-1190: the My work tile counts the same rows).
+RANGE_WAITING = "(r.status = 'pending' OR (r.end_requested_at IS NOT NULL AND r.ended_at IS NULL))"
+CALENDARS_SQL = f"""
 SELECT c.id::text AS id, c.owner_kind, c.destination_id::text AS destination_id,
        c.supplier_contract_id::text AS supplier_contract_id, c.name, c.default_season, c.pending_default_season,
        c.default_requested_by, c.default_requested_at, c.default_request_reason, c.created_by,
        c.created_at, c.updated_at,
        (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id AND r.status = 'approved'
           AND r.ended_at IS NULL) AS ranges,
-       (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id
-          AND (r.status = 'pending' OR (r.end_requested_at IS NOT NULL AND r.ended_at IS NULL))) AS waiting,
+       (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id AND {RANGE_WAITING}) AS waiting,
        (SELECT count(*) FROM booking.trip_plans p WHERE p.season_calendar_id = c.id) AS plans
 FROM booking.season_calendars c
-"""
+"""  # noqa: S608 — constants only
 RANGES_SQL = """
 SELECT r.id::text AS id, r.calendar_id::text AS calendar_id, r.kind, r.season_code, r.date_from, r.date_to,
        r.holiday_country::text AS holiday_country, r.holiday_code, r.days_before, r.days_after, r.note, r.status,
@@ -90,6 +92,36 @@ FROM booking.holiday_events e
 
 def _last(end: date | None) -> date | None:
     return None if end is None else end - ONE_DAY
+
+
+# AA-1190 My work: every season change waiting for a second person (the Seasons page's "Waiting" tile: the waiting
+# ranges of every calendar plus each calendar's proposed default season) and when the oldest was asked.
+SEASONS_WAITING_SQL = f"""
+SELECT (SELECT count(*) FROM booking.season_ranges r WHERE {RANGE_WAITING})::int
+     + (SELECT count(*) FROM booking.season_calendars c WHERE c.pending_default_season IS NOT NULL)::int AS count,
+       LEAST(
+         (SELECT min(coalesce(r.end_requested_at, r.created_at)) FROM booking.season_ranges r WHERE {RANGE_WAITING}),
+         (SELECT min(c.default_requested_at) FROM booking.season_calendars c WHERE c.pending_default_season IS NOT NULL)
+       ) AS oldest_at
+"""  # noqa: S608 — constants only
+# A holiday event change waiting for a second person: proposed, or its removal asked (state pending / ending; the
+# Holiday events page's ``?state=waiting`` view).
+EVENT_WAITING = "(e.ended_at IS NULL AND (e.status = 'pending' OR e.end_requested_at IS NOT NULL))"
+EVENTS_WAITING_SQL = f"""
+SELECT count(*)::int AS count, min(coalesce(e.end_requested_at, e.created_at)) AS oldest_at
+FROM booking.holiday_events e WHERE {EVENT_WAITING}
+"""  # noqa: S608 — constants only
+WAITING_STATES = ("pending", "ending")
+
+
+async def seasons_waiting_queue(conn: asyncpg.Connection) -> dict[str, Any]:
+    row = await conn.fetchrow(SEASONS_WAITING_SQL)
+    return {"count": row["count"], "oldest_at": row["oldest_at"]}
+
+
+async def events_waiting_queue(conn: asyncpg.Connection) -> dict[str, Any]:
+    row = await conn.fetchrow(EVENTS_WAITING_SQL)
+    return {"count": row["count"], "oldest_at": row["oldest_at"]}
 
 
 def state(row: Any) -> str:

@@ -21371,6 +21371,25 @@
               "title": "Status",
               "type": "string"
             }
+          },
+          {
+            "description": "only the versions the caller may approve (AA-1190 My work)",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "only the versions the caller may approve (AA-1190 My work)",
+              "title": "Approvable"
+            }
           }
         ],
         "responses": {
@@ -26199,6 +26218,34 @@
         "summary": "Patch Media",
         "tags": [
           "supply"
+        ]
+      }
+    },
+    "/booking/my-work/price-setup": {
+      "get": {
+        "operationId": "my_work_price_setup_booking_my_work_price_setup_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response My Work Price Setup Booking My Work Price Setup Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "My Work Price Setup",
+        "tags": [
+          "my-work"
         ]
       }
     },

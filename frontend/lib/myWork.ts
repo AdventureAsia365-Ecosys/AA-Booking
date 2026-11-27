@@ -4,6 +4,7 @@
 // the earliest due date, and the target list's filter; this table keeps the page path, label and icon name of each key.
 // The keys and capabilities must stay those of backend app/my_work.py TILES (tests/unit/test_aa1159_my_work.py reads
 // this file). A tile opens `path` + the API's `filter` as the query string, the exact view its count was taken from.
+// AA-1190: tiles with work come first in their group; the tiles with nothing waiting fold into one line (splitTiles).
 
 export type MyWorkGroup = "work" | "approve";
 
@@ -31,12 +32,22 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     empty: "Nothing assigned to you",
   },
   {
+    // AA-1190: the overdue checks you own (owner=me); the unowned ones are the next tile.
     key: "trip_checks_overdue",
     capability: "ops.read",
     group: "work",
     path: "/trip-checks",
-    label: "Trip checks overdue",
-    aria: "Trip checks overdue: open the overdue checks",
+    label: "Trip checks overdue: yours",
+    aria: "Trip checks overdue: yours: open your overdue checks",
+    empty: "Nothing overdue",
+  },
+  {
+    key: "trip_checks_unassigned",
+    capability: "ops.write",
+    group: "work",
+    path: "/trip-checks",
+    label: "Trip checks overdue: no owner",
+    aria: "Trip checks overdue: no owner: open the overdue checks nobody owns",
     empty: "Nothing overdue",
   },
   {
@@ -149,6 +160,43 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     empty: "Nothing to approve",
   },
   {
+    // AA-1190: the pending price versions the viewer may approve (never their own, unless the business owner may).
+    key: "price_versions_to_approve",
+    capability: "price_version.approve",
+    group: "approve",
+    path: "/pricing/workbench",
+    label: "Price versions to approve",
+    aria: "Price versions to approve: open the versions waiting for approval",
+    empty: "Nothing to approve",
+  },
+  {
+    key: "addons_to_publish",
+    capability: "addon.approve",
+    group: "approve",
+    path: "/add-ons",
+    label: "Add-ons to publish",
+    aria: "Add-ons to publish: open the drafts you may publish",
+    empty: "Nothing to publish",
+  },
+  {
+    key: "season_changes_to_approve",
+    capability: "season.approve",
+    group: "approve",
+    path: "/pricing/seasons",
+    label: "Season changes to approve",
+    aria: "Season changes to approve: open the season calendars",
+    empty: "Nothing to approve",
+  },
+  {
+    key: "holiday_events_to_approve",
+    capability: "season.approve",
+    group: "approve",
+    path: "/pricing/holiday-events",
+    label: "Holiday events to approve",
+    aria: "Holiday events to approve: open the holiday events waiting for a second person",
+    empty: "Nothing to approve",
+  },
+  {
     key: "owner_self_approvals",
     capability: "audit.read",
     group: "work",
@@ -174,4 +222,43 @@ export function tileSpec(key: string): MyWorkTileSpec | undefined {
 export function tileHref(path: string, filter: Record<string, string>): string {
   const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v !== "")).toString();
   return qs ? `${path}?${qs}` : path;
+}
+
+/** A tile with something to show: an available count above zero, or one that could not be read (it says so). */
+export function hasWork(tile: { available: boolean; count: number | null }): boolean {
+  return !tile.available || (tile.count ?? 0) > 0;
+}
+
+/** AA-1190: the rows of each group with work (in table order), and the rows with nothing waiting, folded into one
+ *  line under the groups ("Nothing waiting in N queues"). Rows still loading (no tile) count as work (skeletons). */
+export function splitTiles<T extends { spec: { group: MyWorkGroup }; tile?: { available: boolean; count: number | null } }>(
+  rows: readonly T[],
+): { groups: { group: MyWorkGroup; rows: T[] }[]; empty: T[] } {
+  const busy = rows.filter((r) => !r.tile || hasWork(r.tile));
+  const groups = (["approve", "work"] as const)
+    .map((group) => ({ group, rows: busy.filter((r) => r.spec.group === group) }))
+    .filter((g) => g.rows.length > 0);
+  return { groups, empty: rows.filter((r) => r.tile && !hasWork(r.tile)) };
+}
+
+// ── Price setup progress (AA-1190) ───────────────────────────────────────────
+
+/** The steps the card shows, in the workbench's order, each opening /pricing/workbench?next_step=<step>. */
+export const PRICE_SETUP_STEPS: readonly { step: string; label: string }[] = [
+  { step: "add_components", label: "Need hotels and services" },
+  { step: "fix_inactive", label: "Inactive hotel or service" },
+  { step: "load_rates", label: "Need supplier rates" },
+  { step: "approve_fx", label: "Need an FX rate" },
+  { step: "approve_rule", label: "Need a pricing rule" },
+  { step: "recompute", label: "Ready to recompute" },
+  { step: "make_sellable", label: "Ready to sell" },
+];
+
+/** Who gets the card: the price setup makers who may read the workbench (backend app/my_work.py). */
+export function hasPriceSetup(permissions: readonly string[]): boolean {
+  return permissions.includes("price_version.write") && permissions.includes("pricing.read");
+}
+
+export function workbenchStepHref(step: string): string {
+  return tileHref("/pricing/workbench", { next_step: step });
 }
