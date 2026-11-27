@@ -13,7 +13,7 @@ extras (contract minor 1.3): the cancellation policy on every quote and hold ans
 ``GET /bookings/{booking_id}/confirmation`` (JSON or a printable HTML file, no traveller names; G2), 409
 ``credit_hold_overdue`` on ``POST /holds`` while the agency's AA invoices are overdue past its terms (G4) and the
 agency's terms ``GET /terms`` (payment terms, credit status, default cancellation policy, approved clauses; G6).
-AA-1030 G3 (contract 1.4): the agency's own tariff ``GET /tariff`` (JSON or ``?format=csv``, ``app.b2b.tariff``).
+AA-1030 G3 (contract 1.4): the agency's own tariff ``GET /tariff`` lives in ``app.routers.b2b_tariff`` (AA-1188, 1.12).
 AA-1037 (contract 1.5, root ADR 0019 d17): the agency's own AA invoices ``GET /invoices``, ``GET /invoices/{number}``
 and its billing status ``GET /billing-status`` (``app.b2b.invoices``: scoped by the caller's partner, drafts never
 shown, a field allow-list without staff notes, reasons, staff names, bank references or the bill-to snapshot).
@@ -30,7 +30,7 @@ named ``supplier_net`` (or any net, cost or margin) is ever in a response (``tes
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from fastapi.responses import HTMLResponse
@@ -46,7 +46,6 @@ from app.b2b import (
     holds,
     quotes,
     reads,
-    tariff,
     terms,
     vouchers,
 )
@@ -540,55 +539,6 @@ class PriceParity(Strict):
     basis: Literal["per_person_2pax_low_season"]
 
 
-class TariffItem(Strict):
-    """1.4 (AA-1030 G3). One price matrix window x pax band of a tour, cut where a supplier rate changes (every
-    departure from ``valid_from`` to ``valid_to`` prices the same), priced as ``POST /quotes`` would price the plan's
-    ``tp:`` line for the band's smallest party on ``priced_for_date`` (= ``valid_from``)."""
-
-    tour: TourKey
-    title: str | None = Field(default=None, max_length=500)
-    country: str | None = Field(default=None, max_length=120)
-    duration_days: int | None = None
-    season: str | None = Field(default=None, max_length=80)
-    valid_from: date
-    valid_to: date
-    pax_min: int = Field(ge=1)
-    pax_max: int | None = Field(default=None, ge=1)
-    priced_for_pax: int = Field(ge=1)
-    priced_for_date: date
-    price: Money
-    price_per_person: Money
-    agency_discount_pct: str = Field(pattern=r"^\d+(\.\d{1,4})?$")
-    rrp_per_person: Money | None = None
-    # 1.7 (AA-1075, bk-15): sell prices by age band and room, priced by the quote engine (never a net).
-    child_price_per_person: Money | None = None
-    infant_price: Money | None = None
-    single_supplement_per_person: Money | None = None
-    # 1.12 (AA-1188, D5): price_per_person is the twin share (single_supplement_per_person on top for a room alone);
-    # a band that reaches the group size AA quotes on request is on_request; a departure inside the row's dates with a
-    # price adjustment in force makes a quote on it differ from the row.
-    availability: Literal["available", "on_request"] = "available"
-    departure_adjusted: bool = False
-
-
-class Tariff(Strict):
-    """1.4 (AA-1030 G3). The calling agency's own tariff: its price per tour, season and pax band."""
-
-    currency: Currency
-    priced_on: date
-    basis: Literal["per_person_band_min_twin_share"]
-    tier_code: str = Field(max_length=32)
-    fx: FxLock
-    items: list[TariffItem]
-    truncated: bool
-    # 1.12 (AA-1188): the pricing policy's group size quoted on request, the b2b rule's early-booking days (null: no
-    # early-booking discount), the tours with a priced row and the tours AA serves (null for a one-tour read).
-    group_on_request_min_pax: int | None = Field(default=None, ge=1)
-    early_booking_days: int | None = Field(default=None, ge=0)
-    tours_priced: int = Field(default=0, ge=0)
-    catalog_tours: int | None = Field(default=None, ge=0)
-
-
 Amount = Annotated[str, Field(pattern=r"^-?\d+\.\d{2}$")]
 InvoiceKind = Literal["saas", "settlement"]
 InvoiceStatus = Literal["issued", "paid", "void"]
@@ -717,32 +667,6 @@ async def get_price_parity(
     currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")],
 ) -> dict:
     return await reads.price_parity(ctx.pool, source_id=source_id, currency=currency, on=datetime.now(UTC).date())
-
-
-@router.get(
-    "/tariff",
-    response_model=Tariff,
-    responses={200: {"content": {"text/csv": {"schema": {"type": "string"}}}}},
-)
-async def get_tariff(
-    ctx: CanRead,
-    currency: Annotated[str, Query(pattern=r"^[A-Z]{3}$")] = "USD",
-    source_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
-    format: Annotated[Literal["json", "csv"], Query()] = "json",  # noqa: A002 — the query parameter's name
-) -> Any:
-    """1.4 (AA-1030 G3): the agency's own price per tour, season and pax band (``app.b2b.tariff``); ``format=csv``
-    answers the same rows as a CSV file."""
-    on = datetime.now(UTC).date()
-    async with ctx.pool.acquire() as conn:
-        body = await tariff.build(conn, partner_id=ctx.partner_id, currency=currency, on=on, source_id=source_id)
-    if format == "csv":
-        name = tariff.filename(str(ctx.partner["agency_name"]), currency, on)
-        return Response(
-            tariff.to_csv(body),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
-        )
-    return tariff.agency_view(body)
 
 
 def _caller(ctx: B2BContext) -> holds.Caller:

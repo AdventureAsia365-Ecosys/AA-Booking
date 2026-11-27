@@ -423,28 +423,14 @@ async def build(
     items: list[tuple[int, dict[str, Any]]] = []
     refused: list[tuple[int, dict[str, Any]]] = []
     for cell in cells:
-        cost = costs[cell.no]
-        if isinstance(cost, str):
-            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, cost)))
-            continue
-        twin = twin_share(cost, cell.party)
-        if isinstance(twin, str):
-            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, twin)))
-            continue
         calendar = calendars.get(cell.row["plan_id"], seasons.EMPTY)
-        try:
-            season = calendar.season_on(cell.on)
-            price = quotes.price_line(basis, twin, cell.row["plan_id"], season=season)
-            extras = _by_age_and_room(basis, cell, twin, costs[cell.no + len(cells)], price, currency, season)
-        except engine.PricingError as exc:
-            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, str(exc))))
+        found = _price_cell(basis, cell, costs[cell.no], costs[cell.no + len(cells)], calendar)
+        if isinstance(found, str):
+            refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, found)))
             continue
-        item = _item(cell, price, currency)
-        if calendar.configured:  # 1.12: the calendar's season of the row's first day, else the matrix label
-            item["season"] = season.code
-        item["availability"] = row_availability(cell.row["pax_max"], group_min)
-        item["departure_adjusted"] = any(cell.on <= d <= cell.end for d in adjusted.get(cell.row["plan_id"], ()))
-        items.append((cell.row_no, {**item, **extras}))
+        found["availability"] = row_availability(cell.row["pax_max"], group_min)
+        found["departure_adjusted"] = any(cell.on <= d <= cell.end for d in adjusted.get(cell.row["plan_id"], ()))
+        items.append((cell.row_no, found))
     unpriced.extend(_joined(refused, ("reason",)))
     joined = _joined(items, SAME_PRICE)
     early = basis.rule.early_days if basis.rule.early_days and basis.rule.early_discount_pts else None
@@ -469,6 +455,33 @@ async def build(
         "tours_priced": len({i["tour"]["source_id"] for i in joined}),
         "catalog_tours": await catalog_tours(conn) if source_id is None else None,
     }
+
+
+def _price_cell(
+    basis: quotes.PriceBasis,
+    cell: Cell,
+    cost: LineCost | str,
+    singles: LineCost | str,
+    calendar: seasons.Calendar,
+) -> dict[str, Any] | str:
+    """One tariff row piece priced by the quote engine (twin share, 1.12), with its age and room prices and its
+    season label; or the reason it cannot be priced."""
+    if isinstance(cost, str):
+        return cost
+    twin = twin_share(cost, cell.party)
+    if isinstance(twin, str):
+        return twin
+    currency = basis.currency
+    try:
+        season = calendar.season_on(cell.on)
+        price = quotes.price_line(basis, twin, cell.row["plan_id"], season=season)
+        extras = _by_age_and_room(basis, cell, twin, singles, price, currency, season)
+    except engine.PricingError as exc:
+        return str(exc)
+    item = _item(cell, price, currency)
+    if calendar.configured:  # 1.12: the calendar's season of the row's first day, else the matrix label
+        item["season"] = season.code
+    return {**item, **extras}
 
 
 def _by_age_and_room(

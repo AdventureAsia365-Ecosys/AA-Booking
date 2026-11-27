@@ -762,9 +762,10 @@ def test_quote_runs_a_fixed_number_of_queries() -> None:
 def test_tariff_and_product_rows_carry_no_net_price() -> None:
     """1.7 (AA-1075, bk-15): child, infant and single prices reach the agency as sell prices only."""
     from app.routers import b2b as b2b_router
+    from app.routers import b2b_tariff  # AA-1188: the tariff models moved here
 
-    for model in (b2b_router.TariffItem, b2b_router.Product, b2b_router.AgeBands):
+    for model in (b2b_tariff.TariffItem, b2b_tariff.Tariff, b2b_router.Product, b2b_router.AgeBands):
         assert not [f for f in model.model_fields if "net" in f or "margin" in f or "cost" in f], model.__name__
-    assert {"child_price_per_person", "infant_price", "single_supplement_per_person"} <= set(
-        b2b_router.TariffItem.model_fields
+    assert {"child_price_per_person", "infant_price", "single_supplement_per_person", "availability"} <= set(
+        b2b_tariff.TariffItem.model_fields
     )
