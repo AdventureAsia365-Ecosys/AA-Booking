@@ -510,6 +510,16 @@ class TermsClause(Strict):
     approved_at: datetime
 
 
+class QuoteRules(Strict):
+    """1.12 (AA-1188): the pricing policy values in force that shape every quote (staff edit them on Pricing >
+    Policy): how long a quote holds its price, the group size quoted on request and AA's default age bands (a tour may
+    have its own: ``Product.age_bands``)."""
+
+    quote_validity_days: int = Field(ge=1)
+    group_on_request_min_pax: int = Field(ge=1)
+    age_bands: AgeBands
+
+
 class PartnerTerms(Strict):
     """1.3 (AA-1037 G6): the agency's terms with AA as data: payment terms, credit status, the default cancellation
     policy in force and the approved clauses (a draft clause is never shown)."""
@@ -519,6 +529,8 @@ class PartnerTerms(Strict):
     credit: CreditStatus
     cancellation_policy: CancellationPolicy | None
     clauses: list[TermsClause]
+    # 1.12 (AA-1188): null when a policy value has no approved version in force (the rest of the terms still answer).
+    quote_rules: QuoteRules | None = None
 
 
 class PriceParity(Strict):
@@ -552,6 +564,11 @@ class TariffItem(Strict):
     child_price_per_person: Money | None = None
     infant_price: Money | None = None
     single_supplement_per_person: Money | None = None
+    # 1.12 (AA-1188, D5): price_per_person is the twin share (single_supplement_per_person on top for a room alone);
+    # a band that reaches the group size AA quotes on request is on_request; a departure inside the row's dates with a
+    # price adjustment in force makes a quote on it differ from the row.
+    availability: Literal["available", "on_request"] = "available"
+    departure_adjusted: bool = False
 
 
 class Tariff(Strict):
@@ -564,6 +581,12 @@ class Tariff(Strict):
     fx: FxLock
     items: list[TariffItem]
     truncated: bool
+    # 1.12 (AA-1188): the pricing policy's group size quoted on request, the b2b rule's early-booking days (null: no
+    # early-booking discount), the tours with a priced row and the tours AA serves (null for a one-tour read).
+    group_on_request_min_pax: int | None = Field(default=None, ge=1)
+    early_booking_days: int | None = Field(default=None, ge=0)
+    tours_priced: int = Field(default=0, ge=0)
+    catalog_tours: int | None = Field(default=None, ge=0)
 
 
 Amount = Annotated[str, Field(pattern=r"^-?\d+\.\d{2}$")]

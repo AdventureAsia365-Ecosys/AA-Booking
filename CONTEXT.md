@@ -228,7 +228,7 @@ backend/
   app/routers/b2b.py       /booking/b2b/v1/products, /quotes, /fx-rates, /price-parity (M2M only, AA-972); /departures,
                            /holds, /holds/{id} (GET, DELETE), /holds/{id}/confirm (AA-973); /holds/{id}/extend,
                            /bookings/{id}/cancel (AA-974); /bookings/{id}/confirmation, /terms (AA-1037, minor 1.3)
-                           /tariff (AA-1030, 1.4); /invoices, /invoices/{number}, /billing-status (AA-1037, 1.5)
+                           /tariff (AA-1030, 1.4; twin share + availability 1.12, AA-1188); /invoices, /invoices/{number}, /billing-status (AA-1037, 1.5)
   app/routers/b2b_partners.py  /booking/b2b-partners (GET, POST, PATCH /{id}; b2b.admin = admin)
   app/routers/ops.py       GET /booking/ops/deploy-gate (machine route: Deploy Dev workflow OIDC token only, AA-751)
   app/ops/                 AA-682 operations after the sale (bk-026): supplier_bookings.py (generate / add / edit /
@@ -1305,9 +1305,21 @@ row first), each window from today at the earliest and **cut wherever a supplier
 (`cost_sheet.rate_cuts`, the cost sheet's own cuts: hand and overridden rows keep the window staff gave them and a
 computed row is only cut as of its last recompute), neighbouring pieces with the same price joined back, so every
 departure date of a tariff row prices the same; priced by the **quote engine itself**: the plan's `tp:` line for the
-band's smallest party (all adults, default room mix) on the row's first day (`priced_for_date` = `valid_from`), through `components.price_lines` and `quotes.price_line` with
-the partner's `quotes.PriceBasis` (b2b rule, FX, agency terms in force today). So `price` = what `POST /quotes`
-answers for that party and day; `price_per_person` = it / party, rounded up like a line. Not the matrix `amount`
+band's smallest party (all adults, **sharing twin rooms**) on the row's first day (`priced_for_date` = `valid_from`),
+through `components.price_lines` and `quotes.price_line` with the partner's `quotes.PriceBasis` (b2b rule, FX, agency
+terms in force today). `price_per_person` = the line / party, rounded up like a line. **Twin share** (contract 1.12,
+AA-1188, S295 decision D5): an even party is the quote's default mix (all doubles), so `price` = what `POST /quotes`
+answers for that party and day; an odd party is asked with `(party + 1) / 2` doubles and half of one double room
+night is taken off per hotel night (`tariff.twin_share`, each room part's net over its rooms), so 3 travellers never
+cost more per person than 2. A quote of an odd party (default mix: doubles plus one single) charges `party` x
+`price_per_person` plus one `single_supplement_per_person`. A hotel night whose rates are in two currencies cannot be
+halved: that odd band is unpriced (staff see the reason). Each row also carries `availability` (`on_request` when the
+band reaches the pricing policy's `group_on_request_min_pax`: the 8-10 and 11+ bands with the seeded 9; else
+`available`), the season of its first day from the plan's season calendar once configured (else the matrix label;
+rows never join across a season) and `departure_adjusted` (an upcoming departure inside the row's dates has an
+approved price adjustment in force). The tariff also answers `group_on_request_min_pax`, `early_booking_days` (the
+b2b rule's, null without an early-booking discount), `tours_priced` and `catalog_tours` (`catalog.v_tour`, null for a
+one-tour read: the CRM's "Priced tours N of M"); the CSV adds `availability` and `departure_adjusted` last. Not the matrix `amount`
 (rounded to 5 USD, peak uplift; quotes never read it); the row's public RRP is shown as it is. Rows a quote cannot
 price (no components, no rate in force, no FX rate for a cost currency) are left out of the agency's tariff and listed
 with the reason for staff. The asked currency must price today (S270): a quote currency without an approved FX rate in
@@ -1804,7 +1816,10 @@ our own code). Staff page `/finance` "Costs & profit" (tabs by permission), the 
   `b2b_infant_age_max` 1). The agency reads them (contract 1.7): `GET /products` `age_bands` (the plan's, else the
   defaults) and three sell-side tariff fields priced by the quote engine (`tariff._by_age_and_room`):
   `child_price_per_person`, `infant_price` (what one infant adds) and `single_supplement_per_person` (the party in
-  single rooms less twin share; null when a single room has no rate), also the last three CSV columns. Never a net.
+  single rooms less the twin share, since 1.12 a party of one too; null when a single room has no rate), CSV columns
+  17-19. Never a net. `GET /terms` (1.12, AA-1188) adds `quote_rules`: the policy's `quote_validity_days`,
+  `group_on_request_min_pax` and default `age_bands` (null when one has no approved value), for the CRM's "Booking
+  conditions with AA".
 - **Per-tour terms** (`booking.trip_plan_billing_terms`, staff `/booking/tour-terms/{source_id}`, trip plan page →
   "Agency terms"): a tour's deposit % and balance days for every agency or one. Most specific wins: agency + tour >
   tour > agency > default (`config.plan_terms`), on the settlement draft (the tour of the hold's first `tp:` line) and
@@ -2819,7 +2834,7 @@ only e-mail today is the staff new inquiry e-mail, AA-811), Booking-side SES bou
 sync of content (D4: live reads instead; the only catalog outbox consumer is the tour lifecycle pull, AA-986; the
 AA-1029 bridge copies catalog keys and the reference price text only), catalog titles on trip case legs (Q11),
 supply facts from a rate sheet (the import only prices existing hotels / services), the tax table (ADR 0005 d10),
-agency tier discounts (ADR 0019 b15, AA-1030), contract document upload, supplier hard delete,
+contract document upload, supplier hard delete,
 editing or withdrawing a pending pricing rule / FX row (append-only: enter a new row with another date), any use of
 `shared.job`, the `trip_case.status_changed` back-channel, CIS grant migrations, the frontend's custom domain (the ECS
 service `aa-booking-dev-admin` serves `booking.lumiguides.it.com` since AA-911, root `frontend/`).

@@ -8,12 +8,16 @@ AA, all read from data rows (no terms text in code):
 - ``cancellation_policy``: the B2B default policy in force today (a tour may have its own; a quote or hold shows the
   one that applies to it);
 - ``clauses``: the **approved** partner terms clauses (bk-044), e.g. the price-error clause with its free-cancel
-  window. A draft clause is never shown to an agency.
+  window. A draft clause is never shown to an agency;
+- ``quote_rules`` (1.12, AA-1188): the pricing policy values in force that every quote follows (quote validity days,
+  the group size quoted on request, AA's default child and infant age bands; :mod:`app.pricing.policy_values`), for
+  the CRM's "Booking conditions with AA"; null when one has no approved value (the rest still answers).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -22,6 +26,9 @@ import asyncpg
 
 from app.agency_billing import clauses, config
 from app.b2b import cancellation
+from app.pricing import policy_values
+
+log = logging.getLogger(__name__)
 
 STATUS_SQL = """
 SELECT status, oldest_overdue_days, overdue_invoices, overdue_amount::text AS overdue_amount, warn_after_days,
@@ -35,6 +42,21 @@ PCT = Decimal("0.01")
 def pct_text(fraction: Any) -> str:
     """A stored fraction (0.3000) as the contract's percent text ("30.00")."""
     return format((Decimal(str(fraction)) * HUNDRED).quantize(PCT), "f")
+
+
+async def quote_rules(conn: asyncpg.Connection, today: date) -> dict[str, Any] | None:
+    """1.12 (AA-1188): the policy values every quote follows, or None when one has no approved value in force."""
+    try:
+        policy = await policy_values.load(conn, today)
+        child_max, infant_max = policy.age_bands
+        return {
+            "quote_validity_days": policy.quote_validity_days,
+            "group_on_request_min_pax": policy.group_on_request_min_pax,
+            "age_bands": {"child_age_max": child_max, "infant_age_max": infant_max},
+        }
+    except policy_values.PolicyUnavailable as exc:
+        log.warning("b2b_terms_policy_unavailable error=%s", exc)
+        return None
 
 
 def money_list(raw: Any) -> list[dict[str, str]]:
@@ -93,4 +115,5 @@ async def partner_terms(
         "credit": credit_out(status),
         "cancellation_policy": cancellation.policy_out(policy, basis=cancellation.BASIS_TODAY),
         "clauses": await clauses.approved(conn),
+        "quote_rules": await quote_rules(conn, today),
     }
