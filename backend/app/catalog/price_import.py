@@ -64,6 +64,7 @@ from app.b2b import departures, plan_components
 from app.b2b.tariff import FORMULA_START
 from app.catalog import cost_sheet, price_readiness, price_versions, sellable_gate, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
+from app.catalog.price_import_rows import Merged, cost_priced, draft_row, hand_row, merge_prices  # noqa: F401
 from app.errors import Forbidden, Invalid
 from app.pricing import engine
 from app.supply import rate_sheet as rs
@@ -328,9 +329,8 @@ def _problem(sheets: Sheets, sheet: str, row: Mapping[str, Any], column: str | N
     sheets.problems.append(Problem(sheet, row.get("_row"), column, code, message))
 
 
-def check_shapes(sheets: Sheets, today: date) -> None:
-    """The checks that need no database: a component names one item, prices and departures follow the form rules,
-    no duplicate item on a day and no overlapping prices within the file."""
+def _check_components(sheets: Sheets) -> None:
+    """A component names one item (a meal plan only on a hotel night, AA-1187), never twice on a day."""
     seen: set[tuple[str, int, str]] = set()
     for c in sheets.components:
         has_room = bool(c.get("hotel_code") or c.get("room_type"))
@@ -359,6 +359,12 @@ def check_shapes(sheets: Sheets, today: date) -> None:
         if c.get("day_no") and key in seen:
             _problem(sheets, COMPONENTS, c, "Day", "duplicate_component", "the same item is listed twice on this day")
         seen.add(key)
+
+
+def check_shapes(sheets: Sheets, today: date) -> None:
+    """The checks that need no database: a component names one item, prices and departures follow the form rules,
+    no duplicate item on a day and no overlapping prices within the file."""
+    _check_components(sheets)
     for p in sheets.prices:
         p["channel"] = p.get("channel") or engine.Channel.B2B.value
         p["currency"] = p.get("currency") or engine.BASE_CURRENCY
@@ -621,68 +627,6 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
     return plans
 
 
-# ── Price rows ───────────────────────────────────────────────────────────────
-
-
-def hand_row(p: Mapping[str, Any], markup: Decimal | None, increments: engine.Increments) -> dict[str, Any]:
-    """One imported hand price as ``trip_plan_prices.store`` writes it (no net cost: nothing is computed)."""
-    amount = p["amount"]
-    return {
-        "channel": p["channel"],
-        "season": str(p["season"])[: cost_sheet.SEASON_MAX] if p.get("season") else None,
-        "peak": bool(p.get("peak")),
-        "valid_from": p["valid_from"],
-        "valid_to": p["valid_to"],
-        "pax_min": int(p["pax_min"]),
-        "pax_max": p.get("pax_max"),
-        "currency": p["currency"],
-        "amount": amount,
-        "net_amount": None,
-        "net_currency": None,
-        "effective_margin": None,
-        "priced_on": None,
-        "overridden": False,
-        "computed": False,
-        "rrp_amount": trip_plan_prices.rrp_for(p["channel"], amount, p["currency"], markup, increments),
-        "child_amount": p.get("child_amount"),
-        "infant_amount": p.get("infant_amount"),
-        "single_supplement_amount": p.get("single_supplement_amount"),
-        "child_net_amount": None,
-        "infant_net_amount": None,
-        "single_supplement_net_amount": None,
-    }
-
-
-def cost_priced(row: Mapping[str, Any]) -> bool:
-    """A row priced from a cost: computed from supplier rates, or typed with a net cost on the single price form (its
-    net cost, margin and override live only in the matrix). Neither is in the workbook, so an import keeps them."""
-    return bool(row["computed"]) or row["net_amount"] is not None
-
-
-@dataclass(frozen=True)
-class Merged:
-    rows: list[dict[str, Any]]
-    computed_replaced: int
-    net_replaced: int
-
-
-def merge_prices(
-    existing: Sequence[dict[str, Any]], hand: Sequence[dict[str, Any]], pricing: cost_sheet.Pricing
-) -> Merged:
-    """The new matrix: the imported hand rows, then the cost-priced rows kept (as stored, their RRP under today's
-    markup) that no hand row overlaps; positions 1..n. Plain hand rows (no net cost) are the file's and are replaced.
-    Also counts the cost-priced rows a hand row replaces (computed, and typed with a net cost)."""
-    priced = [cost_sheet.kept_row(r, pricing) for r in existing if cost_priced(r)]
-    covered = [any(cost_sheet.overlaps(r, h) for h in hand) for r in priced]
-    kept = [r for r, c in zip(priced, covered, strict=True) if not c]
-    gone = [r for r, c in zip(priced, covered, strict=True) if c]
-    final = [*(dict(h) for h in hand), *kept]
-    for i, row in enumerate(final, start=1):
-        row["position"] = i
-    computed = sum(1 for r in gone if r["computed"])
-    return Merged(final, computed, len(gone) - computed)
-
-
 # ── Status after (dry run) ───────────────────────────────────────────────────
 
 
@@ -871,23 +815,6 @@ async def _apply(
                 },
             )
     return drafts
-
-
-def draft_row(p: Mapping[str, Any]) -> dict[str, Any]:
-    """One imported hand price as a draft version row (the peak comes from the season calendar)."""
-    return {
-        "channel": p["channel"],
-        "season": str(p["season"])[: cost_sheet.SEASON_MAX] if p.get("season") else None,
-        "valid_from": p["valid_from"],
-        "valid_to": p["valid_to"],
-        "pax_min": int(p["pax_min"]),
-        "pax_max": p.get("pax_max"),
-        "currency": p["currency"],
-        "amount": p["amount"],
-        "child_amount": p.get("child_amount"),
-        "infant_amount": p.get("infant_amount"),
-        "single_supplement_amount": p.get("single_supplement_amount"),
-    }
 
 
 # ── Template ─────────────────────────────────────────────────────────────────
