@@ -49,24 +49,26 @@ from app import audit
 from app.auth import people, self_approval
 from app.auth.staff import Staff
 from app.errors import Conflict, Forbidden, Invalid, NotFound
-from app.pricing import season_sync, seasons
+from app.pricing import season_approvals, season_sync, seasons
 
 ONE_DAY = timedelta(days=1)
 REASON_MAX = 300
 NAME_MAX = season_sync.NAME_MAX
 
-CALENDARS_SQL = """
+# A range change waiting for a second person: a proposed range, or the removal of an approved one (the Seasons page's
+# "Waiting" column and tile; AA-1190: the My work tile counts the ones the viewer may approve, see season_approvals).
+RANGE_WAITING = "(r.status = 'pending' OR (r.end_requested_at IS NOT NULL AND r.ended_at IS NULL))"
+CALENDARS_SQL = f"""
 SELECT c.id::text AS id, c.owner_kind, c.destination_id::text AS destination_id,
        c.supplier_contract_id::text AS supplier_contract_id, c.name, c.default_season, c.pending_default_season,
        c.default_requested_by, c.default_requested_at, c.default_request_reason, c.created_by,
        c.created_at, c.updated_at,
        (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id AND r.status = 'approved'
           AND r.ended_at IS NULL) AS ranges,
-       (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id
-          AND (r.status = 'pending' OR (r.end_requested_at IS NOT NULL AND r.ended_at IS NULL))) AS waiting,
+       (SELECT count(*) FROM booking.season_ranges r WHERE r.calendar_id = c.id AND {RANGE_WAITING}) AS waiting,
        (SELECT count(*) FROM booking.trip_plans p WHERE p.season_calendar_id = c.id) AS plans
 FROM booking.season_calendars c
-"""
+"""  # noqa: S608 — constants only
 RANGES_SQL = """
 SELECT r.id::text AS id, r.calendar_id::text AS calendar_id, r.kind, r.season_code, r.date_from, r.date_to,
        r.holiday_country::text AS holiday_country, r.holiday_code, r.days_before, r.days_after, r.note, r.status,
@@ -214,6 +216,11 @@ async def list_calendars(conn: asyncpg.Connection, staff: Staff, owner_kind: str
         CALENDARS_SQL + " WHERE ($1::text IS NULL OR c.owner_kind = $1) ORDER BY c.owner_kind, c.name", owner_kind
     )
     items = await _people(conn, [calendar_out(r) for r in rows], CALENDAR_PEOPLE)
+    # AA-1190: each calendar's waiting changes the caller may approve (0 without season.approve); the page's
+    # ``?approvable=me`` view and the My work tile "Season changes to approve" read the same filter
+    mine = await season_approvals.by_calendar(conn, staff)
+    for item in items:
+        item["approvable"] = mine.get(item["id"], 0)
     return {"items": items, "season_codes": list(seasons.SEASON_CODES), **(await season_sync.last_run(conn))}
 
 
@@ -532,14 +539,31 @@ async def _end(conn: asyncpg.Connection, table: str, row: Any, staff: Staff, act
 # ── Holiday events ───────────────────────────────────────────────────────────
 
 
-async def list_events(conn: asyncpg.Connection, staff: Staff, country: str | None, year: int | None) -> dict[str, Any]:
+async def list_events(
+    conn: asyncpg.Connection, staff: Staff, country: str | None, year: int | None, *, approvable: bool = False
+) -> dict[str, Any]:
+    """The events, by date. ``approvable`` (``?approvable=me``, AA-1190 My work): only the waiting changes the caller
+    may approve (:data:`app.pricing.season_approvals.EVENT_APPROVABLE`; none without season.approve)."""
     _read(staff)
-    rows = await conn.fetch(
-        EVENTS_SQL + " WHERE ($1::text IS NULL OR e.country_iso2 = $1) AND ($2::int IS NULL OR e.year = $2)"
-        " ORDER BY e.date_from, e.country_iso2, e.code",
-        (country or "").upper() or None,
-        year,
-    )
+    order = " ORDER BY e.date_from, e.country_iso2, e.code"
+    country = (country or "").upper() or None
+    if not approvable:
+        rows = await conn.fetch(
+            EVENTS_SQL + " WHERE ($1::text IS NULL OR e.country_iso2 = $1)"
+            " AND ($2::int IS NULL OR e.year = $2)" + order,
+            country,
+            year,
+        )
+    elif staff.can("season.approve"):
+        rows = await conn.fetch(
+            EVENTS_SQL + f" WHERE {season_approvals.EVENT_APPROVABLE} AND ($3::text IS NULL OR e.country_iso2 = $3)"
+            " AND ($4::int IS NULL OR e.year = $4)" + order,
+            *(await season_approvals.event_args(conn, staff)),
+            country,
+            year,
+        )
+    else:
+        rows = []
     countries = await conn.fetch("SELECT iso2::text AS iso2, name FROM booking.countries ORDER BY name")
     return {
         "items": await _people(conn, [event_out(r) for r in rows], CHANGE_PEOPLE),

@@ -121,7 +121,6 @@
   "frontend/app/(staff)/pricing/agency-tiers/_parts/AgencyTiersView.tsx::AgencyTiersView": 36,
   "frontend/app/(staff)/pricing/agency-tiers/_parts/TariffView.tsx::TariffView": 16,
   "frontend/app/(staff)/pricing/calculator/page.tsx::PricingCalculatorPage": 11,
-  "frontend/app/(staff)/pricing/holiday-events/_parts/HolidayEventsView.tsx::HolidayEvents": 12,
   "frontend/app/(staff)/pricing/readiness/_parts/ReadinessView.tsx::Needs": 16,
   "frontend/app/(staff)/pricing/readiness/_parts/ReadinessView.tsx::ReadinessView": 22,
   "frontend/app/(staff)/pricing/rules/_parts/PolicyDrawers.tsx::NewRuleDrawer": 11,

@@ -6,7 +6,8 @@ due date among them (``earliest_due``), and the query string of the list page th
 
     key                         needs                   group     target page (filter)
     my_open_cases               trip_case.read          work      /cases?tab=mine&status=<every open status>
-    trip_checks_overdue         ops.read                work      /trip-checks?due=overdue
+    trip_checks_overdue         ops.read                work      /trip-checks?due=overdue&owner=me (AA-1190: yours)
+    trip_checks_unassigned      ops.write               work      /trip-checks?due=overdue&owner=none
     b2b_on_request              b2b_desk.read           work      /b2b-desk (its default: On request, open)
     supplier_bills_overdue      bill.read               work      /billing?bill_status=open&bill_due=overdue
     supplier_bills_due_soon     bill.read               work      /billing?bill_status=open&bill_due=soon
@@ -19,6 +20,10 @@ due date among them (``earliest_due``), and the query string of the list page th
     suppliers_to_activate       supplier.activate       approve   /suppliers?status=pending&approvable=me
     billing_changes_to_approve  billing_config.approve  approve   /agency-billing?tab=settings&approvable=me
     supplier_bank_to_approve    supplier_bank.approve   approve   /suppliers?bank=pending&approvable=me
+    price_versions_to_approve   price_version.approve   approve   /pricing/workbench?pending_versions=me
+    addons_to_publish           addon.approve           approve   /add-ons?approvable=me
+    season_changes_to_approve   season.approve          approve   /pricing/seasons?approvable=me
+    holiday_events_to_approve   season.approve          approve   /pricing/holiday-events?approvable=me
     contracts_ending_soon       supply.write            work      /suppliers?contracts=ending (the expiring list)
     owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&from=<month start>
 
@@ -32,7 +37,14 @@ oversight never rests with the person it lists. The approval tiles include the b
 self-approve (:mod:`app.auth.self_approval`).
 
 The approval tiles count only the items the caller may act on (maker-checker: not entered, last changed, recorded or
-asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies.
+asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies. AA-1190: the season
+and holiday tiles leave out the caller's own proposals and removal requests (the business owner's own proposal stays
+in while she may self-approve, never a stop-sale range or a removal) and a stop-sale range for a caller without
+``stop_sale.approve``, the approve paths' rules (:mod:`app.pricing.season_approvals`).
+
+AA-1190 (slice 1): the price setup progress card (``GET /booking/my-work/price-setup``, :func:`price_setup`) counts
+the trip plans per next step of the price workbench (``app.catalog.price_workbench``, its own summary, so the card and
+the workbench never disagree), for the people who set prices up (``price_version.write`` with ``pricing.read``).
 
 Shown by capability, never by person: a tile is in the answer only when :meth:`Staff.can` grants its capability (so a
 preview or E2E session gets its capped set, and a later custom role gets exactly the tiles of its capabilities). Every
@@ -66,11 +78,13 @@ from app.agency_billing import payments as agency_payments
 from app.auth import self_approval
 from app.auth.staff import Staff
 from app.b2b import desk
+from app.catalog import cost_sheet, price_version_queue, price_workbench
 from app.errors import Forbidden, Unavailable
 from app.ops import bill_approvals, bill_filters, supplier_bills, trip_checks
+from app.pricing import season_approvals
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
-from app.supply import contract_expiry, restrictions
+from app.supply import addons, contract_expiry, restrictions
 from app.trip_cases import service as trip_cases
 
 log = logging.getLogger(__name__)
@@ -89,8 +103,13 @@ async def _my_open_cases(conn: asyncpg.Connection, staff: Staff) -> dict[str, An
     return await trip_cases.case_queue(conn, statuses=list(OPEN_CASE_STATUSES), assignee=staff.cis_user_id)
 
 
-async def _trip_checks_overdue(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await trip_checks.overdue_queue(conn)
+async def _trip_checks_overdue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    # AA-1190: the overdue checks the caller owns (the page's owner=me); the unowned ones are the next tile
+    return await trip_checks.overdue_queue(conn, assignee=staff.cis_user_id)
+
+
+async def _trip_checks_unassigned(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
+    return await trip_checks.overdue_queue(conn, assignee="none")
 
 
 async def _b2b_on_request(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
@@ -158,6 +177,22 @@ async def _stop_sales_to_review(conn: asyncpg.Connection, staff: Staff) -> dict[
     return await restrictions.review_queue(conn, reviewable_by=staff.cis_user_id)
 
 
+async def _price_versions_to_approve(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await price_version_queue.approval_queue(conn, staff)
+
+
+async def _addons_to_publish(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await addons.publish_queue(conn, approvable_by=staff.cis_user_id)
+
+
+async def _season_changes(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await season_approvals.seasons_waiting_queue(conn, staff)
+
+
+async def _holiday_events(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await season_approvals.events_waiting_queue(conn, staff)
+
+
 @dataclass(frozen=True)
 class Tile:
     key: str
@@ -177,7 +212,8 @@ TILES: tuple[Tile, ...] = (
         _my_open_cases,
         {"tab": "mine", "status": ",".join(OPEN_CASE_STATUSES)},
     ),
-    Tile("trip_checks_overdue", "ops.read", WORK, _trip_checks_overdue, {"due": "overdue"}),
+    Tile("trip_checks_overdue", "ops.read", WORK, _trip_checks_overdue, {"due": "overdue", "owner": "me"}),
+    Tile("trip_checks_unassigned", "ops.write", WORK, _trip_checks_unassigned, {"due": "overdue", "owner": "none"}),
     Tile("b2b_on_request", "b2b_desk.read", WORK, _b2b_on_request),
     Tile("supplier_bills_overdue", "bill.read", WORK, _bills_overdue, {"bill_status": "open", "bill_due": "overdue"}),
     Tile("supplier_bills_due_soon", "bill.read", WORK, _bills_due_soon, {"bill_status": "open", "bill_due": "soon"}),
@@ -226,6 +262,16 @@ TILES: tuple[Tile, ...] = (
         _supplier_bank_to_approve,
         {"bank": "pending", "approvable": "me"},
     ),
+    Tile(
+        "price_versions_to_approve",
+        "price_version.approve",
+        APPROVE,
+        _price_versions_to_approve,
+        {"pending_versions": "me"},
+    ),
+    Tile("addons_to_publish", "addon.approve", APPROVE, _addons_to_publish, {"approvable": "me"}),
+    Tile("season_changes_to_approve", "season.approve", APPROVE, _season_changes, {"approvable": "me"}),
+    Tile("holiday_events_to_approve", "season.approve", APPROVE, _holiday_events, {"approvable": "me"}),
     Tile("owner_self_approvals", "audit.read", WORK, _owner_self_approvals, {"owner_self_approved": "true"}),
 )
 CAPABILITIES: tuple[str, ...] = tuple(dict.fromkeys(t.capability for t in TILES))
@@ -274,3 +320,34 @@ async def summary(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
     require_any(staff)
     tiles = [await _one(conn, staff, t) for t in tiles_for(staff)]
     return {"role": staff.role, "tiles": tiles, "generated_at": datetime.now(UTC).isoformat()}
+
+
+# ── Price setup progress (AA-1190) ───────────────────────────────────────────
+
+PRICE_SETUP_CAPABILITY = "price_version.write"
+
+
+def may_see_price_setup(staff: Staff) -> bool:
+    """The price setup makers (``price_version.write``) who may read the workbench (``pricing.read``)."""
+    return staff.can(PRICE_SETUP_CAPABILITY) and staff.can("pricing.read")
+
+
+def require_price_setup(staff: Staff) -> None:
+    if not may_see_price_setup(staff):
+        raise Forbidden("forbidden", "the price setup card needs price_version.write and pricing.read")
+
+
+async def price_setup(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    """The price setup progress card: the trip plans per next step of the price workbench (its own summary of every
+    plan: ``by_next_step``, the same numbers as its filter options), so each count opens
+    ``/pricing/workbench?next_step=<step>`` with that many plans. 403 for a caller who is not a price setup maker."""
+    require_price_setup(staff)
+    rows, facts = await price_workbench.rows(conn, cost_sheet.today())
+    summary = price_workbench.summary(rows)
+    return {
+        "steps": list(price_workbench.NEXT_STEPS),
+        "by_next_step": summary["by_next_step"],
+        "total": len(rows),
+        "degraded": bool(facts.degraded),
+        "generated_at": datetime.now(UTC).isoformat(),
+    }

@@ -334,7 +334,8 @@ backend/
                            effective matrix cut by version and season
   app/pricing/seasons.py   AA-1091 (bk-055): the one season function (calendar ranges, festive from holiday events,
                            stop-sale overlay); seasons_admin.py: calendars, ranges, holiday events (maker-checker), the
-                           default calendar of a plan
+                           default calendar of a plan; season_approvals.py (AA-1190): the waiting changes a viewer may
+                           approve (My work tiles, the pages' approvable=me views)
   app/routers/price_versions.py  /booking/catalog/trip-plans/{source_id}/price-versions, /booking/catalog/price-versions*,
                            …/season-calendar; /booking/pricing/season-calendars*, /season-ranges/*, /holiday-events*
   app/catalog/price_readiness.py  AA-1029: catalog-wide price readiness (one status per plan: priced, hand_priced, or the
@@ -2993,7 +2994,19 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   the tile equals the list total. "Due soon" is the `supplier_bill.due` reminder's window (policy
   `supplier_bill_due_soon_days`), also a `due_soon` filter of `GET /supplier-bills` and "Due: Due soon" on /billing.
   A role with no tile capability gets 403 and no band; a tile it cannot read answers `available: false`. The band
-  links "CIS: My work" (`/admin/my-work`) for a person with a CIS role;
+  links "CIS: My work" (`/admin/my-work`) for a person with a CIS role. AA-1190 (My work slice 1): every staff member
+  starts at the dashboard, so My work is the landing page; approvals come first, then the work queues, and the tiles
+  with nothing waiting fold into one line ("Nothing waiting in N queues"). Overdue trip checks split into the caller's
+  own (`owner=me`, `ops.read`) and the unowned ones (`owner=none`, `ops.write`); more approval tiles: price versions to
+  approve (`price_version.approve`, `GET /catalog/price-versions?status=pending&approvable=me`, opened on the price setup
+  page with `?pending_versions=me`), add-ons to publish (`addon.approve`, `/add-ons?approvable=me`), season changes
+  (`season.approve`, `/pricing/seasons?approvable=me`) and holiday event changes
+  (`/pricing/holiday-events?approvable=me`), each only the changes the viewer may approve (never their own, unless the
+  business owner may self-approve). The price setup makers (`price_version.write` + `pricing.read`) also get a
+  **Price setup progress** card (`GET /booking/my-work/price-setup`: the trip plans per next step of the price
+  workbench, each step opening `/pricing/workbench?next_step=<step>`). Below My work the sales block is open for
+  `trip_case.write` holders and folded under "Sales overview" for the others; the Inactive staff tile follows
+  `staff.admin`;
   AA-682 S2: **/trip-checks** (checks across the open sold cases, filters status / due / owner / check / search, the
   check drawer, the latest daily lifecycle runs) and the case **Checks** tab (derived checks, standard + custom checks,
   Add check, the same drawer; emergency contact fields on a B2C trip only); the

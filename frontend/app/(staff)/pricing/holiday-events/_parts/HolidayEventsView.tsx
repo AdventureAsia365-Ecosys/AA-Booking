@@ -6,7 +6,7 @@
 // made from the name and stays the same every year). Text in ../../seasons/_parts/messages.ts (one catalogue for the
 // two season pages); own language switch.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { seasonsApi, type ChangeAction, type HolidayEvent } from "@/lib/api/priceVersions";
@@ -29,6 +29,9 @@ import {
   type ColumnDef,
 } from "@/ui";
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
+
+/** AA-1190: the states of an event waiting for a second person (backend seasons_admin.state: pending, ending). */
+const WAITING_STATES: readonly string[] = ["pending", "ending"];
 import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
 import { useBookingFormat } from "@/ui/local/useBookingFormat";
@@ -102,6 +105,28 @@ function NewEventDrawer({ countries, onClose }: { countries: { iso2: string; nam
   );
 }
 
+/** The events of the page's filters. AA-1190: `?state=waiting`: only the events waiting for a second person (proposed,
+ *  or removal asked: state pending / ending). `?approvable=me` (the My work tile "Holiday events to approve"): only
+ *  the waiting changes the viewer may approve (never their own proposal or removal request, unless the business owner
+ *  may approve her own proposal), the server's filter and the tile's own count. */
+function useEvents() {
+  const { get } = useUrlFilters();
+  const country = get("country") || undefined;
+  const yearText = get("year");
+  const year = yearText ? Number(yearText) : undefined;
+  const waitingOnly = get("state") === "waiting";
+  const approvable = get("approvable") === "me" ? ("me" as const) : undefined;
+  const list = useQuery({
+    queryKey: ["holiday-events", country, year, approvable],
+    queryFn: () => seasonsApi.events(country, year, approvable),
+  });
+  const rows = useMemo(
+    () => (list.data?.items ?? []).filter((e) => !waitingOnly || WAITING_STATES.includes(e.state)),
+    [list.data, waitingOnly],
+  );
+  return { list, rows };
+}
+
 function HolidayEvents() {
   const t = useT(S);
   const { formatDay } = useBookingFormat();
@@ -109,11 +134,8 @@ function HolidayEvents() {
   const qc = useQueryClient();
   const canWrite = useCan("season.write");
   const who = useWho();
-  const { get } = useUrlFilters();
-  const country = get("country") ?? undefined;
-  const year = get("year") ? Number(get("year")) : undefined;
   const [creating, setCreating] = useState(false);
-  const list = useQuery({ queryKey: ["holiday-events", country, year], queryFn: () => seasonsApi.events(country, year) });
+  const { list, rows } = useEvents();
   const act = useMutation({
     mutationFn: ({ id, action, reason }: { id: string; action: ChangeAction; reason?: string }) =>
       seasonsApi.decideEvent(id, action, reason),
@@ -206,6 +228,20 @@ function HolidayEvents() {
                   width: 190,
                 },
                 {
+                  key: "state",
+                  label: t("filterState"),
+                  allLabel: t("allStates"),
+                  options: [{ value: "waiting", label: t("stateWaiting") }],
+                  width: 190,
+                },
+                {
+                  key: "approvable",
+                  label: t("filterShow"),
+                  allLabel: t("allChanges"),
+                  options: [{ value: "me", label: t("onlyMine") }],
+                  width: 230,
+                },
+                {
                   key: "year",
                   label: t("filterYear"),
                   allLabel: t("allYears"),
@@ -217,7 +253,7 @@ function HolidayEvents() {
           }
           searchable={false}
           tableId="holiday-events"
-          data={list.data?.items ?? []}
+          data={rows}
           columns={columns}
           getRowId={(r) => r.id}
           loading={list.isLoading}

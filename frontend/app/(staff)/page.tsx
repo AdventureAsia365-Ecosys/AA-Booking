@@ -5,7 +5,8 @@
 //   GET /booking/trip-cases/summary                       → KPI tiles + pipeline by phase
 //   GET /booking/trip-cases?sort=-updated_at&limit=5      → "Recent trip cases"
 //   GET /booking/trip-cases?assignee=me&status=<open>&…   → "My queue"
-//   GET /booking/staff?active=false (admin only)          → "Inactive staff" tile (spec Q6; AA-1128 wording)
+//   GET /booking/staff?active=false (staff.admin)         → "Inactive staff" tile (spec Q6; AA-1128 wording; AA-1190: by
+//                                                           capability, not the role name)
 //
 // Tiles follow the role (Nghiệp S236): New inquiries, In progress, Proposals sent, and a fourth tile that is
 // "Inactive staff" for admins (AA-1159: "My open cases" is a tile of the My work band now). content_creator has no trip
@@ -15,15 +16,17 @@
 // trip cases") sit on the Pipeline by phase card (S237: under "In progress" they read as a mismatch, 0 vs "1 open").
 
 import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowRight, Hammer, Hotel, Lock, Send, UserPlus } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, Hammer, Hotel, Lock, Send, UserPlus } from "lucide-react";
 import { ApiError, api } from "@/lib/api/client";
 import { supplierBookingsApi } from "@/lib/api/supplierBookings";
 import type { TripCaseListItem, TripCaseStatus, TripCaseSummary } from "@/lib/api/types";
 import { canSeePage } from "@/lib/rbac";
 import {
+  Button,
   Code,
   DataTable,
   DateText,
@@ -68,8 +71,34 @@ export default function DashboardPage() {
     <PageFrame title={tr("Dashboard")} description={tr("Welcome back, {0}. Here is what needs your attention today.", name)}>
       {/* AA-1159: the role's work queues first (by capability; hidden for a role with none). */}
       <MyWorkBand />
-      {canCases ? <SalesDashboard role={staff.role} /> : <CatalogDashboard />}
+      {canCases ? <SalesOverview /> : <CatalogDashboard />}
     </PageFrame>
+  );
+}
+
+/** AA-1190: the sales block, open for the people who work trip cases (trip_case.write), folded for the others. */
+function SalesOverview() {
+  const tr = useT(MSG);
+  // The "sales focus" decides only whether the block starts open (no write is offered here, so no case gate).
+  const sales = useStaff().permissions.includes("trip_case.write");
+  const [open, setOpen] = useState(false);
+  if (sales) return <SalesDashboard />;
+  return (
+    <>
+      <Section
+        testId="sales-overview"
+        title={tr("Sales overview")}
+        description={tr("Trip case counts, recent cases, the pipeline and your queue.")}
+        actions={
+          <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open} testId="sales-overview-toggle">
+            <span className="inline-flex items-center gap-1.5">
+              {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {open ? tr("Hide") : tr("Show")}
+            </span>
+          </Button>
+        }
+      />
+      {open ? <SalesDashboard /> : null}
+    </>
   );
 }
 
@@ -140,12 +169,13 @@ function SupplierAnswers() {
   );
 }
 
-function SalesDashboard({ role }: { role: string }) {
+function SalesDashboard() {
   const tr = useT(MSG);
   const tx = useTx();
   const router = useRouter();
   const isPhone = useIsPhone();
-  const isAdmin = role === "admin";
+  // AA-1190: the Inactive staff tile follows the capability that manages staff, not the role name
+  const isAdmin = useCan("staff.admin");
 
   const summary = useQuery({ queryKey: ["trip-cases", "summary"], queryFn: api.tripCases.summary, retry: retryUnlessClientError });
   const recent = useQuery({
@@ -493,7 +523,7 @@ function CatalogDashboard() {
     <Section title={tr("Catalog")} description={tr("Tours, destinations and countries are written in CIS and read here.")}>
       <div className="flex flex-col gap-3 text-[13px] text-body">
         <p>
-          {tr("Your role works on catalog content. Booking shows that content read-only; the catalog pages open in wave 2. Edit tours, places and photos in the CIS admin.")}
+          {tr("Your role works on catalog content. Booking shows that content read-only. Edit tours, places and photos in the CIS admin.")}
         </p>
         <ManagedInCisLink label={tr("Open CIS admin")} />
       </div>

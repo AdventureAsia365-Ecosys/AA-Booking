@@ -4,32 +4,53 @@
 // GET /booking/my-work/summary answers one tile per work queue the signed-in role's capabilities allow (by capability,
 // never by person): the count, the oldest item or the earliest due date, and the filter of the list it was counted
 // from. Each tile opens that list with that filter (lib/myWork.ts tileHref), so the tile and the list show the same
-// total. Two groups: "To do" (work queues) and "To approve or pay" (approvals). A role with none of the capabilities
-// sees no band. Loaded on open and on Refresh, never polled.
+// total. Two groups: "To approve or pay" (approvals) first, then "To do" (work queues); AA-1190: only the tiles with
+// work are drawn there, the ones with nothing waiting fold into one line ("Nothing waiting in N queues", opens on
+// click). The price setup makers also get the Price setup progress card (PriceSetupCard: the trip plans per next step
+// of the price workbench, loaded on its own). A role with none of the capabilities sees no band. Loaded on open and on
+// Refresh, never polled.
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlarmClock,
   Banknote,
   Briefcase,
   CalendarClock,
+  CalendarDays,
   CalendarX2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
   FileWarning,
   Handshake,
   Landmark,
   OctagonX,
+  PackagePlus,
   Power,
   ReceiptText,
   RefreshCw,
   SquareCheck,
   Stamp,
+  Tags,
   UserCheck,
+  UserX,
   KeyRound,
 } from "lucide-react";
 import { CIS_MY_WORK_PATH } from "@/lib/config";
 import { myWorkApi, type MyWorkTile } from "@/lib/api/myWork";
-import { MY_WORK_TILES, hasMyWork, tileHref, tileSpec, type MyWorkGroup, type MyWorkTileSpec } from "@/lib/myWork";
+import {
+  MY_WORK_TILES,
+  PRICE_SETUP_STEPS,
+  hasMyWork,
+  hasPriceSetup,
+  splitTiles,
+  tileHref,
+  tileSpec,
+  workbenchStepHref,
+  type MyWorkTileSpec,
+} from "@/lib/myWork";
 import { Button, DateText, ErrorState, KpiTile, ManagedInCisLink, Section, useIsPhone, useStaff } from "@/ui";
 import type { Tone } from "@/ui/core/primitives";
 import { retryUnlessClientError } from "@/ui/booking/QueryProvider";
@@ -54,10 +75,15 @@ const ICONS: Record<string, React.ReactNode> = {
   billing_changes_to_approve: <Landmark size={ICON} />,
   supplier_bank_to_approve: <KeyRound size={ICON} />, // AA-1158 part 2
   owner_self_approvals: <UserCheck size={ICON} />,
+  // AA-1190
+  trip_checks_unassigned: <UserX size={ICON} />,
+  price_versions_to_approve: <Tags size={ICON} />,
+  addons_to_publish: <PackagePlus size={ICON} />,
+  season_changes_to_approve: <CalendarDays size={ICON} />,
+  holiday_events_to_approve: <ClipboardList size={ICON} />,
 };
 /** A count above zero on these tiles is late work (red hint); on the approval tiles it waits for the viewer (amber). */
-const LATE = new Set(["trip_checks_overdue", "supplier_bills_overdue", "agency_invoices_overdue"]);
-const GROUPS: readonly MyWorkGroup[] = ["work", "approve"];
+const LATE = new Set(["trip_checks_overdue", "trip_checks_unassigned", "supplier_bills_overdue", "agency_invoices_overdue"]);
 
 export function MyWorkBand() {
   const tr = useT(MSG);
@@ -79,6 +105,8 @@ export function MyWorkBand() {
       })
     : MY_WORK_TILES.filter((s) => staff.permissions.includes(s.capability)).map((spec) => ({ spec, tile: undefined }));
 
+  const { groups, empty } = splitTiles(rows);
+
   return (
     <Section
       testId="my-work-band"
@@ -99,25 +127,98 @@ export function MyWorkBand() {
         <ErrorState message={tr("My work could not load. {0}", (q.error as Error).message)} onRetry={() => q.refetch()} />
       ) : (
         <div className="flex flex-col gap-4">
-          {GROUPS.map((key) => {
-            const inGroup = rows.filter((r) => r.spec.group === key);
-            if (!inGroup.length) return null;
-            return (
-              <div key={key} className="flex flex-col gap-2" data-testid={`my-work-group-${key}`}>
-                <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">{key === "work" ? tr("To do") : tr("To approve or pay")}</h3>
-                {/* One column on a phone: the tile labels are long, two columns of 390 px would cut them (so not the
-                    shell's 2-up aa-kpi-grid). */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
-                  {inGroup.map(({ spec, tile }) => (
-                    <MyWorkTileLink key={spec.key} spec={spec} tile={tile} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {groups.map(({ group, rows: inGroup }) => (
+            <div key={group} className="flex flex-col gap-2" data-testid={`my-work-group-${group}`}>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">
+                {group === "work" ? tr("To do") : tr("To approve or pay")}
+              </h3>
+              <TileGrid rows={inGroup} />
+            </div>
+          ))}
+          {empty.length > 0 && <EmptyQueues rows={empty} />}
         </div>
       )}
+      {hasPriceSetup(staff.permissions) ? <PriceSetupCard /> : null}
     </Section>
+  );
+}
+
+type Row = { spec: MyWorkTileSpec; tile: MyWorkTile | undefined };
+
+/** One column on a phone: the tile labels are long, two columns of 390 px would cut them (so not the shell's 2-up
+ *  aa-kpi-grid). */
+function TileGrid({ rows }: { rows: Row[] }) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+      {rows.map(({ spec, tile }) => (
+        <MyWorkTileLink key={spec.key} spec={spec} tile={tile} />
+      ))}
+    </div>
+  );
+}
+
+/** AA-1190: the queues with nothing waiting, folded into one line; a click shows their (zero) tiles. */
+function EmptyQueues({ rows }: { rows: Row[] }) {
+  const tr = useT(MSG);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col gap-2" data-testid="my-work-empty">
+      <span>
+        <Button size="sm" variant="ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open} testId="my-work-empty-toggle">
+          <span className="inline-flex items-center gap-1.5">
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {tr("Nothing waiting in {0} queues", rows.length)}
+          </span>
+        </Button>
+      </span>
+      {open ? <TileGrid rows={rows} /> : null}
+    </div>
+  );
+}
+
+/** AA-1190: the price setup progress card: the trip plans per next step of the price workbench (GET
+ *  /booking/my-work/price-setup, the workbench's own summary), each step opening the workbench filtered on it. Only
+ *  the steps with plans are drawn (all of them while loading). */
+function PriceSetupCard() {
+  const tr = useT(MSG);
+  const tx = useTx();
+  const q = useQuery({ queryKey: ["my-work", "price-setup"], queryFn: myWorkApi.priceSetup, retry: retryUnlessClientError });
+  const d = q.data;
+  const done = d?.by_next_step.done ?? 0;
+  const served = d ? d.total - (d.by_next_step.not_served ?? 0) : 0;
+  const steps = d ? PRICE_SETUP_STEPS.filter((s) => (d.by_next_step[s.step] ?? 0) > 0) : PRICE_SETUP_STEPS;
+  return (
+    <div className="mt-5 flex flex-col gap-2 border-t border-line2 pt-4" data-testid="my-work-price-setup">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.06em] text-muted">{tr("Price setup progress")}</h3>
+        <Link href="/pricing/workbench" className="text-xs font-semibold text-accent-deep hover:underline">
+          {tr("Open the price setup")}
+        </Link>
+      </div>
+      <p className="text-[13px] text-muted">
+        {d ? `${tr("{0} of {1} tours ready to buy", done, served)} ` : null}
+        {tr("Tours by their next price setup step. Each number opens the price setup with that step.")}
+      </p>
+      {q.isError ? (
+        <ErrorState message={tr("The price setup could not load. {0}", (q.error as Error).message)} onRetry={() => q.refetch()} />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+          {steps.map((s) => (
+            <Link
+              key={s.step}
+              href={workbenchStepHref(s.step)}
+              aria-label={tx(s.label)}
+              data-testid={`my-work-price-setup-${s.step}`}
+              className="block min-w-0 rounded-lg outline-none [&>div]:h-full transition hover:-translate-y-px hover:shadow-kit-md focus-visible:ring-2 focus-visible:ring-accent-border"
+            >
+              <KpiTile size="sm" label={tx(s.label)} value={d ? (d.by_next_step[s.step] ?? 0) : undefined} />
+            </Link>
+          ))}
+        </div>
+      )}
+      {d?.degraded ? (
+        <p className="text-xs text-muted">{tr("Some tour titles could not be read from the catalog; the counts are complete.")}</p>
+      ) : null}
+    </div>
   );
 }
 

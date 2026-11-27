@@ -1,4 +1,6 @@
 """AA-1159 — My work band: tiles by capability, the route's gate, the per-tile fallback and the shared list filters.
+AA-1190: the price version / add-on / season / holiday approval tiles, trip checks split into yours and unassigned, the
+price setup progress card.
 
 The counts themselves against the lists they open run on PostgreSQL in tests/integration/test_aa1159_my_work.py.
 """
@@ -20,13 +22,15 @@ from app.agency_billing import invoices as agency_invoices
 from app.agency_billing import payments as agency_payments
 from app.auth.staff import PERMISSIONS, Staff, current_staff, get_pool
 from app.b2b import desk
+from app.catalog import price_version_queue, price_workbench
 from app.errors import Unavailable
 from app.main import create_app
 from app.ops import bill_filters, supplier_bills, trip_checks
+from app.pricing import season_approvals, seasons_admin
 from app.settings import Settings
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
-from app.supply import contract_expiry, restrictions
+from app.supply import addons, contract_expiry, restrictions
 from app.trip_cases import service as trip_cases
 from tests.unit.fakes import ScriptedConn
 
@@ -75,6 +79,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
             [
                 "my_open_cases",
                 "trip_checks_overdue",
+                "trip_checks_unassigned",  # AA-1190
                 "b2b_on_request",
                 "supplier_bills_overdue",
                 "supplier_bills_due_soon",
@@ -87,6 +92,10 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "suppliers_to_activate",
                 "billing_changes_to_approve",
                 "supplier_bank_to_approve",  # AA-1158 part 2
+                "price_versions_to_approve",  # AA-1190
+                "addons_to_publish",
+                "season_changes_to_approve",
+                "holiday_events_to_approve",
                 "owner_self_approvals",
             ],
         ),
@@ -95,6 +104,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
             [
                 "my_open_cases",
                 "trip_checks_overdue",
+                "trip_checks_unassigned",
                 "b2b_on_request",
                 "supplier_bills_overdue",
                 "supplier_bills_due_soon",
@@ -102,6 +112,10 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
                 "supplier_bills_to_approve",
                 "stop_sales_to_review",
                 "suppliers_to_activate",
+                "price_versions_to_approve",
+                "addons_to_publish",
+                "season_changes_to_approve",
+                "holiday_events_to_approve",
             ],
         ),
         (
@@ -109,6 +123,7 @@ def test_open_case_statuses_leave_out_only_the_closed_ones() -> None:
             [
                 "my_open_cases",
                 "trip_checks_overdue",
+                "trip_checks_unassigned",
                 "b2b_on_request",
                 "supplier_bills_overdue",
                 "supplier_bills_due_soon",
@@ -221,6 +236,17 @@ def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
         "queue_count",
         _queue({"count": 2, "earliest_due": date(2026, 12, 20), "days": 60}, calls, "contracts_ending"),
     )
+    # AA-1190: price versions, add-ons, season and holiday changes waiting for a second person.
+    monkeypatch.setattr(
+        price_version_queue, "approval_queue", _queue({"count": 10, "oldest_at": stamp}, calls, "price_versions")
+    )
+    monkeypatch.setattr(addons, "publish_queue", _queue({"count": 11, "oldest_at": stamp}, calls, "addons"))
+    monkeypatch.setattr(
+        season_approvals, "seasons_waiting_queue", _queue({"count": 12, "oldest_at": stamp}, calls, "seasons")
+    )
+    monkeypatch.setattr(
+        season_approvals, "events_waiting_queue", _queue({"count": 13, "oldest_at": stamp}, calls, "events")
+    )
     monkeypatch.setattr(
         audit,
         "owner_self_approvals_month",
@@ -249,6 +275,18 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
         "earliest_due": "2026-11-03",
         "days": None,
     }
+    # AA-1190: overdue trip checks split into the caller's own and the unowned ones (the page's owner filter)
+    assert tiles["trip_checks_overdue"]["filter"] == {"due": "overdue", "owner": "me"}
+    assert tiles["trip_checks_unassigned"]["filter"] == {"due": "overdue", "owner": "none"}
+    assert [kw for name, kw in stubbed if name == "checks"] == [{"assignee": "a-1"}, {"assignee": "none"}]
+    assert tiles["price_versions_to_approve"]["filter"] == {"pending_versions": "me"}
+    assert tiles["price_versions_to_approve"]["count"] == 10 and tiles["addons_to_publish"]["count"] == 11
+    assert tiles["addons_to_publish"]["filter"] == {"approvable": "me"}
+    assert [kw for name, kw in stubbed if name == "addons"] == [{"approvable_by": "a-1"}]
+    assert tiles["season_changes_to_approve"]["filter"] == {"approvable": "me"}
+    assert tiles["season_changes_to_approve"]["count"] == 12
+    assert tiles["holiday_events_to_approve"]["filter"] == {"approvable": "me"}
+    assert tiles["holiday_events_to_approve"]["group"] == "approve"
     assert tiles["supplier_bills_due_soon"]["days"] == 3
     assert tiles["supplier_bills_due_soon"]["filter"] == {"bill_status": "open", "bill_due": "soon"}
     assert tiles["agency_payments_to_approve"]["filter"] == {"tab": "payments", "approvable": "me"}
@@ -309,6 +347,125 @@ def test_only_the_callers_tiles_are_counted(make_client, stubbed) -> None:
     body = make_client(SALES).get("/booking/my-work/summary").json()
     assert [t["key"] for t in body["tiles"]] == _keys(SALES)
     assert {name for name, _ in stubbed} == {"cases", "checks", "desk", "bills"}
+
+
+# ── Price setup progress (AA-1190) ───────────────────────────────────────────
+
+
+def test_the_price_setup_card_is_for_the_price_setup_makers() -> None:
+    assert my_work.may_see_price_setup(ADMIN) and my_work.may_see_price_setup(CONTRACTING)
+    assert not my_work.may_see_price_setup(SALES) and not my_work.may_see_price_setup(FINANCE)
+    assert not my_work.may_see_price_setup(CONTENT)
+
+
+def test_the_price_setup_card_counts_the_workbench_steps(make_client, monkeypatch) -> None:
+    def row(step: str) -> dict[str, Any]:
+        return {"next_step": step, "missing": [], "provisional": None, "status": "priced", "reason": None}
+
+    rows = [row("add_components"), row("load_rates"), row("load_rates"), row("done")]
+
+    class _Facts:
+        degraded: list[str] = []
+
+    async def _rows(_conn: Any, _on: Any) -> tuple[list[dict[str, Any]], Any]:
+        return rows, _Facts()
+
+    monkeypatch.setattr(price_workbench, "rows", _rows)
+    monkeypatch.setattr(price_workbench.price_readiness, "summary", lambda _rows: {})
+    body = make_client(CONTRACTING).get("/booking/my-work/price-setup").json()
+    assert body["steps"] == list(price_workbench.NEXT_STEPS)
+    assert body["total"] == 4 and body["degraded"] is False
+    assert body["by_next_step"]["load_rates"] == 2 and body["by_next_step"]["add_components"] == 1
+    assert body["by_next_step"]["done"] == 1 and body["by_next_step"]["recompute"] == 0
+
+
+def test_the_price_setup_card_refuses_other_roles(make_client) -> None:
+    r = make_client(SALES).get("/booking/my-work/price-setup")
+    assert r.status_code == 403 and r.json()["detail"] == "forbidden"
+
+
+@pytest.mark.asyncio
+async def test_the_new_approval_queues_share_their_lists_where() -> None:
+    stamp = datetime(2026, 11, 2, 8, 0)
+    assert price_version_queue.PENDING_WHERE.startswith("v.status = 'pending'")
+    assert "v.created_by IS DISTINCT FROM $1" in price_version_queue.PENDING_WHERE
+    where, args = addons._offer_where(approvable_by="u-5")
+    assert where[-1] == "o.status = 'draft' AND NOT ($1 = ANY (o.writers))" and args == ["u-5"]
+    offers = ScriptedConn().on("count(*)::int AS count", {"count": 2, "oldest_at": stamp})
+    assert await addons.publish_queue(offers, approvable_by="u-5") == {"count": 2, "oldest_at": stamp}
+    assert addons.OFFER_SQL.strip()[:40] in offers.calls[0][0] and offers.calls[0][1] == ("u-5",)
+    assert seasons_admin.RANGE_WAITING in seasons_admin.CALENDARS_SQL
+    # AA-1190: the season tile and the Seasons page's per-calendar column share the approvable filters
+    for fragment in (season_approvals.RANGE_APPROVABLE, season_approvals.DEFAULT_APPROVABLE):
+        assert fragment in season_approvals.SEASONS_APPROVABLE_SQL
+        assert fragment in season_approvals.CALENDARS_APPROVABLE_SQL
+    assert season_approvals.EVENT_APPROVABLE in season_approvals.EVENTS_APPROVABLE_SQL
+
+
+# ── AA-1190: the season and holiday tiles follow the approve paths' maker-checker ──
+
+
+def _placeholders_match(conn: ScriptedConn) -> None:
+    """Each recorded query takes exactly the arguments it was given (asyncpg refuses a count mismatch; the fake
+    does not)."""
+    for sql, args in conn.calls:
+        used = {int(n) for n in re.findall(r"\$(\d+)", sql)}
+        assert used == set(range(1, len(args) + 1)), (sql[:80], args)
+
+
+@pytest.mark.parametrize(
+    ("staff", "owner", "expected"),
+    [
+        (CONTRACTING, False, ("u-5", False, True)),  # reviews stop-sales, never self-approves
+        (CONTRACTING, True, ("u-5", True, True)),  # the business owner while the switch is on
+        (SALES, False, ("u-1", False, False)),  # no stop_sale.approve: its stop-sale ranges are left out
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_season_and_holiday_queues_pass_the_approver(monkeypatch, staff, owner, expected) -> None:
+    async def _owner(_conn: Any, _staff: Staff, kind: str = "approve") -> bool:
+        return owner
+
+    monkeypatch.setattr(season_approvals.self_approval, "may_self_approve", _owner)
+    stamp = datetime(2026, 11, 2, 8, 0)
+    conn = ScriptedConn().on("AS oldest_at", {"count": 3, "oldest_at": stamp})
+    assert await season_approvals.seasons_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert await season_approvals.events_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert [args for _, args in conn.calls] == [expected, expected[:2]]  # an event has no stop-sale
+    _placeholders_match(conn)
+
+
+def test_the_approvable_filters_mirror_the_approve_paths() -> None:
+    ranges = season_approvals.RANGE_APPROVABLE
+    # a proposal: never one's own, unless the business owner may self-approve a season range (never a stop-sale)
+    assert "r.created_by IS DISTINCT FROM $1::text OR ($2::boolean AND r.kind = 'season')" in ranges
+    # a removal: never one's own request, no self-approval
+    assert "r.end_requested_by IS DISTINCT FROM $1::text)" in ranges
+    # a stop-sale range (and its removal) only for a stop-sale reviewer
+    assert ranges.startswith("((r.kind <> 'stop_sale' OR $3::boolean)")
+    assert "c.default_requested_by IS DISTINCT FROM $1::text OR $2::boolean" in season_approvals.DEFAULT_APPROVABLE
+    events = season_approvals.EVENT_APPROVABLE
+    assert "e.created_by IS DISTINCT FROM $1::text OR $2::boolean" in events
+    assert "e.end_requested_by IS DISTINCT FROM $1::text)" in events
+
+
+@pytest.mark.asyncio
+async def test_the_holiday_list_approvable_view(monkeypatch) -> None:
+    async def _owner(*_args: Any, **_kw: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(season_approvals.self_approval, "may_self_approve", _owner)
+    conn = ScriptedConn()
+    await seasons_admin.list_events(conn, CONTRACTING, "vn", 2027, approvable=True)
+    _placeholders_match(conn)
+    listed = [(sql, args) for sql, args in conn.calls if "FROM booking.holiday_events e" in sql]
+    assert len(listed) == 1 and listed[0][1] == ("u-5", False, "VN", 2027)
+    assert " ".join(season_approvals.EVENT_APPROVABLE.split()) in listed[0][0]
+    # without season.approve the view is empty (no query of the events)
+    assert FINANCE.can("pricing.read") and not FINANCE.can("season.approve")
+    none = ScriptedConn()
+    assert (await seasons_admin.list_events(none, FINANCE, None, None, approvable=True))["items"] == []
+    assert not [sql for sql, _ in none.calls if "FROM booking.holiday_events e" in sql]
 
 
 def test_a_tile_that_cannot_be_read_says_so_and_the_others_load(make_client, stubbed, monkeypatch) -> None:
@@ -435,3 +592,13 @@ async def test_each_queue_counts_over_its_lists_from_and_where() -> None:
     assert desk.STATE_WHERE["open"] in lines.calls[0][0]
     with pytest.raises(Exception, match="state"):
         await desk.on_request_queue(lines, state="lost")
+
+
+def test_the_frontend_price_setup_steps_are_workbench_steps() -> None:
+    text = FRONTEND_TABLE.read_text(encoding="utf-8")
+    block = text.split("export const PRICE_SETUP_STEPS", 1)[1].split("];", 1)[0]
+    steps = re.findall(r'step: "([a-z_]+)"', block)
+    assert steps and len(steps) == len(set(steps))
+    # in the workbench's order, every step a plan can still take (never the not-served or done ones)
+    assert steps == [s for s in price_workbench.NEXT_STEPS if s in steps]
+    assert set(steps) == set(price_workbench.NEXT_STEPS) - {price_workbench.NOT_SERVED, price_workbench.DONE}

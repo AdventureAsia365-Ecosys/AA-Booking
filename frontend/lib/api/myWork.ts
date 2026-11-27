@@ -1,7 +1,9 @@
 // lib/api/myWork.ts
 // AA-1159 — the My work band of the staff dashboard (backend routers/my_work.py, app/my_work.py).
 //
-//   GET /booking/my-work/summary   the caller's tiles (by capability); 403 forbidden for a role with no tile
+//   GET /booking/my-work/summary       the caller's tiles (by capability); 403 forbidden for a role with no tile
+//   GET /booking/my-work/price-setup   AA-1190: the trip plans per next step of the price workbench (price setup
+//                                      makers: price_version.write + pricing.read)
 
 import { bkGet } from "./client";
 import type { IsoDate, IsoDateTime } from "./types";
@@ -30,6 +32,15 @@ export interface MyWorkSummary {
   generated_at: IsoDateTime;
 }
 
+export interface PriceSetupProgress {
+  steps: string[];
+  by_next_step: Record<string, number>;
+  total: number;
+  degraded: boolean;
+  generated_at: IsoDateTime;
+}
+
 export const myWorkApi = {
   summary: () => bkGet<MyWorkSummary>("my-work/summary"),
+  priceSetup: () => bkGet<PriceSetupProgress>("my-work/price-setup"),
 };

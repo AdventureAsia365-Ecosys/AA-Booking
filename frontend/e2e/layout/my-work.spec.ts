@@ -4,7 +4,9 @@
 // API's filter as the query string; an unavailable tile reads "Not available yet"; "CIS: My work" points at the CIS
 // half; Refresh reloads the summary; Vietnamese labels when VI is picked; the page never scrolls sideways at 390; the
 // stop-sale tile's list (/stop-sales?review=me) leaves out what the viewer entered; AA-1177: the "Contracts ending
-// soon" tile's list on Suppliers (every contract kind, the e-mail state) and a supplier's own list fit 390 px.
+// soon" tile's list on Suppliers (every contract kind, the e-mail state) and a supplier's own list fit 390 px. AA-1190:
+// the tiles with nothing waiting fold into one line that opens on click; the new approval tiles and the overdue trip
+// checks split into yours / no owner link to their filtered lists; the price setup progress card links each step.
 // Screenshots (1440 light / dark, 390 light / dark) land in $LAYOUT_SHOTS_DIR/my-work-*.png.
 
 import path from "node:path";
@@ -59,8 +61,23 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(page.getByTestId("my-work-group-approve")).toContainText("To approve or pay");
       await expect(tile(page, "supplier_bills_due_soon")).toHaveAttribute("href", "/billing?bill_status=open&bill_due=soon");
       await expect(tile(page, "my_open_cases")).toHaveAttribute("href", "/cases?tab=mine&status=discovery%2Cbuilding");
-      await expect(tile(page, "trip_checks_overdue")).toHaveAttribute("href", "/trip-checks?due=overdue");
+      await expect(tile(page, "trip_checks_overdue")).toHaveAttribute("href", "/trip-checks?due=overdue&owner=me");
+      await expect(tile(page, "trip_checks_unassigned")).toHaveAttribute("href", "/trip-checks?due=overdue&owner=none");
+      await expect(tile(page, "price_versions_to_approve")).toHaveAttribute("href", "/pricing/workbench?pending_versions=me");
+      await expect(tile(page, "season_changes_to_approve")).toHaveAttribute("href", "/pricing/seasons?approvable=me");
+      // AA-1190: the three zero tiles fold into one line; a click shows them
+      await expect(tile(page, "b2b_on_request")).toHaveCount(0);
+      await expect(page.getByTestId("my-work-empty-toggle")).toContainText("Nothing waiting in 3 queues");
+      await page.getByTestId("my-work-empty-toggle").click();
       await expect(tile(page, "b2b_on_request")).toHaveAttribute("href", "/b2b-desk");
+      await expect(tile(page, "addons_to_publish")).toHaveAttribute("href", "/add-ons?approvable=me");
+      await expect(tile(page, "holiday_events_to_approve")).toHaveAttribute("href", "/pricing/holiday-events?approvable=me");
+      // AA-1190: the price setup progress card: only the steps with plans, each opening the workbench on that step
+      const setup = page.getByTestId("my-work-price-setup");
+      await expect(setup).toContainText("30 of 55 tours ready to buy");
+      await expect(page.getByTestId("my-work-price-setup-add_components")).toHaveAttribute("href", "/pricing/workbench?next_step=add_components");
+      await expect(page.getByTestId("my-work-price-setup-load_rates")).toContainText("7");
+      await expect(page.getByTestId("my-work-price-setup-approve_fx")).toHaveCount(0);
       await expect(tile(page, "agency_payments_to_approve")).toHaveAttribute("href", "/agency-billing?tab=payments&approvable=me");
       await expect(tile(page, "supplier_bills_to_approve")).toHaveAttribute("href", "/billing?bill_status=received&approvable=me");
       await expect(tile(page, "stop_sales_to_review")).toHaveAttribute("href", "/stop-sales?review=me");

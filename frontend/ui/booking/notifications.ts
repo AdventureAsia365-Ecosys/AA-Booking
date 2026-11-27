@@ -32,6 +32,8 @@ export const NOTIFICATION_TYPE_LABEL: Record<string, string> = {
   "invoice.balance_reopened": "Balance reopened",
   "invoice.case_cancelled": "Invoice of a cancelled trip",
   "retention.held": "Retention held",
+  // AA-1190: AA-1151 announces each published supplier contract ending within contract_expiry_alert_days.
+  "contract.expiring": "Contract ending soon",
 };
 
 /** The text of a data field, or null. */
