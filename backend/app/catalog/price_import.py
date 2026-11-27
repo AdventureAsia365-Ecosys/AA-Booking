@@ -6,8 +6,11 @@ with the current state of the plans the workbench filters select (at most :data:
 importing an unchanged file changes nothing:
 
 - ``Tours``: Tour key, Title, Country (both for reading only), Sellable (yes / no; empty = unchanged);
-- ``Components``: Tour key, Day, Hotel code + Room type, or Service code (one item a row). **A tour listed here gets
-  exactly these components** (the plan's set is replaced, as ``PUT …/components`` does);
+- ``Components``: Tour key, Day, Hotel code + Room type, or Service code (one item a row), Meal plan (a hotel
+  night's board: RO, BB, HB, FB, AI or its name, e.g. "Half board"; AA-1187). **A tour listed here gets exactly these
+  components** (the plan's set is replaced, as ``PUT …/components`` does). An empty Meal plan (or a file without the
+  column) keeps the board the same night already has (same tour, day and room type), so re-importing an old file
+  never resets a board set on the form; a new night without one gets the default (BB);
 - ``Prices``: Tour key, Channel (b2b or fixed_departure; empty = b2b), Season, Peak (yes / no), Valid from, Valid to,
   Pax min, Pax max, Currency (empty = USD), Price per person, Child price, Infant price, Single supplement. AA-1091
   (bk-054): **a tour listed here gets a draft price list version with exactly these hand prices** (``source =
@@ -61,10 +64,12 @@ from app.b2b import departures, plan_components
 from app.b2b.tariff import FORMULA_START
 from app.catalog import cost_sheet, price_readiness, price_versions, sellable_gate, trip_plan_prices
 from app.catalog.destinations import CATALOG_ERRORS
+from app.catalog.price_import_rows import Merged, cost_priced, draft_row, hand_row, merge_prices  # noqa: F401
 from app.errors import Forbidden, Invalid
 from app.pricing import engine
 from app.supply import rate_sheet as rs
 from app.supply.rate_sheet import Problem
+from app.supply.rates import MEAL_PLANS
 
 MAX_BYTES = rs.MAX_BYTES
 MAX_ROWS = 5000
@@ -76,7 +81,7 @@ README = "Read me"
 TOURS, COMPONENTS, PRICES, DEPARTURES = "Tours", "Components", "Prices", "Departures"
 COLUMNS: dict[str, tuple[str, ...]] = {
     TOURS: ("Tour key", "Title", "Country", "Sellable"),
-    COMPONENTS: ("Tour key", "Day", "Hotel code", "Room type", "Service code"),
+    COMPONENTS: ("Tour key", "Day", "Hotel code", "Room type", "Service code", "Meal plan"),
     PRICES: (
         "Tour key",
         "Channel",
@@ -117,6 +122,8 @@ README_LINES = (
     "Tours: Sellable yes / no (empty = unchanged). A sellable tour needs its components.",
     "Components: one hotel room type (Hotel code + Room type) or one Service code per row. A tour listed here gets "
     "exactly these components.",
+    "Components: Meal plan = the board of a hotel night (RO room only, BB bed and breakfast, HB half board, FB full "
+    "board, AI all inclusive). Empty = keep the night's board (a new night gets BB). Services have no meal plan.",
     "Prices: hand prices per person per pax band and season (dates YYYY-MM-DD). A tour listed here gets a draft price "
     "version with exactly these hand prices: submit it on the tour's Versions tab; it prices once a second person "
     "approves it. Prices worked out from a cost (from supplier rates) are not in this file and stay, unless a hand "
@@ -189,6 +196,30 @@ def _lower(value: Any) -> str | None:
     return text.lower() if text else None
 
 
+# AA-1187: a board by its code or its name, as the rate drawer labels them (case, spaces, "&" / "and" ignored).
+MEAL_PLAN_NAMES = {
+    "roomonly": "RO",
+    "bedandbreakfast": "BB",
+    "bedbreakfast": "BB",
+    "halfboard": "HB",
+    "fullboard": "FB",
+    "allinclusive": "AI",
+}
+
+
+def _meal_plan(value: Any) -> str | None:
+    text = rs._text(value)
+    if not text:
+        return None
+    code = text.strip().upper()
+    if code in MEAL_PLANS:
+        return code
+    name = "".join(ch for ch in text.lower().replace("&", "and") if ch.isalpha())
+    if name in MEAL_PLAN_NAMES:
+        return MEAL_PLAN_NAMES[name]
+    raise ValueError(f"a meal plan is one of {', '.join(MEAL_PLANS)} (or its name, e.g. Half board)")
+
+
 CONVERTERS: dict[str, dict[str, tuple[str, Any]]] = {
     TOURS: {"Tour key": ("tour_key", rs._text), "Sellable": ("sellable", _yes_no)},
     COMPONENTS: {
@@ -197,6 +228,7 @@ CONVERTERS: dict[str, dict[str, tuple[str, Any]]] = {
         "Hotel code": ("hotel_code", _upper),
         "Room type": ("room_type", rs._text),
         "Service code": ("service_code", _upper),
+        "Meal plan": ("meal_plan", _meal_plan),
     },
     PRICES: {
         "Tour key": ("tour_key", rs._text),
@@ -297,9 +329,8 @@ def _problem(sheets: Sheets, sheet: str, row: Mapping[str, Any], column: str | N
     sheets.problems.append(Problem(sheet, row.get("_row"), column, code, message))
 
 
-def check_shapes(sheets: Sheets, today: date) -> None:
-    """The checks that need no database: a component names one item, prices and departures follow the form rules,
-    no duplicate item on a day and no overlapping prices within the file."""
+def _check_components(sheets: Sheets) -> None:
+    """A component names one item (a meal plan only on a hotel night, AA-1187), never twice on a day."""
     seen: set[tuple[str, int, str]] = set()
     for c in sheets.components:
         has_room = bool(c.get("hotel_code") or c.get("room_type"))
@@ -321,11 +352,19 @@ def check_shapes(sheets: Sheets, today: date) -> None:
                 "required",
                 "a hotel component needs the Hotel code and the Room type",
             )
+        elif c.get("meal_plan") and not has_room:
+            _problem(sheets, COMPONENTS, c, "Meal plan", "invalid_meal_plan", "only a hotel night has a meal plan")
         item = (c.get("hotel_code") or "", rs._key(c.get("room_type")), c.get("service_code") or "")
         key = (c.get("tour_key") or "", c.get("day_no") or 0, repr(item))
         if c.get("day_no") and key in seen:
             _problem(sheets, COMPONENTS, c, "Day", "duplicate_component", "the same item is listed twice on this day")
         seen.add(key)
+
+
+def check_shapes(sheets: Sheets, today: date) -> None:
+    """The checks that need no database: a component names one item, prices and departures follow the form rules,
+    no duplicate item on a day and no overlapping prices within the file."""
+    _check_components(sheets)
     for p in sheets.prices:
         p["channel"] = p.get("channel") or engine.Channel.B2B.value
         p["currency"] = p.get("currency") or engine.BASE_CURRENCY
@@ -421,7 +460,7 @@ SELECT trip_plan_id::text AS plan_id, start_date FROM booking.departures WHERE t
 """
 COMPONENT_KEYS_SQL = """
 SELECT trip_plan_id::text AS plan_id, day_no, hotel_room_type_id::text AS hotel_room_type_id,
-       service_id::text AS service_id
+       service_id::text AS service_id, meal_plan
 FROM booking.trip_plan_components WHERE trip_plan_id = ANY($1::uuid[])
 """
 
@@ -483,6 +522,16 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
             SERVICES_SQL, sorted({c["service_code"] for c in sheets.components if c.get("service_code")})
         )
     }
+    current: dict[str, list[dict[str, Any]]] = {}
+    for r in await conn.fetch(COMPONENT_KEYS_SQL, [p.id for p in plans.values()]):
+        current.setdefault(r["plan_id"], []).append(dict(r))
+    # AA-1187: the board each hotel night has today, kept when the file leaves Meal plan empty (or has no such column).
+    boards = {
+        (plan_id, int(r["day_no"]), r["hotel_room_type_id"]): r.get("meal_plan")
+        for plan_id, rows in current.items()
+        for r in rows
+        if r.get("hotel_room_type_id")
+    }
     for c in sheets.components:
         plan = plans.get(c.get("tour_key") or "")
         if plan is None or not c.get("day_no"):
@@ -490,7 +539,12 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
         if plan.duration_days and c["day_no"] > plan.duration_days:
             _problem(sheets, COMPONENTS, c, "Day", "day_out_of_tour", f"the tour has {plan.duration_days} days")
             continue
-        item: dict[str, Any] = {"day_no": c["day_no"], "hotel_room_type_id": None, "service_id": None}
+        item: dict[str, Any] = {
+            "day_no": c["day_no"],
+            "hotel_room_type_id": None,
+            "service_id": None,
+            "meal_plan": None,
+        }
         if c.get("hotel_code") and c.get("room_type"):
             found = rooms.get((c["hotel_code"], rs._key(c["room_type"])))
             if found is None:
@@ -507,6 +561,7 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
                 _problem(sheets, COMPONENTS, c, "Room type", "inactive_item", "the room type or hotel is inactive")
                 continue
             item["hotel_room_type_id"] = found["id"]
+            item["meal_plan"] = c.get("meal_plan") or boards.get((plan.id, c["day_no"], found["id"]))
         elif c.get("service_code"):
             found = services.get(c["service_code"])
             if found is None:
@@ -547,9 +602,6 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
             continue
         in_file.add((plan.key, d["start_date"]))
         plan.new_departures.append(d)
-    current = {}
-    for r in await conn.fetch(COMPONENT_KEYS_SQL, [p.id for p in plans.values()]):
-        current.setdefault(r["plan_id"], []).append(dict(r))
     for t in sheets.tours:
         plan = plans.get(t.get("tour_key") or "")
         if plan is None or t.get("sellable") is None:
@@ -573,68 +625,6 @@ async def match(conn: asyncpg.Connection, sheets: Sheets) -> dict[str, Plan]:
     for plan in plans.values():
         plan.components_now = current.get(plan.id, [])
     return plans
-
-
-# ── Price rows ───────────────────────────────────────────────────────────────
-
-
-def hand_row(p: Mapping[str, Any], markup: Decimal | None, increments: engine.Increments) -> dict[str, Any]:
-    """One imported hand price as ``trip_plan_prices.store`` writes it (no net cost: nothing is computed)."""
-    amount = p["amount"]
-    return {
-        "channel": p["channel"],
-        "season": str(p["season"])[: cost_sheet.SEASON_MAX] if p.get("season") else None,
-        "peak": bool(p.get("peak")),
-        "valid_from": p["valid_from"],
-        "valid_to": p["valid_to"],
-        "pax_min": int(p["pax_min"]),
-        "pax_max": p.get("pax_max"),
-        "currency": p["currency"],
-        "amount": amount,
-        "net_amount": None,
-        "net_currency": None,
-        "effective_margin": None,
-        "priced_on": None,
-        "overridden": False,
-        "computed": False,
-        "rrp_amount": trip_plan_prices.rrp_for(p["channel"], amount, p["currency"], markup, increments),
-        "child_amount": p.get("child_amount"),
-        "infant_amount": p.get("infant_amount"),
-        "single_supplement_amount": p.get("single_supplement_amount"),
-        "child_net_amount": None,
-        "infant_net_amount": None,
-        "single_supplement_net_amount": None,
-    }
-
-
-def cost_priced(row: Mapping[str, Any]) -> bool:
-    """A row priced from a cost: computed from supplier rates, or typed with a net cost on the single price form (its
-    net cost, margin and override live only in the matrix). Neither is in the workbook, so an import keeps them."""
-    return bool(row["computed"]) or row["net_amount"] is not None
-
-
-@dataclass(frozen=True)
-class Merged:
-    rows: list[dict[str, Any]]
-    computed_replaced: int
-    net_replaced: int
-
-
-def merge_prices(
-    existing: Sequence[dict[str, Any]], hand: Sequence[dict[str, Any]], pricing: cost_sheet.Pricing
-) -> Merged:
-    """The new matrix: the imported hand rows, then the cost-priced rows kept (as stored, their RRP under today's
-    markup) that no hand row overlaps; positions 1..n. Plain hand rows (no net cost) are the file's and are replaced.
-    Also counts the cost-priced rows a hand row replaces (computed, and typed with a net cost)."""
-    priced = [cost_sheet.kept_row(r, pricing) for r in existing if cost_priced(r)]
-    covered = [any(cost_sheet.overlaps(r, h) for h in hand) for r in priced]
-    kept = [r for r, c in zip(priced, covered, strict=True) if not c]
-    gone = [r for r, c in zip(priced, covered, strict=True) if c]
-    final = [*(dict(h) for h in hand), *kept]
-    for i, row in enumerate(final, start=1):
-        row["position"] = i
-    computed = sum(1 for r in gone if r["computed"])
-    return Merged(final, computed, len(gone) - computed)
 
 
 # ── Status after (dry run) ───────────────────────────────────────────────────
@@ -691,8 +681,15 @@ def _raise(sheets: Sheets) -> None:
 
 
 def _same_components(before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]) -> bool:
-    def key(c: Mapping[str, Any]) -> tuple[int, str, str]:
-        return (int(c["day_no"]), c.get("hotel_room_type_id") or "", c.get("service_id") or "")
+    """The same set and the same boards (``plan_components`` writes a board change too, AA-1153 / AA-1187)."""
+
+    def key(c: Mapping[str, Any]) -> tuple[int, str, str, str]:
+        return (
+            int(c["day_no"]),
+            c.get("hotel_room_type_id") or "",
+            c.get("service_id") or "",
+            c.get("meal_plan") or "",
+        )
 
     return sorted(map(key, before)) == sorted(map(key, after))
 
@@ -820,27 +817,10 @@ async def _apply(
     return drafts
 
 
-def draft_row(p: Mapping[str, Any]) -> dict[str, Any]:
-    """One imported hand price as a draft version row (the peak comes from the season calendar)."""
-    return {
-        "channel": p["channel"],
-        "season": str(p["season"])[: cost_sheet.SEASON_MAX] if p.get("season") else None,
-        "valid_from": p["valid_from"],
-        "valid_to": p["valid_to"],
-        "pax_min": int(p["pax_min"]),
-        "pax_max": p.get("pax_max"),
-        "currency": p["currency"],
-        "amount": p["amount"],
-        "child_amount": p.get("child_amount"),
-        "infant_amount": p.get("infant_amount"),
-        "single_supplement_amount": p.get("single_supplement_amount"),
-    }
-
-
 # ── Template ─────────────────────────────────────────────────────────────────
 
 TEMPLATE_COMPONENTS_SQL = """
-SELECT p.source_id, c.day_no, h.code AS hotel_code, rt.name AS room_type, s.code AS service_code
+SELECT p.source_id, c.day_no, h.code AS hotel_code, rt.name AS room_type, s.code AS service_code, c.meal_plan
 FROM booking.trip_plan_components c
 JOIN booking.trip_plans p ON p.id = c.trip_plan_id
 LEFT JOIN booking.hotel_room_types rt ON rt.id = c.hotel_room_type_id
@@ -903,7 +883,14 @@ def build_workbook(
         sheets[TOURS].append([t["tour_key"], t.get("title"), t.get("country"), _yn(t.get("sellable"))])
     for c in components:
         sheets[COMPONENTS].append(
-            [c["source_id"], c["day_no"], c.get("hotel_code"), c.get("room_type"), c.get("service_code")]
+            [
+                c["source_id"],
+                c["day_no"],
+                c.get("hotel_code"),
+                c.get("room_type"),
+                c.get("service_code"),
+                c.get("meal_plan"),
+            ]
         )
     for p in prices:
         sheets[PRICES].append(

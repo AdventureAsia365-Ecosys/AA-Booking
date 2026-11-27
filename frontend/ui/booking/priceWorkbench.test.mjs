@@ -54,6 +54,19 @@ test("accepted suggestions are added to the plan's set, removed items leave it, 
   assert.deepEqual(mergeComponents([], []), []);
 });
 
+test("a hotel night keeps its board on Save, also when a suggestion for the same night is accepted (AA-1187)", () => {
+  const current = [
+    { day_no: 1, hotel_room_type_id: "rt-1", service_id: null, meal_plan: "HB" },
+    { day_no: 2, hotel_room_type_id: "rt-1", service_id: null, meal_plan: null },
+    { day_no: 2, service_id: "sv-guide", hotel_room_type_id: null, meal_plan: null },
+  ];
+  assert.deepEqual(mergeComponents(current, [{ day_no: 1, hotel_room_type_id: "rt-1" }]), [
+    { day_no: 1, hotel_room_type_id: "rt-1", meal_plan: "HB" },
+    { day_no: 2, service_id: "sv-guide" },
+    { day_no: 2, hotel_room_type_id: "rt-1" },
+  ]);
+});
+
 test("import problems read as sheet, row, column and message, grouped in workbook order", () => {
   assert.equal(
     problemLine({ sheet: "Prices", row: 3, column: "Valid from", message: "overlaps row 2" }),

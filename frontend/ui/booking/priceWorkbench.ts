@@ -62,19 +62,24 @@ export interface ItemRef {
   day_no: number;
   hotel_room_type_id?: string | null;
   service_id?: string | null;
+  /** AA-1187: a hotel night's board (RO, BB, HB, FB, AI); null = the default BB. A service never has one. */
+  meal_plan?: string | null;
 }
 
 function key(i: ItemRef): string {
   return `${i.day_no}|${i.hotel_room_type_id ?? ""}|${i.service_id ?? ""}`;
 }
 
-/** The plan's new set: its current items (minus the removed ones) plus the accepted ones, each item once a day. */
+/** The plan's new set: its current items (minus the removed ones) plus the accepted ones, each item once a day.
+ *  AA-1187: PUT …/components replaces the whole set, boards included, so a hotel night keeps the board it has (an
+ *  accepted suggestion for the same night keeps it too); dropping it here reset every board to BB on Save. */
 export function mergeComponents(current: ItemRef[], accepted: ItemRef[], removed: ItemRef[] = []): ItemRef[] {
   const gone = new Set(removed.map(key));
   const out = new Map<string, ItemRef>();
   for (const item of [...current.filter((c) => !gone.has(key(c))), ...accepted]) {
+    const board = item.meal_plan ?? out.get(key(item))?.meal_plan ?? null;
     const clean: ItemRef = item.hotel_room_type_id
-      ? { day_no: item.day_no, hotel_room_type_id: item.hotel_room_type_id }
+      ? { day_no: item.day_no, hotel_room_type_id: item.hotel_room_type_id, ...(board ? { meal_plan: board } : {}) }
       : { day_no: item.day_no, service_id: item.service_id ?? null };
     out.set(key(clean), clean);
   }

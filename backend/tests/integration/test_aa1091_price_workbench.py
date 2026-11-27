@@ -577,3 +577,73 @@ async def test_structured_reference_from_cis(
     async with pool.acquire() as conn:
         bench = {r["tour_key"]: r for r in (await price_workbench.build(conn, on=TODAY))["items"]}
     assert bench[TOUR]["provisional"]["from_reference"] is False  # staff see it no longer matches the reference
+
+
+def _old_components_file(hotel_code: str) -> bytes:
+    """A Components sheet saved before the Meal plan column existed (AA-1187)."""
+    import io
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Components"
+    ws.append(["Tour key", "Day", "Hotel code", "Room type", "Service code"])
+    ws.append([STAFF_TOUR, 1, hotel_code, "Garden Twin", None])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def test_reimport_keeps_a_hand_set_meal_plan(
+    admin: asyncpg.Connection,  # noqa: F811
+    pool: asyncpg.Pool,  # noqa: F811
+    world: None,
+) -> None:
+    """AA-1187 (S295 data audit): a board set on the form (half board) survived neither a re-import of an old file
+    nor of the prefilled export; every night came back as the default BB. Now an empty Meal plan keeps it, the export
+    carries it, the same file again writes nothing, and a value in the file changes it."""
+    s = await _setup(admin, pool)
+    board_sql = (
+        "SELECT c.meal_plan FROM booking.trip_plan_components c JOIN booking.trip_plans p ON p.id = c.trip_plan_id"
+        " WHERE p.source_id = $1 AND c.hotel_room_type_id IS NOT NULL"
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        await plan_components.replace_components(
+            conn, _staff(MAKER), STAFF_TOUR, [{"day_no": 1, "hotel_room_type_id": s["room"], "meal_plan": "HB"}]
+        )
+    replaced = await _audits(admin, "trip_plan.components_replaced")
+
+    async with pool.acquire() as conn, conn.transaction():
+        out = await price_import.import_workbook(
+            conn, _staff(MAKER), _old_components_file(s["hotel_code"]), dry_run=False
+        )
+    assert out["totals"]["components_changed"] == 0
+    assert await admin.fetchval(board_sql, STAFF_TOUR) == "HB"
+    assert await _audits(admin, "trip_plan.components_replaced") == replaced  # nothing rewritten
+
+    async with pool.acquire() as conn:
+        items = [r for r in (await price_workbench.build(conn, on=TODAY))["items"] if r["tour_key"] == STAFF_TOUR]
+        data = await price_import.prefilled(conn, items, today=TODAY)
+    assert [c["meal_plan"] for c in price_import.parse(data).components] == ["HB"]  # the export carries the board
+    async with pool.acquire() as conn, conn.transaction():
+        again = await price_import.import_workbook(conn, _staff(MAKER), data, dry_run=False)
+    assert again["totals"]["components_changed"] == 0 and await admin.fetchval(board_sql, STAFF_TOUR) == "HB"
+
+    full = price_import.build_workbook(
+        components=[
+            {
+                "source_id": STAFF_TOUR,
+                "day_no": 1,
+                "hotel_code": s["hotel_code"],
+                "room_type": "Garden Twin",
+                "meal_plan": "Full board",
+            }
+        ]
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        dry = await price_import.import_workbook(conn, _staff(MAKER), full, dry_run=True)
+    assert dry["totals"]["components_changed"] == 1 and await admin.fetchval(board_sql, STAFF_TOUR) == "HB"
+    async with pool.acquire() as conn, conn.transaction():
+        await price_import.import_workbook(conn, _staff(MAKER), full, dry_run=False)
+    assert await admin.fetchval(board_sql, STAFF_TOUR) == "FB"
