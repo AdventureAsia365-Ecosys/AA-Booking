@@ -29,8 +29,16 @@ import { NONCE_HEADER, contentSecurityPolicy, newNonce, sentryOrigin } from "./l
 const PUBLIC_PATHS = ["/login"];
 
 // The paths the matcher used to leave out (besides /api and the build chunks): static files, no session gate.
+// AA-1185 (S295 audit SA-73): plus public/.well-known/security.txt, the vulnerability contact (RFC 9116), which a
+// signed-out visitor must read without a sign-in redirect.
+export const SECURITY_TXT_PATH = "/.well-known/security.txt";
 function isStaticFile(pathname: string): boolean {
-  return pathname === "/favicon.ico" || pathname === "/robots.txt" || pathname.startsWith("/assets/");
+  return (
+    pathname === "/favicon.ico" ||
+    pathname === "/robots.txt" ||
+    pathname === SECURITY_TXT_PATH ||
+    pathname.startsWith("/assets/")
+  );
 }
 
 // The browser posts Sentry events to the DSN's origin (a public build-time value; none = no Sentry).
