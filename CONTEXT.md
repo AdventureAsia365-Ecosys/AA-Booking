@@ -334,7 +334,8 @@ backend/
                            effective matrix cut by version and season
   app/pricing/seasons.py   AA-1091 (bk-055): the one season function (calendar ranges, festive from holiday events,
                            stop-sale overlay); seasons_admin.py: calendars, ranges, holiday events (maker-checker), the
-                           default calendar of a plan
+                           default calendar of a plan; season_approvals.py (AA-1190): the waiting changes a viewer may
+                           approve (My work tiles, the pages' approvable=me views)
   app/routers/price_versions.py  /booking/catalog/trip-plans/{source_id}/price-versions, /booking/catalog/price-versions*,
                            …/season-calendar; /booking/pricing/season-calendars*, /season-ranges/*, /holiday-events*
   app/catalog/price_readiness.py  AA-1029: catalog-wide price readiness (one status per plan: priced, hand_priced, or the

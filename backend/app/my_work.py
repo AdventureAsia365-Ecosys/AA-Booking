@@ -40,7 +40,7 @@ The approval tiles count only the items the caller may act on (maker-checker: no
 asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies. AA-1190: the season
 and holiday tiles leave out the caller's own proposals and removal requests (the business owner's own proposal stays
 in while she may self-approve, never a stop-sale range or a removal) and a stop-sale range for a caller without
-``stop_sale.approve``, the approve paths' rules (``seasons_admin.RANGE_APPROVABLE`` and its siblings).
+``stop_sale.approve``, the approve paths' rules (:mod:`app.pricing.season_approvals`).
 
 AA-1190 (slice 1): the price setup progress card (``GET /booking/my-work/price-setup``, :func:`price_setup`) counts
 the trip plans per next step of the price workbench (``app.catalog.price_workbench``, its own summary, so the card and
@@ -81,7 +81,7 @@ from app.b2b import desk
 from app.catalog import cost_sheet, price_version_queue, price_workbench
 from app.errors import Forbidden, Unavailable
 from app.ops import bill_approvals, bill_filters, supplier_bills, trip_checks
-from app.pricing import seasons_admin
+from app.pricing import season_approvals
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
 from app.supply import addons, contract_expiry, restrictions
@@ -186,11 +186,11 @@ async def _addons_to_publish(conn: asyncpg.Connection, staff: Staff) -> dict[str
 
 
 async def _season_changes(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    return await seasons_admin.seasons_waiting_queue(conn, staff)
+    return await season_approvals.seasons_waiting_queue(conn, staff)
 
 
 async def _holiday_events(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
-    return await seasons_admin.events_waiting_queue(conn, staff)
+    return await season_approvals.events_waiting_queue(conn, staff)
 
 
 @dataclass(frozen=True)

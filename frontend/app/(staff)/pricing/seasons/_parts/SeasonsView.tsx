@@ -534,19 +534,53 @@ function SyncSummary({ data }: { data: SeasonCalendarList | undefined }) {
   );
 }
 
+/** AA-1190: `?approvable=me` (the My work tile "Season changes to approve"): only the calendars with a waiting change
+ *  the viewer may approve (each calendar's `approvable`, the tile's own count: never their own proposal or removal
+ *  request, unless the business owner may approve her own; a stop-sale range only for a stop-sale reviewer). */
+function useCalendars() {
+  const list = useQuery({ queryKey: ["season-calendars", "all"], queryFn: () => seasonsApi.calendars() });
+  const { get } = useUrlFilters();
+  const mine = get("approvable") === "me";
+  const all = list.data?.items ?? [];
+  const items = mine ? all.filter((c) => (c.approvable ?? 0) > 0) : all;
+  return { list, mine, items };
+}
+
+/** The "Waiting" KPI: every waiting change, or (`?approvable=me`) the ones the viewer may approve. */
+function waitingKpi(items: SeasonCalendar[], mine: boolean): number {
+  return mine
+    ? items.reduce((n, c) => n + (c.approvable ?? 0), 0)
+    : items.reduce((n, c) => n + c.waiting + (c.pending_default_season ? 1 : 0), 0);
+}
+
+function ApprovableFilter() {
+  const t = useT(S);
+  return (
+    <FilterBar
+      selects={[
+        {
+          key: "approvable",
+          label: t("filterShow"),
+          allLabel: t("allChanges"),
+          options: [{ value: "me", label: t("onlyMine") }],
+          width: 230,
+        },
+      ]}
+    />
+  );
+}
+
 function Seasons() {
   const t = useT(S);
   const canWrite = useCan("season.write");
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const list = useQuery({ queryKey: ["season-calendars", "all"], queryFn: () => seasonsApi.calendars() });
-  // AA-1190: `?approvable=me` (the My work tile "Season changes to approve"): only the calendars with a waiting change
-  // the viewer may approve (each calendar's `approvable`, the tile's own count: never their own proposal or removal
-  // request, unless the business owner may approve her own; a stop-sale range only for a stop-sale reviewer).
-  const { get } = useUrlFilters();
-  const mine = get("approvable") === "me";
-  const all = list.data?.items ?? [];
-  const items = mine ? all.filter((c) => (c.approvable ?? 0) > 0) : all;
+  const { list, mine, items } = useCalendars();
+  const approvableColumn: ColumnDef<SeasonCalendar, unknown> = {
+    id: "approvable",
+    header: t("colApprovable"),
+    accessorFn: (r) => r.approvable ?? 0,
+  };
   const columns: ColumnDef<SeasonCalendar, unknown>[] = [
     { id: "name", header: t("colName"), accessorFn: (r) => r.name, cell: ({ row }) => <span className="break-words font-medium text-ink">{row.original.name}</span> },
     {
@@ -558,9 +592,7 @@ function Seasons() {
     { id: "default", header: t("colDefault"), accessorFn: (r) => r.default_season, cell: ({ row }) => <SeasonPill code={row.original.default_season} /> },
     { id: "ranges", header: t("colRanges"), accessorFn: (r) => r.ranges },
     { id: "waiting", header: t("colWaiting"), accessorFn: (r) => r.waiting + (r.pending_default_season ? 1 : 0) },
-    ...(mine
-      ? [{ id: "approvable", header: t("colApprovable"), accessorFn: (r) => r.approvable ?? 0 } as ColumnDef<SeasonCalendar, unknown>]
-      : []),
+    ...(mine ? [approvableColumn] : []),
     { id: "plans", header: t("colPlans"), accessorFn: (r) => r.plans },
   ];
   return (
@@ -580,14 +612,8 @@ function Seasons() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiTile label={t("kpiCalendars")} value={list.data ? items.length : undefined} />
         <KpiTile
-          label={mine ? t("kpiMine") : t("kpiWaiting")}
-          value={
-            !list.data
-              ? undefined
-              : mine
-                ? items.reduce((n, c) => n + (c.approvable ?? 0), 0)
-                : items.reduce((n, c) => n + c.waiting + (c.pending_default_season ? 1 : 0), 0)
-          }
+          label={t(mine ? "kpiMine" : "kpiWaiting")}
+          value={list.data ? waitingKpi(items, mine) : undefined}
           hintTone="warning"
         />
         <KpiTile label={t("kpiPlans")} value={list.data ? items.reduce((n, c) => n + c.plans, 0) : undefined} />
@@ -595,19 +621,7 @@ function Seasons() {
       <SyncSummary data={list.data} />
       <Section>
         <DataTable<SeasonCalendar>
-          filters={
-            <FilterBar
-              selects={[
-                {
-                  key: "approvable",
-                  label: t("filterShow"),
-                  allLabel: t("allChanges"),
-                  options: [{ value: "me", label: t("onlyMine") }],
-                  width: 230,
-                },
-              ]}
-            />
-          }
+          filters={<ApprovableFilter />}
           tableId="season-calendars"
           data={items}
           columns={columns}

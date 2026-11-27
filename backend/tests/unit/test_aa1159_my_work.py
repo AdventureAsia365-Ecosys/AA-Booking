@@ -26,7 +26,7 @@ from app.catalog import price_version_queue, price_workbench
 from app.errors import Unavailable
 from app.main import create_app
 from app.ops import bill_filters, supplier_bills, trip_checks
-from app.pricing import seasons_admin
+from app.pricing import season_approvals, seasons_admin
 from app.settings import Settings
 from app.suppliers import bank_accounts
 from app.suppliers import service as suppliers
@@ -242,10 +242,10 @@ def stubbed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]
     )
     monkeypatch.setattr(addons, "publish_queue", _queue({"count": 11, "oldest_at": stamp}, calls, "addons"))
     monkeypatch.setattr(
-        seasons_admin, "seasons_waiting_queue", _queue({"count": 12, "oldest_at": stamp}, calls, "seasons")
+        season_approvals, "seasons_waiting_queue", _queue({"count": 12, "oldest_at": stamp}, calls, "seasons")
     )
     monkeypatch.setattr(
-        seasons_admin, "events_waiting_queue", _queue({"count": 13, "oldest_at": stamp}, calls, "events")
+        season_approvals, "events_waiting_queue", _queue({"count": 13, "oldest_at": stamp}, calls, "events")
     )
     monkeypatch.setattr(
         audit,
@@ -396,10 +396,10 @@ async def test_the_new_approval_queues_share_their_lists_where() -> None:
     assert addons.OFFER_SQL.strip()[:40] in offers.calls[0][0] and offers.calls[0][1] == ("u-5",)
     assert seasons_admin.RANGE_WAITING in seasons_admin.CALENDARS_SQL
     # AA-1190: the season tile and the Seasons page's per-calendar column share the approvable filters
-    for fragment in (seasons_admin.RANGE_APPROVABLE, seasons_admin.DEFAULT_APPROVABLE):
-        assert fragment in seasons_admin.SEASONS_APPROVABLE_SQL
-        assert fragment in seasons_admin.CALENDARS_APPROVABLE_SQL
-    assert seasons_admin.EVENT_APPROVABLE in seasons_admin.EVENTS_APPROVABLE_SQL
+    for fragment in (season_approvals.RANGE_APPROVABLE, season_approvals.DEFAULT_APPROVABLE):
+        assert fragment in season_approvals.SEASONS_APPROVABLE_SQL
+        assert fragment in season_approvals.CALENDARS_APPROVABLE_SQL
+    assert season_approvals.EVENT_APPROVABLE in season_approvals.EVENTS_APPROVABLE_SQL
 
 
 # ── AA-1190: the season and holiday tiles follow the approve paths' maker-checker ──
@@ -426,25 +426,25 @@ async def test_the_season_and_holiday_queues_pass_the_approver(monkeypatch, staf
     async def _owner(_conn: Any, _staff: Staff, kind: str = "approve") -> bool:
         return owner
 
-    monkeypatch.setattr(seasons_admin.self_approval, "may_self_approve", _owner)
+    monkeypatch.setattr(season_approvals.self_approval, "may_self_approve", _owner)
     stamp = datetime(2026, 11, 2, 8, 0)
     conn = ScriptedConn().on("AS oldest_at", {"count": 3, "oldest_at": stamp})
-    assert await seasons_admin.seasons_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
-    assert await seasons_admin.events_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert await season_approvals.seasons_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert await season_approvals.events_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
     assert [args for _, args in conn.calls] == [expected, expected[:2]]  # an event has no stop-sale
     _placeholders_match(conn)
 
 
 def test_the_approvable_filters_mirror_the_approve_paths() -> None:
-    ranges = seasons_admin.RANGE_APPROVABLE
+    ranges = season_approvals.RANGE_APPROVABLE
     # a proposal: never one's own, unless the business owner may self-approve a season range (never a stop-sale)
     assert "r.created_by IS DISTINCT FROM $1::text OR ($2::boolean AND r.kind = 'season')" in ranges
     # a removal: never one's own request, no self-approval
     assert "r.end_requested_by IS DISTINCT FROM $1::text)" in ranges
     # a stop-sale range (and its removal) only for a stop-sale reviewer
     assert ranges.startswith("((r.kind <> 'stop_sale' OR $3::boolean)")
-    assert "c.default_requested_by IS DISTINCT FROM $1::text OR $2::boolean" in seasons_admin.DEFAULT_APPROVABLE
-    events = seasons_admin.EVENT_APPROVABLE
+    assert "c.default_requested_by IS DISTINCT FROM $1::text OR $2::boolean" in season_approvals.DEFAULT_APPROVABLE
+    events = season_approvals.EVENT_APPROVABLE
     assert "e.created_by IS DISTINCT FROM $1::text OR $2::boolean" in events
     assert "e.end_requested_by IS DISTINCT FROM $1::text)" in events
 
@@ -454,13 +454,13 @@ async def test_the_holiday_list_approvable_view(monkeypatch) -> None:
     async def _owner(*_args: Any, **_kw: Any) -> bool:
         return False
 
-    monkeypatch.setattr(seasons_admin.self_approval, "may_self_approve", _owner)
+    monkeypatch.setattr(season_approvals.self_approval, "may_self_approve", _owner)
     conn = ScriptedConn()
     await seasons_admin.list_events(conn, CONTRACTING, "vn", 2027, approvable=True)
     _placeholders_match(conn)
     listed = [(sql, args) for sql, args in conn.calls if "FROM booking.holiday_events e" in sql]
     assert len(listed) == 1 and listed[0][1] == ("u-5", False, "VN", 2027)
-    assert " ".join(seasons_admin.EVENT_APPROVABLE.split()) in listed[0][0]
+    assert " ".join(season_approvals.EVENT_APPROVABLE.split()) in listed[0][0]
     # without season.approve the view is empty (no query of the events)
     assert FINANCE.can("pricing.read") and not FINANCE.can("season.approve")
     none = ScriptedConn()
