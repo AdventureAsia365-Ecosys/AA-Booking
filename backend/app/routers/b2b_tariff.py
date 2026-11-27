@@ -48,7 +48,8 @@ class TariffItem(Strict):
     single_supplement_per_person: Money | None = None
     # 1.12 (AA-1188, D5): price_per_person is the twin share (single_supplement_per_person on top for a room alone);
     # a band that reaches the group size AA quotes on request is on_request; a departure inside the row's dates with a
-    # price adjustment in force makes a quote on it differ from the row.
+    # price adjustment in force makes a quote on it differ from the row. rrp_per_person is on the same twin share
+    # basis (an odd band of a computed row is scaled from the matrix's default mix: tariff.twin_rrp).
     availability: Literal["available", "on_request"] = "available"
     departure_adjusted: bool = False
 

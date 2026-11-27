@@ -50,6 +50,8 @@ def _row(plan: str, source_id: str, pax_min: int, pax_max: int | None, **extra: 
         "pax_max": pax_max,
         "rrp_amount": D("150.00"),
         "rrp_currency": "USD",
+        "computed": True,  # AA-1188: a cost sheet row (its odd band RRP is put on the twin share basis)
+        "overridden": False,
         **extra,
     }
 
@@ -142,6 +144,9 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def catalog_tours(conn: Any) -> int:
         return state.get("catalog", 844)
 
+    async def rrp_rounding(conn: Any, on: Any) -> dict[str, D]:  # AA-1188: the policy's rounding increments
+        return state.get("increments", {"USD": D("5")})
+
     async def adjusted_departures(conn: Any, plan_ids: Any, on: Any) -> dict[str, list[date]]:
         return state.get("adjusted", {})
 
@@ -149,6 +154,7 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(tariff, "default_board_b2b", default_board_b2b)
     monkeypatch.setattr(tariff, "group_min_pax", group_min_pax)
     monkeypatch.setattr(tariff, "catalog_tours", catalog_tours)
+    monkeypatch.setattr(tariff, "rrp_rounding", rrp_rounding)
     monkeypatch.setattr(tariff, "adjusted_departures", adjusted_departures)
     monkeypatch.setattr(liveness, "states", states)
     monkeypatch.setattr(quotes, "price_basis", price_basis)
@@ -663,3 +669,46 @@ async def test_without_an_approved_group_size_the_tariff_is_aas_side() -> None:
     with pytest.raises(B2BError) as err:
         await tariff.group_min_pax(PolicyConn(), ON)
     assert err.value.error == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_the_rrp_of_an_odd_computed_band_is_on_the_twin_share_basis_too(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AA-1188 (D5): the cost sheet prices an odd band in the default mix (one traveller alone), so its matrix RRP
+    carries a single room; beside a twin share price it is scaled to the twin share. Even bands and hand rows keep the
+    matrix RRP."""
+    monkeypatch.setattr(tariff, "price_lines", _hotel_lines())
+    rows = [
+        _row(PLAN_A, "tour-a", 2, 2),
+        _row(PLAN_A, "tour-a", 3, 3, rrp_amount=D("160.00")),
+        _row(PLAN_B, "tour-b", 3, 3, rrp_amount=D("160.00"), computed=False),  # a hand row: staff's twin share
+    ]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    rrp = {(i["tour"]["source_id"], i["pax_min"]): i["rrp_per_person"]["amount"] for i in out["items"]}
+    assert rrp[("tour-a", 2)] == "150.00" and rrp[("tour-b", 3)] == "160.00"
+    three = next(i for i in out["items"] if i["tour"]["source_id"] == "tour-a" and i["pax_min"] == 3)
+    pp, supplement = D(three["price_per_person"]["amount"]), D(three["single_supplement_per_person"]["amount"])
+    expected = engine.round_price(D("160") * pp / (pp + supplement / 3), "USD", {"USD": D("5")})
+    assert D(rrp[("tour-a", 3)]) == expected < D("160")
+
+
+@pytest.mark.parametrize(
+    ("party", "extra", "supplement", "increments", "expected"),
+    [
+        (2, {}, D("20"), {"USD": D("5")}, D("150.00")),  # an even band: as the matrix
+        (3, {"overridden": True}, D("20"), {"USD": D("5")}, D("150.00")),  # staff's price
+        (3, {"computed": False}, D("20"), {"USD": D("5")}, D("150.00")),  # a hand row
+        (3, {}, D("0"), {"USD": D("5")}, D("150.00")),  # no hotel room: nothing to share
+        (3, {}, None, {"USD": D("5")}, None),  # no single rate: no RRP rather than a wrong one
+        (3, {}, D("30"), {}, None),  # no rounding increment in the policy
+        (3, {}, D("30"), {"USD": D("5")}, D("140.00")),  # 150 x 100 / (100 + 10) = 136.36... -> 140, up
+        (1, {}, D("30"), {"USD": D("1")}, D("116.00")),  # one traveller: 150 x 100 / 130 = 115.38... -> 116
+        (3, {"rrp_amount": None}, D("30"), {"USD": D("5")}, None),
+    ],
+)
+def test_twin_rrp(
+    party: int, extra: dict[str, Any], supplement: D | None, increments: dict[str, D], expected: D | None
+) -> None:
+    row = _row(PLAN_A, "tour-a", party, party, **extra)
+    assert tariff.twin_rrp(row, party, D("100"), supplement, increments) == expected

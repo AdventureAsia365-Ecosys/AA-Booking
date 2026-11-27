@@ -1320,7 +1320,11 @@ rows never join across a season) and `departure_adjusted` (an upcoming departure
 approved price adjustment in force). The tariff also answers `group_on_request_min_pax`, `early_booking_days` (the
 b2b rule's, null without an early-booking discount), `tours_priced` and `catalog_tours` (`catalog.v_tour`, null for a
 one-tour read: the CRM's "Priced tours N of M"); the CSV adds `availability` and `departure_adjusted` last. Not the matrix `amount`
-(rounded to 5 USD, peak uplift; quotes never read it); the row's public RRP is shown as it is. Rows a quote cannot
+(rounded to 5 USD, peak uplift; quotes never read it). The row's public RRP is shown as it is on an even band and on
+a hand or overridden row (staff enter the twin share); on an odd band of a computed row (priced by the cost sheet in
+the default mix, one traveller alone) it is put on the twin share basis too (`tariff.twin_rrp`: the matrix RRP x
+`price_per_person` / (`price_per_person` + one supplement / party), rounded up to the policy increment, never above
+the matrix RRP; null when the supplement is unknown). Rows a quote cannot
 price (no components, no rate in force, no FX rate for a cost currency) are left out of the agency's tariff and listed
 with the reason for staff. The asked currency must price today (S270): a quote currency without an approved FX rate in
 force is refused before any row is read as **422 `invalid`** (`tariff.check_currency`, the message lists the

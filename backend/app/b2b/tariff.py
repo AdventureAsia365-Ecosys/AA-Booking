@@ -25,7 +25,9 @@
 - **Not the matrix amount.** The matrix's b2b ``amount`` is the plan's public price list (rounded up to 5 USD per
   person, the peak uplift applied); the RRP is built on it. B2B quotes never read it (they price the components), so
   the tariff does not either. The row's RRP (``rrp_amount``, the public suggested retail price, ADR 0019 b15) is
-  shown as it is, in the row's currency.
+  shown in the row's currency: as it is on an even band and on a row staff priced by hand (a hand or ``overridden``
+  row is taken as the twin share it is entered as), and on the twin share basis on an odd band of a computed row
+  (see **Twin share**).
 - **Rows that cannot be quoted** (a plan without bookable components, a component without a rate in force, a cost
   currency without an approved FX rate) are left out of the agency's tariff; the staff read lists them with the
   reason (``unpriced``).
@@ -52,7 +54,11 @@
   party in the default mix (doubles plus one single) therefore charges ``party`` x ``price_per_person`` plus one
   ``single_supplement_per_person``, within the line's rounding. A hotel night whose rates are in more than one
   currency cannot be halved: that row is ``unpriced`` (ask a quote). ``price`` = ``price_per_person`` x party
-  (the line of the party sharing).
+  (the line of the party sharing). The cost sheet prices an odd band's matrix row (and so its RRP) in the default
+  mix, so ``rrp_per_person`` of a computed odd row is put on the same basis (:func:`twin_rrp`): the matrix RRP times
+  the twin share over the default mix per person (``price_per_person`` over ``price_per_person`` plus one
+  supplement shared by the party), rounded up to the RRP's increment (pricing policy), never above the matrix RRP;
+  ``null`` when the supplement is unknown (no single rate in force) or the RRP's currency has no increment.
 - **Availability per row** (1.12): ``on_request`` when the band reaches the group size AA quotes on request (pricing
   policy ``group_on_request_min_pax``: ``pax_max`` at or above it, or an open band), else ``available``: the price
   stands and AA confirms the date as on a quote (a departure with seats books at once; without one the quote line is
@@ -104,6 +110,7 @@ from app.b2b.errors import B2BError
 from app.catalog import cost_sheet, liveness
 from app.catalog.destinations import CATALOG_ERRORS
 from app.pricing import engine, policy_values, repository, seasons
+from app.pricing import service as pricing_service
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +127,7 @@ SELECT DISTINCT ON (p.source_id, pr.valid_from, pr.valid_to, pr.pax_min, pr.pax_
        p.id::text AS plan_id, p.source_id, t.title, t.country, t.duration_days,
        (SELECT count(*) FROM booking.trip_plan_components c WHERE c.trip_plan_id = p.id) AS components,
        pr.season, pr.peak, pr.valid_from, pr.valid_to, pr.pax_min, pr.pax_max,
-       pr.rrp_amount, pr.currency::text AS rrp_currency
+       pr.rrp_amount, pr.currency::text AS rrp_currency, pr.computed, pr.overridden
 FROM booking.trip_plans p
 JOIN booking.trip_plan_prices pr ON pr.trip_plan_id = p.id AND pr.channel = 'b2b' AND pr.valid_to >= $1
 JOIN LATERAL (SELECT t.title, t.country, t.duration_days FROM catalog.v_tour t
@@ -306,6 +313,42 @@ async def group_min_pax(conn: asyncpg.Connection, on: date) -> int:
         raise B2BError("unavailable", "pricing policy is not available") from None
 
 
+async def rrp_rounding(conn: asyncpg.Connection, on: date) -> engine.Increments:
+    """The rounding increments in force on ``on`` (pricing policy), for :func:`twin_rrp`. None in force: empty (an
+    odd computed row then shows no RRP rather than an unrounded one)."""
+    try:
+        return await pricing_service.rounding_increments(conn, on)
+    except pricing_service.PricingDataUnavailable:
+        log.warning("b2b_tariff_rounding_unavailable on=%s", on)
+        return {}
+
+
+def twin_rrp(
+    row: Any, party: int, adult_pp: Decimal, supplement_pp: Decimal | None, increments: engine.Increments
+) -> Decimal | None:
+    """1.12 (AA-1188, D5): the row's RRP on the twin share basis of ``price_per_person``. The cost sheet prices an
+    odd band in the default room mix (doubles plus one single, :func:`app.catalog.cost_sheet.room_mix`), so the
+    matrix RRP of a computed odd row carries a share of that single room. It is scaled by the twin share over the
+    default mix per person (``adult_pp`` over ``adult_pp + supplement_pp / party``: the default mix charges one
+    supplement more, see **Twin share**), rounded up like every customer-facing price, never above the matrix RRP.
+    An even band, a hand row and an ``overridden`` row keep the matrix RRP (staff enter the twin share); an unknown
+    supplement or a currency without a rounding increment gives ``None`` (no RRP rather than a wrong one)."""
+    rrp = row["rrp_amount"]
+    if rrp is None or party % 2 == 0 or not row["computed"] or row["overridden"]:
+        return rrp
+    if supplement_pp is None:
+        return None
+    default_pp = adult_pp + supplement_pp / party
+    if supplement_pp == 0 or default_pp <= 0:
+        return rrp
+    currency = (row["rrp_currency"] or "").strip()
+    try:
+        scaled = engine.round_price(Decimal(rrp) * adult_pp / default_pp, currency, increments)
+    except engine.PricingError:
+        return None
+    return min(scaled, Decimal(rrp))
+
+
 async def catalog_tours(conn: asyncpg.Connection) -> int:
     """The tours AA serves in its catalog (``catalog.v_tour``), the M of "Priced tours N of M"."""
     return int(await conn.fetchval(CATALOG_TOURS_SQL) or 0)
@@ -380,6 +423,7 @@ async def build(
     ``unavailable`` without a b2b rule, without readable pricing data or without a readable catalog (AA's side)."""
     await check_currency(conn, currency, on)
     group_min = await group_min_pax(conn, on)
+    increments = await rrp_rounding(conn, on)
     try:
         rows = await conn.fetch(ROWS_SQL, on, source_id, limit + 1)
         served = await liveness.states(conn, [r["source_id"] for r in rows], strict=True)
@@ -424,7 +468,7 @@ async def build(
     refused: list[tuple[int, dict[str, Any]]] = []
     for cell in cells:
         calendar = calendars.get(cell.row["plan_id"], seasons.EMPTY)
-        found = _price_cell(basis, cell, costs[cell.no], costs[cell.no + len(cells)], calendar)
+        found = _price_cell(basis, cell, costs[cell.no], costs[cell.no + len(cells)], calendar, increments)
         if isinstance(found, str):
             refused.append((cell.row_no, _unpriced(cell.row, cell.on, cell.end, found)))
             continue
@@ -463,9 +507,10 @@ def _price_cell(
     cost: LineCost | str,
     singles: LineCost | str,
     calendar: seasons.Calendar,
+    increments: engine.Increments,
 ) -> dict[str, Any] | str:
-    """One tariff row piece priced by the quote engine (twin share, 1.12), with its age and room prices and its
-    season label; or the reason it cannot be priced."""
+    """One tariff row piece priced by the quote engine (twin share, 1.12), with its age and room prices, its RRP on
+    the same basis (:func:`twin_rrp`) and its season label; or the reason it cannot be priced."""
     if isinstance(cost, str):
         return cost
     twin = twin_share(cost, cell.party)
@@ -478,7 +523,15 @@ def _price_cell(
         extras = _by_age_and_room(basis, cell, twin, singles, price, currency, season)
     except engine.PricingError as exc:
         return str(exc)
-    item = _item(cell, price, currency)
+    supplement = extras["single_supplement_per_person"]
+    rrp = twin_rrp(
+        cell.row,
+        cell.party,
+        per_person(price.b2b_price, cell.party, currency),
+        None if supplement is None else Decimal(supplement["amount"]),
+        increments,
+    )
+    item = _item(cell, price, currency, rrp)
     if calendar.configured:  # 1.12: the calendar's season of the row's first day, else the matrix label
         item["season"] = season.code
     return {**item, **extras}
@@ -564,7 +617,7 @@ def _unpriced(row: Any, start: date, end: date, reason: str) -> dict[str, Any]:
     return {**_tour(row, start, end), "reason": reason[:300]}
 
 
-def _item(cell: Cell, price: quotes.LinePrice, currency: str) -> dict[str, Any]:
+def _item(cell: Cell, price: quotes.LinePrice, currency: str, rrp: Decimal | None) -> dict[str, Any]:
     row = cell.row
     rrp_currency = (row["rrp_currency"] or "").strip()
     return {
@@ -575,7 +628,7 @@ def _item(cell: Cell, price: quotes.LinePrice, currency: str) -> dict[str, Any]:
         "price_per_person": quotes.money(per_person(price.b2b_price, cell.party, currency), currency),
         "agency_discount_pct": _decimal(price.discount),
         "rate_card_id": price.rate_card_id,
-        "rrp_per_person": _money(row["rrp_amount"], rrp_currency) if row["rrp_amount"] is not None else None,
+        "rrp_per_person": _money(rrp, rrp_currency),
     }
 
 
