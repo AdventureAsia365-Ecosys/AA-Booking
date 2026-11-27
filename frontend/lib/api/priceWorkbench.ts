@@ -12,6 +12,7 @@
 
 import { ApiError, BFF_BASE, bkGet, bkSend, buildQuery } from "./client";
 import type { ReadinessItem, ReadinessStatus, StatusCounts } from "./priceReadiness";
+import type { MealPlan } from "./supply";
 import type { DecimalString, IsoDate } from "./types";
 
 export const WORKBENCH_CHECKS = ["components", "rates", "fx", "rule", "price", "sellable", "departures"] as const;
@@ -180,6 +181,8 @@ export interface PlanComponent {
   service_id: string | null;
   label: string;
   active: boolean;
+  /** AA-1153 / AA-1187: a hotel night's board (null = the default BB; always null for a service). */
+  meal_plan: MealPlan | null;
 }
 
 export interface PlanComponents {
@@ -188,7 +191,12 @@ export interface PlanComponents {
   items: PlanComponent[];
 }
 
-export type ComponentIn = { day_no: number; hotel_room_type_id?: string | null; service_id?: string | null };
+export type ComponentIn = {
+  day_no: number;
+  hotel_room_type_id?: string | null;
+  service_id?: string | null;
+  meal_plan?: string | null;
+};
 
 async function template(filters: WorkbenchFilters, blank = false): Promise<{ blob: Blob; filename: string }> {
   const query = buildQuery(blank ? { blank: "true" } : { ...filters });

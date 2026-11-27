@@ -65,6 +65,7 @@ def test_parse_reads_every_sheet_by_header_name() -> None:
         "hotel_code": None,
         "room_type": None,
         "service_code": "SVC-000101",
+        "meal_plan": None,
     }
     price = sheets.prices[0]
     assert (price["valid_from"], price["valid_to"], price["amount"], price["currency"], price["peak"]) == (
@@ -404,8 +405,8 @@ async def test_match() -> None:
     }
     one = plans[KEY]
     assert one.components == [
-        {"day_no": 1, "hotel_room_type_id": "rt-1", "service_id": None},
-        {"day_no": 2, "hotel_room_type_id": None, "service_id": "sv-1"},
+        {"day_no": 1, "hotel_room_type_id": "rt-1", "service_id": None, "meal_plan": None},
+        {"day_no": 2, "hotel_room_type_id": None, "service_id": "sv-1", "meal_plan": None},
     ]
     assert one.existing_departures == [TODAY + timedelta(days=10), TODAY + timedelta(days=11)]
     assert [d["_row"] for d in one.new_departures] == [3]
@@ -580,3 +581,96 @@ async def test_prefilled_notes_the_cut(monkeypatch: pytest.MonkeyPatch) -> None:
     wb = load_workbook(io.BytesIO(data), read_only=True)
     lines = [r[0] for r in wb["Read me"].iter_rows(values_only=True)]
     assert lines[-1].startswith("Prefilled with the first 1 of 2 tours")
+
+
+# ── AA-1187: a re-import keeps the board of a hotel night ─────────────────────
+
+
+def test_parse_meal_plan_by_code_or_name() -> None:
+    data = _book(
+        {
+            "Components": [
+                ["Tour key", "Day", "Hotel code", "Room type", "Meal plan"],
+                [KEY, 1, "HTL-1", "Garden Twin", "hb"],
+                [KEY, 2, "HTL-1", "Garden Twin", "Full board"],
+                [KEY, 3, "HTL-1", "Garden Twin", "Bed & Breakfast"],
+                [KEY, 4, "HTL-1", "Garden Twin", None],
+                [KEY, 5, "HTL-1", "Garden Twin", "dinner only"],
+            ]
+        }
+    )
+    sheets = pi.parse(data)
+    assert [c["meal_plan"] for c in sheets.components] == ["HB", "FB", "BB", None, None]
+    assert _codes(sheets) == {("Components", 6, "Meal plan", "invalid_value")}
+
+
+def test_check_shapes_refuses_a_meal_plan_on_a_service() -> None:
+    sheets = pi.Sheets(
+        components=[
+            _comp(2, KEY, 1, service_code="SVC-1", meal_plan="HB"),
+            _comp(3, KEY, 1, hotel_code="HTL-1", room_type="Garden Twin", meal_plan="HB"),
+        ]
+    )
+    pi.check_shapes(sheets, TODAY)
+    assert _codes(sheets) == {("Components", 2, "Meal plan", "invalid_meal_plan")}
+
+
+@pytest.mark.asyncio
+async def test_match_keeps_the_board_a_night_has_when_the_cell_is_empty() -> None:
+    """The S295 data audit bug: re-importing Components (an old file without the column, or an empty cell) reset
+    every hand-set board to the default. Now an empty cell keeps the night's board; a value replaces it."""
+    conn = _match_conn().on(
+        "FROM booking.trip_plan_components WHERE trip_plan_id = ANY",
+        [
+            {"plan_id": "p-1", "day_no": 1, "hotel_room_type_id": "rt-1", "service_id": None, "meal_plan": "HB"},
+            {"plan_id": "p-1", "day_no": 2, "hotel_room_type_id": "rt-1", "service_id": None, "meal_plan": "FB"},
+            {"plan_id": "p-1", "day_no": 3, "hotel_room_type_id": None, "service_id": "sv-1", "meal_plan": None},
+        ],
+    )
+    sheets = pi.Sheets(
+        components=[
+            _comp(2, KEY, 1, hotel_code="HTL-1", room_type="Garden Twin"),  # no column / empty: keeps HB
+            _comp(3, KEY, 2, hotel_code="HTL-1", room_type="garden twin", meal_plan="AI"),  # a value wins
+            _comp(4, KEY, 3, service_code="SVC-1"),
+        ]
+    )
+    plans = await pi.match(conn, sheets)  # type: ignore[arg-type]
+    assert sheets.problems == []
+    plan = plans[KEY]
+    assert [(c["day_no"], c["meal_plan"]) for c in plan.components or []] == [(1, "HB"), (2, "AI"), (3, None)]
+    assert not pi._same_components(plan.components_now, plan.components or [])  # day 2's board changes
+    plan.components[1]["meal_plan"] = "FB"  # type: ignore[index]
+    assert pi._same_components(plan.components_now, plan.components or [])  # same file again = nothing to write
+
+
+@pytest.mark.asyncio
+async def test_match_gives_a_new_night_no_board() -> None:
+    """A night the plan does not have yet (another day or another room type) gets no board: the default BB."""
+    conn = _match_conn().on(
+        "FROM booking.trip_plan_components WHERE trip_plan_id = ANY",
+        [{"plan_id": "p-1", "day_no": 1, "hotel_room_type_id": "rt-9", "service_id": None, "meal_plan": "HB"}],
+    )
+    sheets = pi.Sheets(components=[_comp(2, KEY, 1, hotel_code="HTL-1", room_type="Garden Twin")])
+    plans = await pi.match(conn, sheets)  # type: ignore[arg-type]
+    assert plans[KEY].components == [{"day_no": 1, "hotel_room_type_id": "rt-1", "service_id": None, "meal_plan": None}]
+
+
+def test_template_round_trip_keeps_the_meal_plan() -> None:
+    data = pi.build_workbook(
+        [],
+        [
+            {
+                "source_id": KEY,
+                "day_no": 1,
+                "hotel_code": "HTL-000101",
+                "room_type": "Garden Twin",
+                "service_code": None,
+                "meal_plan": "HB",
+            },
+            {"source_id": KEY, "day_no": 2, "hotel_code": None, "room_type": None, "service_code": "SVC-000101"},
+        ],
+    )
+    sheets = pi.parse(data)
+    assert sheets.problems == []
+    assert [c["meal_plan"] for c in sheets.components] == ["HB", None]
+    assert pi.COLUMNS[pi.COMPONENTS][-1] == "Meal plan"

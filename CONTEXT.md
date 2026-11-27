@@ -1181,7 +1181,9 @@ forms' services.
   empty with `blank=true`, else prefilled with the workbench's filtered plans, at most 300) and
   `POST /booking/catalog/price-import` (`trip_plan.write`, the .xlsx as base64 JSON like rate sheets, `?dry_run=true`
   checks only)): sheets `Tours` (Sellable), `Components` (a listed tour gets exactly these: Hotel code + Room type, or
-  Service code, per day), `Prices` (a listed tour gets exactly these hand prices per channel, season, dates and pax
+  Service code, per day; AA-1187: `Meal plan` = a hotel night's board, code or name; an empty cell or an older file
+  without the column keeps the board the same night has (tour, day, room type), a new night gets the default BB; the
+  export prefills it, and the Price setup drawer's Save carries each night's board too), `Prices` (a listed tour gets exactly these hand prices per channel, season, dates and pax
   band, with child / infant / single supplement; rows priced from a cost (computed, or typed with a net cost on the
   single form: their net cost, margin and override are not in the file, so the export leaves them out) are kept unless
   a hand row overlaps them, and the dry run counts those it replaces: `computed_rows_replaced`, `net_rows_replaced`),

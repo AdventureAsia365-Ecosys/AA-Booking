@@ -38,7 +38,8 @@ function itemOf(day: number, cand: SuggestionCandidate, roomTypeId?: string): It
 }
 
 function currentRef(c: PlanComponent): ItemRef {
-  return { day_no: c.day_no, hotel_room_type_id: c.hotel_room_type_id, service_id: c.service_id };
+  // AA-1187: the board travels with the night, or Save (the whole set) resets it to the default BB.
+  return { day_no: c.day_no, hotel_room_type_id: c.hotel_room_type_id, service_id: c.service_id, meal_plan: c.meal_plan };
 }
 
 function refKey(r: ItemRef): string {

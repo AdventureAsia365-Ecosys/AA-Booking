@@ -1019,8 +1019,8 @@ function planComponents(key: string): PlanComponents {
     trip_plan_id: uuid("p", 1),
     source_id: key,
     items: [
-      { component_id: `rt:${uuid("r", 1)}`, kind: "hotel_room", day_no: 1, hotel_room_type_id: uuid("r", 1), service_id: null, label: "HTL-003101 Invented Lagoon Riverside Boutique Retreat · Superior Garden View Twin", active: true },
-      { component_id: `sv:${uuid("s", 2)}`, kind: "guide", day_no: 1, hotel_room_type_id: null, service_id: uuid("s", 2), label: "SVC-004202 Invented English-speaking guide, full day", active: false },
+      { component_id: `rt:${uuid("r", 1)}`, kind: "hotel_room", day_no: 1, hotel_room_type_id: uuid("r", 1), service_id: null, label: "HTL-003101 Invented Lagoon Riverside Boutique Retreat · Superior Garden View Twin", active: true, meal_plan: "HB" },
+      { component_id: `sv:${uuid("s", 2)}`, kind: "guide", day_no: 1, hotel_room_type_id: null, service_id: uuid("s", 2), label: "SVC-004202 Invented English-speaking guide, full day", active: false, meal_plan: null },
     ],
   };
 }
