@@ -253,6 +253,10 @@ async def test_credit_stop_reminders_and_release(
     assert terms["credit"]["status"] == "past_due" and terms["credit"]["holds_paused"] is True
     assert terms["credit"]["overdue_amount"] == [{"amount": "500.00", "currency": "USD"}]
     assert terms["payment"]["deposit_pct"] == "30.00"
+    # AA-1188 (1.12): the pricing policy values every quote follows, from the seeded policy rows (bk-050 / bk-056).
+    rules = terms["quote_rules"]
+    assert rules["quote_validity_days"] >= 1 and rules["group_on_request_min_pax"] >= 2
+    assert rules["age_bands"]["child_age_max"] > rules["age_bands"]["infant_age_max"] >= 0
 
     dep = await _departure(c, cis, DAY1, 4)
     quote = await _ok(await _quote(c, m2m, "GX-2", [_plan_line("tour", billing["plan"], dep["id"], DAY1)]), 201)

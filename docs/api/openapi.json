@@ -8482,6 +8482,16 @@
                 "type": "null"
               }
             ]
+          },
+          "quote_rules": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteRules"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -9803,6 +9813,32 @@
           "lines"
         ],
         "title": "QuoteRequest",
+        "type": "object"
+      },
+      "QuoteRules": {
+        "additionalProperties": false,
+        "description": "1.12 (AA-1188): the pricing policy values in force that shape every quote (staff edit them on Pricing >\nPolicy): how long a quote holds its price, the group size quoted on request and AA's default age bands (a tour may\nhave its own: ``Product.age_bands``).",
+        "properties": {
+          "age_bands": {
+            "$ref": "#/components/schemas/AgeBands"
+          },
+          "group_on_request_min_pax": {
+            "minimum": 1.0,
+            "title": "Group On Request Min Pax",
+            "type": "integer"
+          },
+          "quote_validity_days": {
+            "minimum": 1.0,
+            "title": "Quote Validity Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quote_validity_days",
+          "group_on_request_min_pax",
+          "age_bands"
+        ],
+        "title": "QuoteRules",
         "type": "object"
       },
       "RangeIn": {
@@ -11849,13 +11885,49 @@
             "title": "Basis",
             "type": "string"
           },
+          "catalog_tours": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Tours"
+          },
           "currency": {
             "pattern": "^[A-Z]{3}$",
             "title": "Currency",
             "type": "string"
           },
+          "early_booking_days": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Early Booking Days"
+          },
           "fx": {
             "$ref": "#/components/schemas/FxLock"
+          },
+          "group_on_request_min_pax": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group On Request Min Pax"
           },
           "items": {
             "items": {
@@ -11873,6 +11945,12 @@
             "maxLength": 32,
             "title": "Tier Code",
             "type": "string"
+          },
+          "tours_priced": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Tours Priced",
+            "type": "integer"
           },
           "truncated": {
             "title": "Truncated",
@@ -11900,6 +11978,15 @@
             "title": "Agency Discount Pct",
             "type": "string"
           },
+          "availability": {
+            "default": "available",
+            "enum": [
+              "available",
+              "on_request"
+            ],
+            "title": "Availability",
+            "type": "string"
+          },
           "child_price_per_person": {
             "anyOf": [
               {
@@ -11921,6 +12008,11 @@
               }
             ],
             "title": "Country"
+          },
+          "departure_adjusted": {
+            "default": false,
+            "title": "Departure Adjusted",
+            "type": "boolean"
           },
           "duration_days": {
             "anyOf": [

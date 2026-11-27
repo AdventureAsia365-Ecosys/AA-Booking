@@ -136,6 +136,9 @@ async def test_the_tariff_is_what_a_quote_charges(
         (1, 1), (2, 2), (3, 3), (4, 4), (5, 7), (8, 10), (11, None)
     ]  # fmt: skip
     assert standard["unpriced"] == [] and standard["truncated"] is False
+    # AA-1188 (1.12): the coverage line and D5 (the 8-10 and 11+ bands on request with the seeded group size).
+    assert standard["tours_priced"] == 1 and standard["catalog_tours"] >= 1
+    assert [i["availability"] for i in standard["items"]][-2:] == ["on_request", "on_request"]
     assert standard["partner"]["tier_code"] == "standard" and standard["basis"] == "per_person_band_min_twin_share"
 
     # Every row of every tariff = the quote of that row's party on that day (price, discount, rate card).
@@ -145,7 +148,18 @@ async def test_the_tariff_is_what_a_quote_charges(
             assert item["priced_for_date"] == "2027-01-01"
             assert D(item["agency_discount_pct"]) == discount and item["rate_card_id"] == card
             quote = await _quote_row(c, m2m, tenant, plan_id, item, "USD")
-            assert quote["lines"][0]["b2b_price"] == item["price"], (tenant, item)
+            if item["priced_for_pax"] % 2 == 0:
+                assert quote["lines"][0]["b2b_price"] == item["price"], (tenant, item)
+            else:
+                # AA-1188 (1.12, D5): the row is the twin share; the quote's default mix puts the odd traveller in a
+                # single, so it charges one single supplement more (within the per-person rounding).
+                quoted = D(quote["lines"][0]["b2b_price"]["amount"])
+                twin_plus_one = D(item["price"]["amount"]) + D(item["single_supplement_per_person"]["amount"])
+                assert abs(quoted - twin_plus_one) <= D("0.01") * (item["priced_for_pax"] + 1), (tenant, item)
+                assert D(item["single_supplement_per_person"]["amount"]) > 0
+            group = tariff["group_on_request_min_pax"]  # the seeded policy value (bk-050)
+            reaches = item["pax_max"] is None or item["pax_max"] >= group
+            assert item["availability"] == ("on_request" if reaches else "available"), (group, item)
             stored = await admin.fetchrow(
                 "SELECT agency_discount_pct, rate_card_id::text AS card FROM booking.b2b_quote_lines"
                 " WHERE quote_id = $1::uuid",

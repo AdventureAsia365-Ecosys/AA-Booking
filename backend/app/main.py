@@ -68,6 +68,7 @@ from app.routers import (
     b2b_addons,
     b2b_desk,
     b2b_partners,
+    b2b_tariff,
     catalog,
     docs,
     finance,
@@ -267,6 +268,7 @@ def create_app(
     app.include_router(ops.router)
     app.include_router(b2b.router)
     app.include_router(b2b_addons.router)  # AA-1152: GET /booking/b2b/v1/add-ons (contract 1.11)
+    app.include_router(b2b_tariff.router)  # AA-1030 / AA-1188: GET /booking/b2b/v1/tariff (contract 1.4, 1.12)
     app.include_router(b2b_partners.router)
     app.include_router(b2b_desk.router)
     app.include_router(supplier_bookings.router)

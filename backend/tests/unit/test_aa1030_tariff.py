@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from app.b2b import agency_pricing, quotes, tariff
-from app.b2b.components import MAX_RATE_LOOKUPS, PLAN_COMPONENTS_SQL, LineAsk, LineCost
+from app.b2b.components import MAX_RATE_LOOKUPS, PLAN_COMPONENTS_SQL, LineAsk, LineCost, PartCost, RoomAsk
 from app.b2b.errors import B2BError
 from app.catalog import cost_sheet, liveness
 from app.pricing import engine, repository, seasons
@@ -50,6 +50,8 @@ def _row(plan: str, source_id: str, pax_min: int, pax_max: int | None, **extra: 
         "pax_max": pax_max,
         "rrp_amount": D("150.00"),
         "rrp_currency": "USD",
+        "computed": True,  # AA-1188: a cost sheet row (its odd band RRP is put on the twin share basis)
+        "overridden": False,
         **extra,
     }
 
@@ -90,6 +92,10 @@ class Conn:
         return self.rows[: args[2]]
 
 
+def _singles(ask: LineAsk) -> bool:
+    return any(room.occupancy == "single" for room in ask.rooms)
+
+
 def _basis(terms: agency_pricing.AgencyTerms, currency: str = "USD", rates: dict | None = None) -> quotes.PriceBasis:
     return quotes.PriceBasis(
         on=ON,
@@ -112,9 +118,11 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         for ask in asks:
             if ask.adult in state["refuse"]:
                 raise B2BError("invalid", f"line {ask.line_ref}: no rate in force on {ask.service_date} for 1 per room")
-        # AA-1075: every traveller in a single room adds 16.40 USD net each (a sell of 20 USD).
+        state.setdefault("rooms", []).append([ask.rooms for ask in asks])
+        # AA-1075: every traveller in a single room adds 16.40 USD net each (a sell of 20 USD). AA-1188: an odd party
+        # sharing twin rooms is asked with (party + 1) / 2 doubles; without room parts nothing is halved here.
         return [
-            LineCost(kind="trip_plan", costs=[((D("82") + (D("16.40") if ask.rooms else 0)) * ask.adult, "USD")])
+            LineCost(kind="trip_plan", costs=[((D("82") + (D("16.40") if _singles(ask) else 0)) * ask.adult, "USD")])
             for ask in asks
         ]
 
@@ -130,8 +138,24 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     async def default_board_b2b(conn: Any, on: Any = None) -> str:
         return "BB"
 
+    async def group_min_pax(conn: Any, on: Any) -> int:  # AA-1188: the policy's group size quoted on request
+        return state.get("group_min", 9)
+
+    async def catalog_tours(conn: Any) -> int:
+        return state.get("catalog", 844)
+
+    async def rrp_rounding(conn: Any, on: Any) -> dict[str, D]:  # AA-1188: the policy's rounding increments
+        return state.get("increments", {"USD": D("5")})
+
+    async def adjusted_departures(conn: Any, plan_ids: Any, on: Any) -> dict[str, list[date]]:
+        return state.get("adjusted", {})
+
     monkeypatch.setattr(tariff, "price_lines", price_lines)
     monkeypatch.setattr(tariff, "default_board_b2b", default_board_b2b)
+    monkeypatch.setattr(tariff, "group_min_pax", group_min_pax)
+    monkeypatch.setattr(tariff, "catalog_tours", catalog_tours)
+    monkeypatch.setattr(tariff, "rrp_rounding", rrp_rounding)
+    monkeypatch.setattr(tariff, "adjusted_departures", adjusted_departures)
     monkeypatch.setattr(liveness, "states", states)
     monkeypatch.setattr(quotes, "price_basis", price_basis)
     return state
@@ -307,12 +331,15 @@ def test_the_csv_has_one_line_per_row_and_neutralises_formulas() -> None:
         "child_price_per_person": {"amount": "70.00", "currency": "USD"},
         "infant_price": {"amount": "0.00", "currency": "USD"},
         "single_supplement_per_person": None,
+        "availability": "on_request",  # AA-1188 (1.12): an open band reaches the group size
+        "departure_adjusted": True,
     }
     text = tariff.to_csv({"items": [item]})
     rows = list(csv.reader(io.StringIO(text)))
     assert rows[0] == list(tariff.CSV_COLUMNS)
     assert rows[1] == ["tour-a", "'=HYPERLINK(1)", "Invented Land", "3", "'-Green", "2027-01-01", "2027-03-31", "11",
-                       "", "11", "USD", "100.00", "1100.00", "0.0300", "", "", "70.00", "0.00", ""]  # fmt: skip
+                       "", "11", "USD", "100.00", "1100.00", "0.0300", "", "", "70.00", "0.00", "", "on_request",
+                       "true"]  # fmt: skip
     assert text.endswith("\r\n")
     view = tariff.agency_view(
         {"currency": "USD", "priced_on": ON, "basis": tariff.BASIS, "tier_code": "standard", "fx": {},
@@ -483,7 +510,7 @@ async def test_a_single_room_without_a_rate_empties_only_the_supplement(
     wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
-        if any(ask.rooms for ask in asks):
+        if any(_singles(ask) for ask in asks):
             raise B2BError("invalid", f"line {asks[0].line_ref}: no rate in force for 1 per room")
         return [LineCost(kind="trip_plan", costs=[(D("82") * ask.adult, "USD")]) for ask in asks]
 
@@ -493,5 +520,195 @@ async def test_a_single_room_without_a_rate_empties_only_the_supplement(
     assert item["price"] == {"amount": "200.00", "currency": "USD"} and item["single_supplement_per_person"] is None
     assert out["unpriced"] == []
     lines = list(csv.reader(io.StringIO(tariff.to_csv(out))))
-    assert lines[0][-3:] == ["child_price_per_person", "infant_price", "single_supplement_per_person"]
-    assert lines[1][-3:] == ["100.00", "0.00", ""]
+    assert lines[0][-5:-2] == ["child_price_per_person", "infant_price", "single_supplement_per_person"]
+    assert lines[1][-5:] == ["100.00", "0.00", "", "available", "false"]
+
+
+# ── AA-1188 (1.12, S295 decision D5): twin share, availability per row, season label, coverage ──────────
+
+
+def _room_part(net: D, rooms: int, currency: str | None = "USD") -> PartCost:
+    return PartCost(
+        part_no=1, day_no=1, service_date=ON, room_type_id="rt-1", service_id=None, supplier_id="s-1",
+        quantity=rooms, pax=1, rooms=None, net=net if currency else None, currency=currency, rate_ids=[],
+    )  # fmt: skip
+
+
+def _hotel_lines(room_currency: str | None = "USD"):
+    """A plan of one hotel night (a double 60 USD net, a single 45 USD net) and a 50 USD net per person service."""
+
+    async def price_lines(conn: Any, asks: list[LineAsk], **_: Any) -> list[LineCost]:
+        out = []
+        for ask in asks:
+            if _singles(ask):
+                rooms, room_net = ask.adult, D("45")
+            else:  # the twin cell: the doubles asked, else the default mix of an even party
+                rooms = sum(r.count for r in ask.rooms) if ask.rooms else ask.adult // 2
+                room_net = D("60")
+            part = _room_part(room_net * rooms, rooms, room_currency)
+            cost = [(D("50") * ask.adult + room_net * rooms, "USD")]
+            out.append(LineCost(kind="trip_plan", costs=cost, parts=[part]))
+        return out
+
+    return price_lines
+
+
+@pytest.mark.asyncio
+async def test_an_odd_party_is_priced_sharing_twin_rooms_and_pays_no_more_per_person_than_two(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: list[LineAsk] = []
+    lines = _hotel_lines()
+
+    async def price_lines(conn: Any, asks: list[LineAsk], **kw: Any) -> list[LineCost]:
+        asked.extend(asks)
+        return await lines(conn, asks, **kw)
+
+    monkeypatch.setattr(tariff, "price_lines", price_lines)
+    rows = [_row(PLAN_A, "tour-a", 1, 1), _row(PLAN_A, "tour-a", 2, 2), _row(PLAN_A, "tour-a", 3, 3)]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    twin = {a.adult: a.rooms for a in asked if not _singles(a)}
+    assert twin == {1: (RoomAsk("double", 1),), 2: (), 3: (RoomAsk("double", 2),)}  # an even party: the default mix
+    per_person = {i["pax_min"]: i["price_per_person"]["amount"] for i in out["items"]}
+    basis = _basis(agency_pricing.NO_TERMS)
+    # 2 travellers: 2 x 50 + one double 60 = 160 net = 80 a person, the same net for 3 sharing (150 + 1.5 doubles).
+    two = quotes.price_line(basis, LineCost(kind="trip_plan", costs=[(D("160"), "USD")]), PLAN_A).b2b_price
+    three = quotes.price_line(basis, LineCost(kind="trip_plan", costs=[(D("240"), "USD")]), PLAN_A).b2b_price
+    assert per_person[2] == str(tariff.per_person(two, 2, "USD"))
+    assert per_person[3] == str(tariff.per_person(three, 3, "USD")) == per_person[2]
+    one = quotes.price_line(basis, LineCost(kind="trip_plan", costs=[(D("80"), "USD")]), PLAN_A).b2b_price
+    assert per_person[1] == str(tariff.per_person(one, 1, "USD"))  # a party of one: the twin share too
+    # The supplement is a single (45) less half a double (30) a night, the same for every band.
+    supplements = {i["pax_min"]: i["single_supplement_per_person"]["amount"] for i in out["items"]}
+    assert len(set(supplements.values())) == 1 and D(supplements[1]) > 0
+
+
+@pytest.mark.asyncio
+async def test_a_hotel_night_in_two_currencies_cannot_be_split_and_the_odd_band_is_unpriced(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tariff, "price_lines", _hotel_lines(room_currency=None))
+    rows = [_row(PLAN_A, "tour-a", 2, 2), _row(PLAN_A, "tour-a", 3, 3)]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    assert [i["pax_min"] for i in out["items"]] == [2]
+    assert out["unpriced"] == [{**out["unpriced"][0], "pax_min": 3, "reason": tariff.MIXED_ROOM_CURRENCY}]
+
+
+def test_twin_share_halves_one_double_room_night_per_hotel_night_only_for_an_odd_party() -> None:
+    cost = LineCost(kind="trip_plan", costs=[(D("270"), "USD")], parts=[_room_part(D("120"), 2)])
+    assert tariff.twin_share(cost, 2) is cost
+    shared = tariff.twin_share(cost, 3)
+    assert isinstance(shared, LineCost) and shared.costs == [(D("270"), "USD"), (D("-30"), "USD")]
+    assert cost.costs == [(D("270"), "USD")]  # the asked line is not changed
+    service_only = LineCost(kind="trip_plan", costs=[(D("150"), "USD")])
+    assert tariff.twin_share(service_only, 3) is service_only
+
+
+@pytest.mark.parametrize(
+    ("pax_max", "expected"),
+    [(1, "available"), (7, "available"), (8, "available"), (9, "on_request"), (10, "on_request"), (None, "on_request")],
+)
+def test_a_band_reaching_the_group_size_is_on_request(pax_max: int | None, expected: str) -> None:
+    assert tariff.row_availability(pax_max, 9) == expected
+
+
+@pytest.mark.asyncio
+async def test_rows_carry_availability_counts_and_the_policy_group_size(wired: dict[str, Any]) -> None:
+    rows = [_row(PLAN_A, "tour-a", 5, 7), _row(PLAN_A, "tour-a", 8, 10), _row(PLAN_A, "tour-a", 11, None)]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    assert [(i["pax_min"], i["availability"]) for i in out["items"]] == [
+        (5, "available"),
+        (8, "on_request"),  # D5: 8-10 and 11+ show "On request" (the policy quotes 9 or more on request)
+        (11, "on_request"),
+    ]
+    assert out["group_on_request_min_pax"] == 9 and out["early_booking_days"] is None
+    assert (out["tours_priced"], out["catalog_tours"]) == (1, 844)
+    view = tariff.agency_view(out)
+    assert view["tours_priced"] == 1 and view["catalog_tours"] == 844 and view["group_on_request_min_pax"] == 9
+    one = await tariff.build(Conn(rows[:1]), partner_id="p", currency="USD", on=ON, source_id="tour-a")
+    assert one["catalog_tours"] is None  # a one-tour read does not count the catalog
+
+
+@pytest.mark.asyncio
+async def test_a_departure_with_a_price_adjustment_flags_its_row(wired: dict[str, Any]) -> None:
+    wired["adjusted"] = {PLAN_A: [date(2026, 12, 20)]}
+    rows = [_row(PLAN_A, "tour-a", 2, 2), _row(PLAN_B, "tour-b", 2, 2)]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    assert [(i["tour"]["source_id"], i["departure_adjusted"]) for i in out["items"]] == [
+        ("tour-a", True),
+        ("tour-b", False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_season_label_comes_from_the_plan_calendar_once_configured(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calendar = seasons.Calendar(id="cal-1", fixed=(seasons.Span(date(2026, 12, 1), date(2027, 2, 1), "high"),))
+
+    async def for_plans(conn: Any, plan_ids: Any) -> dict[str, seasons.Calendar]:
+        return {p: calendar for p in plan_ids}
+
+    monkeypatch.setattr(seasons, "for_plans", for_plans)
+    out = await tariff.build(Conn([_row(PLAN_A, "tour-a", 2, 2)]), partner_id="p", currency="USD", on=ON)
+    got = [(i["season"], i["valid_from"], i["valid_to"]) for i in out["items"]]
+    # Same price in low and high (no peak uplift), still one row per season: never joined across a season change.
+    assert got == [
+        ("low", ON, date(2026, 11, 30)),
+        ("high", date(2026, 12, 1), date(2027, 1, 31)),
+        ("low", date(2027, 2, 1), date(2027, 3, 31)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_without_an_approved_group_size_the_tariff_is_aas_side() -> None:
+    class PolicyConn:
+        async def fetch(self, sql: str, *args: Any) -> list[Any]:
+            return []  # no approved policy value in force
+
+    with pytest.raises(B2BError) as err:
+        await tariff.group_min_pax(PolicyConn(), ON)
+    assert err.value.error == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_the_rrp_of_an_odd_computed_band_is_on_the_twin_share_basis_too(
+    wired: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AA-1188 (D5): the cost sheet prices an odd band in the default mix (one traveller alone), so its matrix RRP
+    carries a single room; beside a twin share price it is scaled to the twin share. Even bands and hand rows keep the
+    matrix RRP."""
+    monkeypatch.setattr(tariff, "price_lines", _hotel_lines())
+    rows = [
+        _row(PLAN_A, "tour-a", 2, 2),
+        _row(PLAN_A, "tour-a", 3, 3, rrp_amount=D("160.00")),
+        _row(PLAN_B, "tour-b", 3, 3, rrp_amount=D("160.00"), computed=False),  # a hand row: staff's twin share
+    ]
+    out = await tariff.build(Conn(rows), partner_id="p", currency="USD", on=ON)
+    rrp = {(i["tour"]["source_id"], i["pax_min"]): i["rrp_per_person"]["amount"] for i in out["items"]}
+    assert rrp[("tour-a", 2)] == "150.00" and rrp[("tour-b", 3)] == "160.00"
+    three = next(i for i in out["items"] if i["tour"]["source_id"] == "tour-a" and i["pax_min"] == 3)
+    pp, supplement = D(three["price_per_person"]["amount"]), D(three["single_supplement_per_person"]["amount"])
+    expected = engine.round_price(D("160") * pp / (pp + supplement / 3), "USD", {"USD": D("5")})
+    assert D(rrp[("tour-a", 3)]) == expected < D("160")
+
+
+@pytest.mark.parametrize(
+    ("party", "extra", "supplement", "increments", "expected"),
+    [
+        (2, {}, D("20"), {"USD": D("5")}, D("150.00")),  # an even band: as the matrix
+        (3, {"overridden": True}, D("20"), {"USD": D("5")}, D("150.00")),  # staff's price
+        (3, {"computed": False}, D("20"), {"USD": D("5")}, D("150.00")),  # a hand row
+        (3, {}, D("0"), {"USD": D("5")}, D("150.00")),  # no hotel room: nothing to share
+        (3, {}, None, {"USD": D("5")}, None),  # no single rate: no RRP rather than a wrong one
+        (3, {}, D("30"), {}, None),  # no rounding increment in the policy
+        (3, {}, D("30"), {"USD": D("5")}, D("140.00")),  # 150 x 100 / (100 + 10) = 136.36... -> 140, up
+        (1, {}, D("30"), {"USD": D("1")}, D("116.00")),  # one traveller: 150 x 100 / 130 = 115.38... -> 116
+        (3, {"rrp_amount": None}, D("30"), {"USD": D("5")}, None),
+    ],
+)
+def test_twin_rrp(
+    party: int, extra: dict[str, Any], supplement: D | None, increments: dict[str, D], expected: D | None
+) -> None:
+    row = _row(PLAN_A, "tour-a", party, party, **extra)
+    assert tariff.twin_rrp(row, party, D("100"), supplement, increments) == expected
