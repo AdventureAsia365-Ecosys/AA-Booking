@@ -194,8 +194,13 @@ function PriceSetupCard() {
           {tr("Open the price setup")}
         </Link>
       </div>
-      <p className="text-[13px] text-muted">
-        {d ? `${tr("{0} of {1} tours ready to buy", done, served)} ` : null}
+      {/* AA-1190 (S296 live check): the count and the explanation are two lines, never one run-on sentence */}
+      {d ? (
+        <p className="text-sm font-semibold text-ink" data-testid="my-work-price-setup-ready">
+          {tr("{0} of {1} tours ready to buy", done, served)}
+        </p>
+      ) : null}
+      <p className="text-[13px] text-muted" data-testid="my-work-price-setup-help">
         {tr("Tours by their next price setup step. Each number opens the price setup with that step.")}
       </p>
       {q.isError ? (

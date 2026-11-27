@@ -7,11 +7,15 @@
 // soon" tile's list on Suppliers (every contract kind, the e-mail state) and a supplier's own list fit 390 px. AA-1190:
 // the tiles with nothing waiting fold into one line that opens on click; the new approval tiles and the overdue trip
 // checks split into yours / no owner link to their filtered lists; the price setup progress card links each step.
+// AA-1190 (S296 live check): the card's count and its explanation are two separate lines; and every tile, CLICKED
+// (a client-side <Link> navigation), makes the same filtered reads as a direct load of its link (the CIS Review Queue
+// and Data erasure pages opened unfiltered on a click because they read window.location once; this keeps Booking's
+// targets from doing the same).
 // Screenshots (1440 light / dark, 390 light / dark) land in $LAYOUT_SHOTS_DIR/my-work-*.png.
 
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { answer, CLOCK } from "./fixtures";
+import { answer, CLOCK, MY_WORK } from "./fixtures";
 import { OUT } from "./paths";
 
 function fakeAccessToken(): string {
@@ -74,7 +78,10 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(tile(page, "holiday_events_to_approve")).toHaveAttribute("href", "/pricing/holiday-events?approvable=me");
       // AA-1190: the price setup progress card: only the steps with plans, each opening the workbench on that step
       const setup = page.getByTestId("my-work-price-setup");
-      await expect(setup).toContainText("30 of 55 tours ready to buy");
+      await expect(page.getByTestId("my-work-price-setup-ready")).toHaveText("30 of 55 tours ready to buy");
+      await expect(page.getByTestId("my-work-price-setup-help")).toHaveText(/^Tours by their next price setup step\./);
+      await expect(setup).not.toContainText("ready to buy Tours");
+      await setup.screenshot({ path: path.join(OUT, `my-work-price-setup-1440-${scheme}.png`) });
       await expect(page.getByTestId("my-work-price-setup-add_components")).toHaveAttribute("href", "/pricing/workbench?next_step=add_components");
       await expect(page.getByTestId("my-work-price-setup-load_rates")).toContainText("7");
       await expect(page.getByTestId("my-work-price-setup-approve_fx")).toHaveCount(0);
@@ -153,3 +160,66 @@ test("the contracts ending soon list: every kind on Suppliers, phone width witho
   await page.screenshot({ path: path.join(OUT, "suppliers-contracts-ending-390-light.png"), fullPage: true });
   expect(errors).toEqual([]);
 });
+
+// --- AA-1190: a tile click opens its list filtered, exactly like a direct load of its link -------------------------
+
+const QUIET_MS = 800;
+const SETTLE_CAP_MS = 8_000;
+
+/** Records the BFF reads (/api/booking/<path>?query) and waits until none has been in flight for a while. */
+function recorder(page: Page, origin: string) {
+  const seen: string[] = [];
+  let inflight = 0;
+  let last = Date.now();
+  let on = false;
+  const isApi = (u: string) => u.startsWith(origin) && new URL(u).pathname.startsWith("/api/booking/");
+  page.on("request", (r) => {
+    if (!isApi(r.url())) return;
+    inflight++;
+    last = Date.now();
+    if (on) { const u = new URL(r.url()); seen.push(`${u.pathname}${u.search}`); }
+  });
+  const done = (r: { url(): string }) => { if (isApi(r.url())) { inflight = Math.max(0, inflight - 1); last = Date.now(); } };
+  page.on("requestfinished", done);
+  page.on("requestfailed", done);
+  return {
+    // the quiet window starts now: a page whose first read only starts after hydration is still waited for
+    start() { seen.length = 0; on = true; last = Date.now(); },
+    async settle(): Promise<string[]> {
+      const t0 = Date.now();
+      while (Date.now() - t0 < SETTLE_CAP_MS && (inflight > 0 || Date.now() - last < QUIET_MS)) await page.waitForTimeout(100);
+      on = false;
+      return [...seen];
+    },
+  };
+}
+
+const pathOf = (read: string) => read.split("?")[0];
+
+for (const t of MY_WORK.tiles.filter((x) => Object.keys(x.filter).length > 0)) {
+  test(`tile ${t.key}: a click opens its list with the same filtered reads as a direct load`, async ({ page, baseURL }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await prepare(page, baseURL!);
+    const rec = recorder(page, new URL(baseURL!).origin);
+    // the dashboard's own reads (the shell and the band): the target's reads are the others
+    rec.start();
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(tile(page, "supplier_bills_to_approve")).toContainText("5");
+    const dashboard = new Set((await rec.settle()).map(pathOf));
+    if (!(await tile(page, t.key).count())) await page.getByTestId("my-work-empty-toggle").click();
+    const link = tile(page, t.key);
+    const target = (await link.getAttribute("href")) ?? "";
+    expect(target.startsWith("/") && target.includes("?"), `${t.key} links to ${target}`).toBe(true);
+
+    rec.start();
+    await link.click();
+    await page.waitForURL((u) => `${u.pathname}${u.search}` === target, { timeout: 20_000 });
+    const clicked = await rec.settle();
+
+    rec.start();
+    await page.goto(target, { waitUntil: "domcontentloaded" });
+    const direct = (await rec.settle()).filter((r) => !dashboard.has(pathOf(r)));
+    expect(direct.length, `${target}: a direct load makes no read of its own`).toBeGreaterThan(0);
+    for (const r of new Set(direct)) expect(clicked, `${target}: a direct load reads ${r}; after the click it did not`).toContain(r);
+  });
+}

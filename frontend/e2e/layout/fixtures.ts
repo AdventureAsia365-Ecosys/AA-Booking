@@ -2105,7 +2105,7 @@ function financeAnswer(p: string, seg: string[]): FixtureAnswer | null {
 }
 
 // AA-1159: the My work band (one tile per queue of the admin fixture's capabilities; invented numbers).
-const MY_WORK: MyWorkSummary = {
+export const MY_WORK: MyWorkSummary = {
   role: "admin",
   generated_at: "2026-10-23T01:55:00Z",
   tiles: [
