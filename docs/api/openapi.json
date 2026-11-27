@@ -21373,7 +21373,7 @@
             }
           },
           {
-            "description": "only the versions the caller may approve (AA-1190 My work)",
+            "description": "only the versions the caller may approve (My work)",
             "in": "query",
             "name": "approvable",
             "required": false,
@@ -21387,7 +21387,7 @@
                   "type": "null"
                 }
               ],
-              "description": "only the versions the caller may approve (AA-1190 My work)",
+              "description": "only the versions the caller may approve (My work)",
               "title": "Approvable"
             }
           }
@@ -27405,7 +27405,7 @@
             }
           },
           {
-            "description": "only the waiting changes the caller may approve (AA-1190 My work)",
+            "description": "only the waiting changes the caller may approve (My work)",
             "in": "query",
             "name": "approvable",
             "required": false,
@@ -27419,7 +27419,7 @@
                   "type": "null"
                 }
               ],
-              "description": "only the waiting changes the caller may approve (AA-1190 My work)",
+              "description": "only the waiting changes the caller may approve (My work)",
               "title": "Approvable"
             }
           }

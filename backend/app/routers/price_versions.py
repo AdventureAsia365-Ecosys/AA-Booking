@@ -164,7 +164,7 @@ async def pending_versions(
     pool: Pool,
     status: Annotated[Literal["pending"], Query()] = "pending",
     approvable: Annotated[
-        Literal["me"] | None, Query(description="only the versions the caller may approve (AA-1190 My work)")
+        Literal["me"] | None, Query(description="only the versions the caller may approve (My work)")
     ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
@@ -342,7 +342,7 @@ async def list_events(
     country: Annotated[str | None, Query(pattern=r"^[A-Za-z]{2}$")] = None,
     year: Annotated[int | None, Query(ge=2000, le=2100)] = None,
     approvable: Annotated[
-        Literal["me"] | None, Query(description="only the waiting changes the caller may approve (AA-1190 My work)")
+        Literal["me"] | None, Query(description="only the waiting changes the caller may approve (My work)")
     ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
