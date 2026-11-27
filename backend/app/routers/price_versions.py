@@ -341,9 +341,12 @@ async def list_events(
     pool: Pool,
     country: Annotated[str | None, Query(pattern=r"^[A-Za-z]{2}$")] = None,
     year: Annotated[int | None, Query(ge=2000, le=2100)] = None,
+    approvable: Annotated[
+        Literal["me"] | None, Query(description="only the waiting changes the caller may approve (AA-1190 My work)")
+    ] = None,
 ) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return await seasons_admin.list_events(conn, staff, country, year)
+        return await seasons_admin.list_events(conn, staff, country, year, approvable=approvable == "me")
 
 
 @router.post("/booking/pricing/holiday-events", status_code=201)

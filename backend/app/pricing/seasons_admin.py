@@ -94,33 +94,64 @@ def _last(end: date | None) -> date | None:
     return None if end is None else end - ONE_DAY
 
 
-# AA-1190 My work: every season change waiting for a second person (the Seasons page's "Waiting" tile: the waiting
-# ranges of every calendar plus each calendar's proposed default season) and when the oldest was asked.
-SEASONS_WAITING_SQL = f"""
-SELECT (SELECT count(*) FROM booking.season_ranges r WHERE {RANGE_WAITING})::int
-     + (SELECT count(*) FROM booking.season_calendars c WHERE c.pending_default_season IS NOT NULL)::int AS count,
+# AA-1190 My work: the season and holiday changes waiting for a second person that the caller may approve, the
+# approve paths' own maker-checker (:func:`decide_range`, :func:`decide_default`, :func:`decide_event`, :func:`_end`):
+# never a proposal or a removal request of their own, except the business owner's own proposal while she may
+# self-approve (AA-1158 Q5: a season range, a default season, a holiday event; never a stop-sale range nor a removal);
+# a stop-sale range (and its removal) only with ``stop_sale.approve`` (AA-1150). ``$1`` the caller, ``$2`` may
+# self-approve, ``$3`` holds stop_sale.approve (:func:`approver`; the event filter takes only ``$1, $2``). The Seasons page (each calendar's ``approvable``,
+# ``?approvable=me``) and the Holiday events page (``?approvable=me``) show the same rows, so a tile equals its list.
+RANGE_APPROVABLE = (
+    "((r.kind <> 'stop_sale' OR $3::boolean) AND ("
+    "(r.status = 'pending' AND (r.created_by IS DISTINCT FROM $1::text OR ($2::boolean AND r.kind = 'season')))"
+    " OR (r.status = 'approved' AND r.end_requested_at IS NOT NULL AND r.ended_at IS NULL"
+    " AND r.end_requested_by IS DISTINCT FROM $1::text)))"
+)
+DEFAULT_APPROVABLE = (
+    "(c.pending_default_season IS NOT NULL AND (c.default_requested_by IS DISTINCT FROM $1::text OR $2::boolean))"
+)
+EVENT_APPROVABLE = (
+    "(e.ended_at IS NULL AND ((e.status = 'pending' AND (e.created_by IS DISTINCT FROM $1::text OR $2::boolean))"
+    " OR (e.status = 'approved' AND e.end_requested_at IS NOT NULL AND e.end_requested_by IS DISTINCT FROM $1::text)))"
+)
+SEASONS_APPROVABLE_SQL = f"""
+SELECT (SELECT count(*) FROM booking.season_ranges r WHERE {RANGE_APPROVABLE})::int
+     + (SELECT count(*) FROM booking.season_calendars c WHERE {DEFAULT_APPROVABLE})::int AS count,
        LEAST(
-         (SELECT min(coalesce(r.end_requested_at, r.created_at)) FROM booking.season_ranges r WHERE {RANGE_WAITING}),
-         (SELECT min(c.default_requested_at) FROM booking.season_calendars c WHERE c.pending_default_season IS NOT NULL)
+         (SELECT min(coalesce(r.end_requested_at, r.created_at)) FROM booking.season_ranges r WHERE {RANGE_APPROVABLE}),
+         (SELECT min(c.default_requested_at) FROM booking.season_calendars c WHERE {DEFAULT_APPROVABLE})
        ) AS oldest_at
 """  # noqa: S608 — constants only
-# A holiday event change waiting for a second person: proposed, or its removal asked (state pending / ending; the
-# Holiday events page's ``?state=waiting`` view).
-EVENT_WAITING = "(e.ended_at IS NULL AND (e.status = 'pending' OR e.end_requested_at IS NOT NULL))"
-EVENTS_WAITING_SQL = f"""
-SELECT count(*)::int AS count, min(coalesce(e.end_requested_at, e.created_at)) AS oldest_at
-FROM booking.holiday_events e WHERE {EVENT_WAITING}
+# Per calendar: its approvable ranges plus its approvable default season change (the Seasons page's column).
+CALENDARS_APPROVABLE_SQL = f"""
+SELECT id::text AS id, sum(n)::int AS n FROM (
+  SELECT r.calendar_id AS id, count(*) AS n FROM booking.season_ranges r WHERE {RANGE_APPROVABLE} GROUP BY 1
+  UNION ALL
+  SELECT c.id, 1 FROM booking.season_calendars c WHERE {DEFAULT_APPROVABLE}
+) t GROUP BY id
 """  # noqa: S608 — constants only
-WAITING_STATES = ("pending", "ending")
+EVENTS_APPROVABLE_SQL = f"""
+SELECT count(*)::int AS count, min(coalesce(e.end_requested_at, e.created_at)) AS oldest_at
+FROM booking.holiday_events e WHERE {EVENT_APPROVABLE}
+"""  # noqa: S608 — constants only
 
 
-async def seasons_waiting_queue(conn: asyncpg.Connection) -> dict[str, Any]:
-    row = await conn.fetchrow(SEASONS_WAITING_SQL)
+async def approver(conn: asyncpg.Connection, staff: Staff) -> tuple[str, bool, bool]:
+    """The ``$1, $2, $3`` of the approvable filters: the caller, whether they may approve their own proposal now
+    (:func:`app.auth.self_approval.may_self_approve`) and whether they review stop-sales."""
+    own = await self_approval.may_self_approve(conn, staff)
+    return staff.cis_user_id, own, staff.can("stop_sale.approve")
+
+
+async def seasons_waiting_queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    """The season changes (ranges, their removals, default seasons) ``staff`` may approve, and the oldest ask."""
+    row = await conn.fetchrow(SEASONS_APPROVABLE_SQL, *(await approver(conn, staff)))
     return {"count": row["count"], "oldest_at": row["oldest_at"]}
 
 
-async def events_waiting_queue(conn: asyncpg.Connection) -> dict[str, Any]:
-    row = await conn.fetchrow(EVENTS_WAITING_SQL)
+async def events_waiting_queue(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    """The holiday event changes (proposals, removals) ``staff`` may approve, and the oldest ask."""
+    row = await conn.fetchrow(EVENTS_APPROVABLE_SQL, *(await approver(conn, staff))[:2])  # an event has no stop-sale
     return {"count": row["count"], "oldest_at": row["oldest_at"]}
 
 
@@ -246,6 +277,13 @@ async def list_calendars(conn: asyncpg.Connection, staff: Staff, owner_kind: str
         CALENDARS_SQL + " WHERE ($1::text IS NULL OR c.owner_kind = $1) ORDER BY c.owner_kind, c.name", owner_kind
     )
     items = await _people(conn, [calendar_out(r) for r in rows], CALENDAR_PEOPLE)
+    # AA-1190: each calendar's waiting changes the caller may approve (0 without season.approve); the page's
+    # ``?approvable=me`` view and the My work tile "Season changes to approve" read the same filter
+    mine: dict[str, int] = {}
+    if staff.can("season.approve"):
+        mine = {r["id"]: r["n"] for r in await conn.fetch(CALENDARS_APPROVABLE_SQL, *(await approver(conn, staff)))}
+    for item in items:
+        item["approvable"] = mine.get(item["id"], 0)
     return {"items": items, "season_codes": list(seasons.SEASON_CODES), **(await season_sync.last_run(conn))}
 
 
@@ -564,14 +602,31 @@ async def _end(conn: asyncpg.Connection, table: str, row: Any, staff: Staff, act
 # ── Holiday events ───────────────────────────────────────────────────────────
 
 
-async def list_events(conn: asyncpg.Connection, staff: Staff, country: str | None, year: int | None) -> dict[str, Any]:
+async def list_events(
+    conn: asyncpg.Connection, staff: Staff, country: str | None, year: int | None, *, approvable: bool = False
+) -> dict[str, Any]:
+    """The events, by date. ``approvable`` (``?approvable=me``, AA-1190 My work): only the waiting changes the caller
+    may approve (:data:`EVENT_APPROVABLE`; none without season.approve)."""
     _read(staff)
-    rows = await conn.fetch(
-        EVENTS_SQL + " WHERE ($1::text IS NULL OR e.country_iso2 = $1) AND ($2::int IS NULL OR e.year = $2)"
-        " ORDER BY e.date_from, e.country_iso2, e.code",
-        (country or "").upper() or None,
-        year,
-    )
+    order = " ORDER BY e.date_from, e.country_iso2, e.code"
+    country = (country or "").upper() or None
+    if not approvable:
+        rows = await conn.fetch(
+            EVENTS_SQL + " WHERE ($1::text IS NULL OR e.country_iso2 = $1)"
+            " AND ($2::int IS NULL OR e.year = $2)" + order,
+            country,
+            year,
+        )
+    elif staff.can("season.approve"):
+        rows = await conn.fetch(
+            EVENTS_SQL + f" WHERE {EVENT_APPROVABLE} AND ($3::text IS NULL OR e.country_iso2 = $3)"
+            " AND ($4::int IS NULL OR e.year = $4)" + order,
+            *(await approver(conn, staff))[:2],
+            country,
+            year,
+        )
+    else:
+        rows = []
     countries = await conn.fetch("SELECT iso2::text AS iso2, name FROM booking.countries ORDER BY name")
     return {
         "items": await _people(conn, [event_out(r) for r in rows], CHANGE_PEOPLE),

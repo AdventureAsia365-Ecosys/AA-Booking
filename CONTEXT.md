@@ -2999,8 +2999,9 @@ on a Bedrock / vendor SDK call, a vendor SDK import or a vendor endpoint in `bac
   own (`owner=me`, `ops.read`) and the unowned ones (`owner=none`, `ops.write`); more approval tiles: price versions to
   approve (`price_version.approve`, `GET /catalog/price-versions?status=pending&approvable=me`, opened on the price setup
   page with `?pending_versions=me`), add-ons to publish (`addon.approve`, `/add-ons?approvable=me`), season changes
-  (`season.approve`, the Seasons page's "Waiting" tile) and holiday events waiting for a second person
-  (`/pricing/holiday-events?state=waiting`). The price setup makers (`price_version.write` + `pricing.read`) also get a
+  (`season.approve`, `/pricing/seasons?approvable=me`) and holiday event changes
+  (`/pricing/holiday-events?approvable=me`), each only the changes the viewer may approve (never their own, unless the
+  business owner may self-approve). The price setup makers (`price_version.write` + `pricing.read`) also get a
   **Price setup progress** card (`GET /booking/my-work/price-setup`: the trip plans per next step of the price
   workbench, each step opening `/pricing/workbench?next_step=<step>`). Below My work the sales block is open for
   `trip_case.write` holders and folded under "Sales overview" for the others; the Inactive staff tile follows

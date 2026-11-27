@@ -283,8 +283,9 @@ def test_summary_answers_each_tile_with_its_filter(make_client, stubbed) -> None
     assert tiles["price_versions_to_approve"]["count"] == 10 and tiles["addons_to_publish"]["count"] == 11
     assert tiles["addons_to_publish"]["filter"] == {"approvable": "me"}
     assert [kw for name, kw in stubbed if name == "addons"] == [{"approvable_by": "a-1"}]
-    assert tiles["season_changes_to_approve"]["filter"] == {} and tiles["season_changes_to_approve"]["count"] == 12
-    assert tiles["holiday_events_to_approve"]["filter"] == {"state": "waiting"}
+    assert tiles["season_changes_to_approve"]["filter"] == {"approvable": "me"}
+    assert tiles["season_changes_to_approve"]["count"] == 12
+    assert tiles["holiday_events_to_approve"]["filter"] == {"approvable": "me"}
     assert tiles["holiday_events_to_approve"]["group"] == "approve"
     assert tiles["supplier_bills_due_soon"]["days"] == 3
     assert tiles["supplier_bills_due_soon"]["filter"] == {"bill_status": "open", "bill_due": "soon"}
@@ -394,18 +395,77 @@ async def test_the_new_approval_queues_share_their_lists_where() -> None:
     assert await addons.publish_queue(offers, approvable_by="u-5") == {"count": 2, "oldest_at": stamp}
     assert addons.OFFER_SQL.strip()[:40] in offers.calls[0][0] and offers.calls[0][1] == ("u-5",)
     assert seasons_admin.RANGE_WAITING in seasons_admin.CALENDARS_SQL
-    assert seasons_admin.RANGE_WAITING in seasons_admin.SEASONS_WAITING_SQL
-    assert "pending_default_season IS NOT NULL" in seasons_admin.SEASONS_WAITING_SQL
-    # the holiday "waiting" view = the states pending and ending (seasons_admin.state)
-    for status, end_req, ended, waiting in (
-        ("pending", None, None, True),
-        ("approved", stamp, None, True),
-        ("approved", None, None, False),
-        ("approved", stamp, stamp, False),
-        ("rejected", None, None, False),
-    ):
-        row = {"status": status, "end_requested_at": end_req, "ended_at": ended}
-        assert (seasons_admin.state(row) in seasons_admin.WAITING_STATES) is waiting, row
+    # AA-1190: the season tile and the Seasons page's per-calendar column share the approvable filters
+    for fragment in (seasons_admin.RANGE_APPROVABLE, seasons_admin.DEFAULT_APPROVABLE):
+        assert fragment in seasons_admin.SEASONS_APPROVABLE_SQL
+        assert fragment in seasons_admin.CALENDARS_APPROVABLE_SQL
+    assert seasons_admin.EVENT_APPROVABLE in seasons_admin.EVENTS_APPROVABLE_SQL
+
+
+# ── AA-1190: the season and holiday tiles follow the approve paths' maker-checker ──
+
+
+def _placeholders_match(conn: ScriptedConn) -> None:
+    """Each recorded query takes exactly the arguments it was given (asyncpg refuses a count mismatch; the fake
+    does not)."""
+    for sql, args in conn.calls:
+        used = {int(n) for n in re.findall(r"\$(\d+)", sql)}
+        assert used == set(range(1, len(args) + 1)), (sql[:80], args)
+
+
+@pytest.mark.parametrize(
+    ("staff", "owner", "expected"),
+    [
+        (CONTRACTING, False, ("u-5", False, True)),  # reviews stop-sales, never self-approves
+        (CONTRACTING, True, ("u-5", True, True)),  # the business owner while the switch is on
+        (SALES, False, ("u-1", False, False)),  # no stop_sale.approve: its stop-sale ranges are left out
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_season_and_holiday_queues_pass_the_approver(monkeypatch, staff, owner, expected) -> None:
+    async def _owner(_conn: Any, _staff: Staff, kind: str = "approve") -> bool:
+        return owner
+
+    monkeypatch.setattr(seasons_admin.self_approval, "may_self_approve", _owner)
+    stamp = datetime(2026, 11, 2, 8, 0)
+    conn = ScriptedConn().on("AS oldest_at", {"count": 3, "oldest_at": stamp})
+    assert await seasons_admin.seasons_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert await seasons_admin.events_waiting_queue(conn, staff) == {"count": 3, "oldest_at": stamp}
+    assert [args for _, args in conn.calls] == [expected, expected[:2]]  # an event has no stop-sale
+    _placeholders_match(conn)
+
+
+def test_the_approvable_filters_mirror_the_approve_paths() -> None:
+    ranges = seasons_admin.RANGE_APPROVABLE
+    # a proposal: never one's own, unless the business owner may self-approve a season range (never a stop-sale)
+    assert "r.created_by IS DISTINCT FROM $1::text OR ($2::boolean AND r.kind = 'season')" in ranges
+    # a removal: never one's own request, no self-approval
+    assert "r.end_requested_by IS DISTINCT FROM $1::text)" in ranges
+    # a stop-sale range (and its removal) only for a stop-sale reviewer
+    assert ranges.startswith("((r.kind <> 'stop_sale' OR $3::boolean)")
+    assert "c.default_requested_by IS DISTINCT FROM $1::text OR $2::boolean" in seasons_admin.DEFAULT_APPROVABLE
+    events = seasons_admin.EVENT_APPROVABLE
+    assert "e.created_by IS DISTINCT FROM $1::text OR $2::boolean" in events
+    assert "e.end_requested_by IS DISTINCT FROM $1::text)" in events
+
+
+@pytest.mark.asyncio
+async def test_the_holiday_list_approvable_view(monkeypatch) -> None:
+    async def _owner(*_args: Any, **_kw: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(seasons_admin.self_approval, "may_self_approve", _owner)
+    conn = ScriptedConn()
+    await seasons_admin.list_events(conn, CONTRACTING, "vn", 2027, approvable=True)
+    _placeholders_match(conn)
+    listed = [(sql, args) for sql, args in conn.calls if "FROM booking.holiday_events e" in sql]
+    assert len(listed) == 1 and listed[0][1] == ("u-5", False, "VN", 2027)
+    assert " ".join(seasons_admin.EVENT_APPROVABLE.split()) in listed[0][0]
+    # without season.approve the view is empty (no query of the events)
+    assert FINANCE.can("pricing.read") and not FINANCE.can("season.approve")
+    none = ScriptedConn()
+    assert (await seasons_admin.list_events(none, FINANCE, None, None, approvable=True))["items"] == []
+    assert not [sql for sql, _ in none.calls if "FROM booking.holiday_events e" in sql]
 
 
 def test_a_tile_that_cannot_be_read_says_so_and_the_others_load(make_client, stubbed, monkeypatch) -> None:

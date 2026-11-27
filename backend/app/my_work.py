@@ -22,8 +22,8 @@ due date among them (``earliest_due``), and the query string of the list page th
     supplier_bank_to_approve    supplier_bank.approve   approve   /suppliers?bank=pending&approvable=me
     price_versions_to_approve   price_version.approve   approve   /pricing/workbench?pending_versions=me
     addons_to_publish           addon.approve           approve   /add-ons?approvable=me
-    season_changes_to_approve   season.approve          approve   /pricing/seasons (its "Waiting" tile)
-    holiday_events_to_approve   season.approve          approve   /pricing/holiday-events?state=waiting
+    season_changes_to_approve   season.approve          approve   /pricing/seasons?approvable=me
+    holiday_events_to_approve   season.approve          approve   /pricing/holiday-events?approvable=me
     contracts_ending_soon       supply.write            work      /suppliers?contracts=ending (the expiring list)
     owner_self_approvals        audit.read              work      /audit-log?owner_self_approved=true&from=<month start>
 
@@ -38,8 +38,9 @@ self-approve (:mod:`app.auth.self_approval`).
 
 The approval tiles count only the items the caller may act on (maker-checker: not entered, last changed, recorded or
 asked to end by them), with the same ``approvable=me`` / ``review=me`` filter their page applies. AA-1190: the season
-and holiday tiles count every change waiting for a second person, as their pages do (those pages have no
-``approvable=me`` view yet; the remaining approval tiles and that filter are a later slice).
+and holiday tiles leave out the caller's own proposals and removal requests (the business owner's own proposal stays
+in while she may self-approve, never a stop-sale range or a removal) and a stop-sale range for a caller without
+``stop_sale.approve``, the approve paths' rules (``seasons_admin.RANGE_APPROVABLE`` and its siblings).
 
 AA-1190 (slice 1): the price setup progress card (``GET /booking/my-work/price-setup``, :func:`price_setup`) counts
 the trip plans per next step of the price workbench (``app.catalog.price_workbench``, its own summary, so the card and
@@ -184,12 +185,12 @@ async def _addons_to_publish(conn: asyncpg.Connection, staff: Staff) -> dict[str
     return await addons.publish_queue(conn, approvable_by=staff.cis_user_id)
 
 
-async def _season_changes(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await seasons_admin.seasons_waiting_queue(conn)
+async def _season_changes(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await seasons_admin.seasons_waiting_queue(conn, staff)
 
 
-async def _holiday_events(conn: asyncpg.Connection, _: Staff) -> dict[str, Any]:
-    return await seasons_admin.events_waiting_queue(conn)
+async def _holiday_events(conn: asyncpg.Connection, staff: Staff) -> dict[str, Any]:
+    return await seasons_admin.events_waiting_queue(conn, staff)
 
 
 @dataclass(frozen=True)
@@ -269,8 +270,8 @@ TILES: tuple[Tile, ...] = (
         {"pending_versions": "me"},
     ),
     Tile("addons_to_publish", "addon.approve", APPROVE, _addons_to_publish, {"approvable": "me"}),
-    Tile("season_changes_to_approve", "season.approve", APPROVE, _season_changes),
-    Tile("holiday_events_to_approve", "season.approve", APPROVE, _holiday_events, {"state": "waiting"}),
+    Tile("season_changes_to_approve", "season.approve", APPROVE, _season_changes, {"approvable": "me"}),
+    Tile("holiday_events_to_approve", "season.approve", APPROVE, _holiday_events, {"approvable": "me"}),
     Tile("owner_self_approvals", "audit.read", WORK, _owner_self_approvals, {"owner_self_approved": "true"}),
 )
 CAPABILITIES: tuple[str, ...] = tuple(dict.fromkeys(t.capability for t in TILES))

@@ -191,6 +191,9 @@ export interface SeasonCalendar {
   ranges: number;
   waiting: number;
   plans: number;
+  /** AA-1190: the waiting changes of this calendar the viewer may approve (ranges, removals, the default season;
+   *  0 without season.approve). The `?approvable=me` view and the My work tile count these. */
+  approvable?: number;
 }
 
 export interface SeasonRange {
@@ -298,8 +301,9 @@ export const seasonsApi = {
     bkSend<CalendarDetail>(`pricing/season-calendars/${enc(id)}/default/${decision}`, { body: { reason: reason ?? null } }),
   decideRange: (id: string, action: ChangeAction, reason?: string) =>
     bkSend<SeasonRange>(`pricing/season-ranges/${enc(id)}/${action}`, { body: { reason: reason ?? null } }),
-  events: (country?: string, year?: number) =>
-    bkGet<{ items: HolidayEvent[]; countries: { iso2: string; name: string }[] }>("pricing/holiday-events", { country, year }),
+  // AA-1190: approvable "me" = only the waiting changes the viewer may approve (the My work tile's view)
+  events: (country?: string, year?: number, approvable?: "me") =>
+    bkGet<{ items: HolidayEvent[]; countries: { iso2: string; name: string }[] }>("pricing/holiday-events", { country, year, approvable }),
   proposeEvent: (body: { country_iso2: string; code: string; name: string; date_from: IsoDate; date_to: IsoDate; reason: string }) =>
     bkSend<HolidayEvent>("pricing/holiday-events", { body }),
   decideEvent: (id: string, action: ChangeAction, reason?: string) =>

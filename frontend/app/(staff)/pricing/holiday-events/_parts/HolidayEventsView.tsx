@@ -30,7 +30,7 @@ import {
 } from "@/ui";
 import { CHANGE_TONE, eventCode } from "@/ui/booking/priceVersions";
 
-/** AA-1190: the states of an event waiting for a second person (backend seasons_admin.WAITING_STATES). */
+/** AA-1190: the states of an event waiting for a second person (backend seasons_admin.state: pending, ending). */
 const WAITING_STATES: readonly string[] = ["pending", "ending"];
 import { ChangeButtons, useWho } from "../../seasons/_parts/SeasonsView";
 import { S, type SeasonMessage } from "../../seasons/_parts/messages";
@@ -116,10 +116,16 @@ function HolidayEvents() {
   const country = get("country") ?? undefined;
   const year = get("year") ? Number(get("year")) : undefined;
   const [creating, setCreating] = useState(false);
-  // AA-1190: `?state=waiting` (the My work tile "Holiday events to approve"): only the events waiting for a second
-  // person (proposed, or removal asked: state pending / ending), the rows the tile counts.
+  // AA-1190: `?state=waiting`: only the events waiting for a second person (proposed, or removal asked: state pending /
+  // ending). `?approvable=me` (the My work tile "Holiday events to approve"): only the waiting changes the viewer may
+  // approve (never their own proposal or removal request, unless the business owner may approve her own proposal),
+  // the server's filter and the tile's own count.
   const waitingOnly = get("state") === "waiting";
-  const list = useQuery({ queryKey: ["holiday-events", country, year], queryFn: () => seasonsApi.events(country, year) });
+  const approvable = get("approvable") === "me" ? "me" : undefined;
+  const list = useQuery({
+    queryKey: ["holiday-events", country, year, approvable ?? ""],
+    queryFn: () => seasonsApi.events(country, year, approvable),
+  });
   const rows = useMemo(
     () => (list.data?.items ?? []).filter((e) => !waitingOnly || WAITING_STATES.includes(e.state)),
     [list.data, waitingOnly],
@@ -221,6 +227,13 @@ function HolidayEvents() {
                   allLabel: t("allStates"),
                   options: [{ value: "waiting", label: t("stateWaiting") }],
                   width: 190,
+                },
+                {
+                  key: "approvable",
+                  label: t("filterShow"),
+                  allLabel: t("allChanges"),
+                  options: [{ value: "me", label: t("onlyMine") }],
+                  width: 230,
                 },
                 {
                   key: "year",

@@ -184,7 +184,7 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     group: "approve",
     path: "/pricing/seasons",
     label: "Season changes to approve",
-    aria: "Season changes to approve: open the season calendars",
+    aria: "Season changes to approve: open the season changes you may approve",
     empty: "Nothing to approve",
   },
   {
@@ -193,7 +193,7 @@ export const MY_WORK_TILES: readonly MyWorkTileSpec[] = [
     group: "approve",
     path: "/pricing/holiday-events",
     label: "Holiday events to approve",
-    aria: "Holiday events to approve: open the holiday events waiting for a second person",
+    aria: "Holiday events to approve: open the holiday event changes you may approve",
     empty: "Nothing to approve",
   },
   {

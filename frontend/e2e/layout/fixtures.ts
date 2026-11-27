@@ -2125,8 +2125,8 @@ const MY_WORK: MyWorkSummary = {
     // AA-1190: the price version, add-on, season and holiday approvals (zero tiles fold into one line)
     { key: "price_versions_to_approve", capability: "price_version.approve", group: "approve", filter: { pending_versions: "me" }, available: true, count: 2, oldest_at: "2026-10-19T02:00:00Z", earliest_due: null, days: null },
     { key: "addons_to_publish", capability: "addon.approve", group: "approve", filter: { approvable: "me" }, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
-    { key: "season_changes_to_approve", capability: "season.approve", group: "approve", filter: {}, available: true, count: 1, oldest_at: "2026-10-18T02:00:00Z", earliest_due: null, days: null },
-    { key: "holiday_events_to_approve", capability: "season.approve", group: "approve", filter: { state: "waiting" }, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
+    { key: "season_changes_to_approve", capability: "season.approve", group: "approve", filter: { approvable: "me" }, available: true, count: 1, oldest_at: "2026-10-18T02:00:00Z", earliest_due: null, days: null },
+    { key: "holiday_events_to_approve", capability: "season.approve", group: "approve", filter: { approvable: "me" }, available: true, count: 0, oldest_at: null, earliest_due: null, days: null },
   ],
 };
 

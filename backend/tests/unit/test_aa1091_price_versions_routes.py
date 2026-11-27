@@ -163,7 +163,7 @@ def test_every_route_reaches_its_service_with_converted_values(calls: list[Any],
     assert by_name["propose_default"] == [((MAKER, CAL, "high", "Busy year"), {})]
     assert by_name["decide_default"] == [((MAKER, CAL), {"approve": False, "reason": "Not this year"})]
     assert by_name["decide_range"] == [((MAKER, CAL, "end", "Moved"), {})]
-    assert by_name["list_events"] == [((MAKER, "vn", 2031), {})]
+    assert by_name["list_events"] == [((MAKER, "vn", 2031), {"approvable": False})]  # AA-1190: approvable=me off
     assert by_name["propose_event"][0][0][1]["code"] == "invented_fest"
     assert by_name["decide_event"] == [((MAKER, EVENT, "approve", None), {})]
 

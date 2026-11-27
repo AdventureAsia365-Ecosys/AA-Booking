@@ -27403,6 +27403,25 @@
               ],
               "title": "Year"
             }
+          },
+          {
+            "description": "only the waiting changes the caller may approve (AA-1190 My work)",
+            "in": "query",
+            "name": "approvable",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "me",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "only the waiting changes the caller may approve (AA-1190 My work)",
+              "title": "Approvable"
+            }
           }
         ],
         "responses": {

@@ -64,14 +64,14 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(tile(page, "trip_checks_overdue")).toHaveAttribute("href", "/trip-checks?due=overdue&owner=me");
       await expect(tile(page, "trip_checks_unassigned")).toHaveAttribute("href", "/trip-checks?due=overdue&owner=none");
       await expect(tile(page, "price_versions_to_approve")).toHaveAttribute("href", "/pricing/workbench?pending_versions=me");
-      await expect(tile(page, "season_changes_to_approve")).toHaveAttribute("href", "/pricing/seasons");
+      await expect(tile(page, "season_changes_to_approve")).toHaveAttribute("href", "/pricing/seasons?approvable=me");
       // AA-1190: the three zero tiles fold into one line; a click shows them
       await expect(tile(page, "b2b_on_request")).toHaveCount(0);
       await expect(page.getByTestId("my-work-empty-toggle")).toContainText("Nothing waiting in 3 queues");
       await page.getByTestId("my-work-empty-toggle").click();
       await expect(tile(page, "b2b_on_request")).toHaveAttribute("href", "/b2b-desk");
       await expect(tile(page, "addons_to_publish")).toHaveAttribute("href", "/add-ons?approvable=me");
-      await expect(tile(page, "holiday_events_to_approve")).toHaveAttribute("href", "/pricing/holiday-events?state=waiting");
+      await expect(tile(page, "holiday_events_to_approve")).toHaveAttribute("href", "/pricing/holiday-events?approvable=me");
       // AA-1190: the price setup progress card: only the steps with plans, each opening the workbench on that step
       const setup = page.getByTestId("my-work-price-setup");
       await expect(setup).toContainText("30 of 55 tours ready to buy");
