@@ -24,7 +24,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.agency_billing import cis, config, reminders
+from app.agency_billing import cis, config, currencies, reminders
 from app.auth import people
 from app.errors import Conflict, Invalid, NotFound
 from app.ops.money import line_amount, looks_like_card_number
@@ -488,4 +488,6 @@ async def summary(conn: asyncpg.Connection) -> dict[str, Any]:
               {INVOICE_FROM}
              GROUP BY i.currency ORDER BY i.currency"""  # noqa: S608
     )
-    return {"by_currency": [dict(r) for r in rows]}
+    # AA-1191: the enabled currencies ride along, so the KPI tiles hide a disabled currency with nothing in it (an old
+    # draft in a disabled currency still counts as a draft and a non-zero amount still shows).
+    return {"by_currency": [dict(r) for r in rows], "enabled_currencies": list(await currencies.enabled(conn))}

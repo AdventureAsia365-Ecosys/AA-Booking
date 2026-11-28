@@ -76,11 +76,14 @@ export function AgencyBillingView() {
   // AA-1116: agencies are billed in USD or VND (their CIS billing currency): each money tile lists every currency.
   const rows = summary.data?.by_currency ?? [];
   const loading = summary.isLoading ? undefined : null;
-  const perCurrency = (pick: (r: (typeof rows)[number]) => string) =>
-    summary.data ? (
-      rows.length ? (
+  // AA-1191: a currency the platform has not enabled shows only when this tile has an amount in it.
+  const enabled = summary.data?.enabled_currencies;
+  const perCurrency = (pick: (r: (typeof rows)[number]) => string) => {
+    const shown = rows.filter((r) => !enabled || enabled.includes(r.currency) || Number(pick(r)) !== 0);
+    return summary.data ? (
+      shown.length ? (
         <span className="flex flex-col">
-          {rows.map((r) => (
+          {shown.map((r) => (
             <Money key={r.currency} amount={pick(r)} currency={r.currency} />
           ))}
         </span>
@@ -90,6 +93,7 @@ export function AgencyBillingView() {
     ) : (
       loading
     );
+  };
   const overdue = rows.some((r) => Number(r.overdue) > 0);
   return (
     <PageFrame

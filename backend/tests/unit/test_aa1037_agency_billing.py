@@ -437,7 +437,9 @@ async def test_invoice_edits_and_lists() -> None:
     assert out["items"][0]["bill_to"] == {"a": 1} and out["total"] == 1
     for status in ("waiting", "draft"):
         await invoices.list_invoices(listed, status=status)
-    assert (await invoices.summary(ScriptedConn([("GROUP BY i.currency", [{"currency": "USD"}])])))["by_currency"]
+    summed = await invoices.summary(ScriptedConn([("GROUP BY i.currency", [{"currency": "USD"}])]))
+    # AA-1191: the enabled currencies ride along (USD only while the CIS view is not readable)
+    assert summed["by_currency"] and summed["enabled_currencies"] == ["USD"]
     voiding = ScriptedConn([(ROW, inv_row(status="issued", number="AAS-2026-000003"))])
     await invoices.void(voiding, INV, "wrong plan", "fin-1")
     assert voiding.sql("SET voided = true")

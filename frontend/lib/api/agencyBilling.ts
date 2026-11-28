@@ -268,6 +268,8 @@ export interface BillingTerms {
 
 export interface Summary {
   by_currency: { currency: string; drafts: number; open: string; overdue: string; waiting: string }[];
+  /** AA-1191: the platform's enabled currencies (USD first); absent from an older API. */
+  enabled_currencies?: string[];
 }
 
 export const agencyBillingApi = {
