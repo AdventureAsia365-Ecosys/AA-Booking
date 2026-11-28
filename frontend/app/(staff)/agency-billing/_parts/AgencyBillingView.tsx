@@ -68,6 +68,17 @@ const TABS = [
   { key: "settings", label: "Settings" },
 ];
 
+/** AA-1191: the rows a money tile lists: every enabled currency, and a disabled one only when this tile holds an
+ * amount in it (an old record in a disabled currency never disappears). Without the list (older API) every row. */
+function tileRows<R extends { currency: string }>(
+  rows: R[],
+  data: { enabled_currencies?: string[] } | undefined,
+  pick: (r: R) => string,
+): R[] {
+  const enabled = data?.enabled_currencies;
+  return rows.filter((r) => !enabled || enabled.includes(r.currency) || Number(pick(r)) !== 0);
+}
+
 export function AgencyBillingView() {
   const t = useT(MSG);
   const { get } = useUrlFilters();
@@ -77,9 +88,8 @@ export function AgencyBillingView() {
   const rows = summary.data?.by_currency ?? [];
   const loading = summary.isLoading ? undefined : null;
   // AA-1191: a currency the platform has not enabled shows only when this tile has an amount in it.
-  const enabled = summary.data?.enabled_currencies;
   const perCurrency = (pick: (r: (typeof rows)[number]) => string) => {
-    const shown = rows.filter((r) => !enabled || enabled.includes(r.currency) || Number(pick(r)) !== 0);
+    const shown = tileRows(rows, summary.data, pick);
     return summary.data ? (
       shown.length ? (
         <span className="flex flex-col">
