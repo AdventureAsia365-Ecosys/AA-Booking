@@ -98,6 +98,9 @@ POLICY_SEED: dict[str, str] = {
     "rate_sheet_max_rows": "2000",
 }
 POLICY_FRAGMENT = "FROM booking.pricing_policy p JOIN booking.pricing_policy_events a"
+# AA-1054: the pilot fence switch (app.auth.pilot_fence.FENCE_SQL); every scripted connection answers "off" by default
+# (lowest priority), so the E2E sessions of the unit tests work; a test of the fence scripts the view itself.
+PILOT_FENCE_FRAGMENT = "FROM catalog.v_pilot_fence_v1"
 # The seeded rounding increments (bk-056), as app.pricing.service.rounding_increments returns them; for the pure
 # engine calls of the unit tests.
 SEED_ROUNDING: dict[str, Decimal] = {
@@ -124,8 +127,11 @@ def policy_rows(**overrides: str) -> list[dict[str, Any]]:
 
 class ScriptedConn:
     def __init__(self, rules: list[tuple[str, Answer]] | None = None) -> None:
-        self.rules = list(rules or []) + [(POLICY_FRAGMENT, lambda *_: policy_rows())]
+        self.rules = list(rules or []) + [(POLICY_FRAGMENT, lambda *_: policy_rows()), (PILOT_FENCE_FRAGMENT, False)]
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        # AA-1054: the pilot fence reads (app.auth.pilot_fence.FENCE_SQL) are kept apart, so the tests that count a
+        # route's statements in ``calls`` do not see the fence of an E2E session.
+        self.fence_calls: list[tuple[str, tuple[Any, ...]]] = []
         self.timeouts: list[tuple[str, float]] = []
 
     def on(self, fragment: str, answer: Answer) -> ScriptedConn:
@@ -134,7 +140,7 @@ class ScriptedConn:
 
     def _answer(self, sql: str, args: tuple[Any, ...]) -> Any:
         flat = " ".join(sql.split())
-        self.calls.append((flat, args))
+        (self.fence_calls if PILOT_FENCE_FRAGMENT in flat else self.calls).append((flat, args))
         for fragment, answer in self.rules:
             if fragment in flat:
                 value = answer(*args) if callable(answer) else answer

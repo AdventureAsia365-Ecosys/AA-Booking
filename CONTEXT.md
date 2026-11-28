@@ -629,6 +629,14 @@ e-mail (`bk_notify_email`), the customer payment reminders, customer payment evi
   switch (its code is readable only by the MFA admin role). Its owner marker comes from CIS like any owner's (sign in to
   CIS first: the view lists linked rows only), so it may start a view-as; it never self-approves; its first-sign-in
   staff row and audit row say "E2E owner (agent, Dev only)". Synthetic records only is an operating rule (ADR).
+- **Pilot fence (AA-1054, root ADR 0006a; `app/auth/pilot_fence.py`).** One switch for CIS and Booking: the CIS platform
+  setting `cis.platform.pilot_e2e_fence` (CIS 495, Platform › Settings, maker-checker, audited by the CIS registry).
+  Booking holds no copy and no grant on the CIS settings tables: it reads the value in force through the read-only
+  contract view `catalog.v_pilot_fence_v1` (CIS 496, SELECT to `booking` only; cached 30 s per process). A WORKFORCE
+  token whose address is of the E2E mailbox domain (every Dev-only E2E identity, any local part) is refused right
+  before its first database read: 403 `e2e_pilot_fence` while the switch is on, 403 `e2e_pilot_fence_unknown` when
+  the view cannot be read (fail closed). Real staff never read it. Turned on on the pilot day (root runbook
+  `docs/ops/runbooks/pilot-agency-onboarding.md`, "Pilot day").
 - **View as a lower role (AA-1157, root ADR 0019 d5 as amended; `app/auth/view_as.py`, `app/routers/staff_view_as.py`).**
   An owner (the CIS `is_owner` marker, read uncached; the business-owner marker alone does not qualify) starts
   `POST /booking/view-as` (`{role, minutes 5-60, reason?}`) on a built-in role or an active custom role whose read
