@@ -6,9 +6,9 @@ name: Release Please
 #
 # Token (AA-901): the release PR is opened with an installation token of the GitHub App aa-ecosys-ci-bot, so the
 # required CI checks run on it (events made with GITHUB_TOKEN start no workflows). GITHUB_TOKEN stays read-only.
-# Configuration in the GitHub environment `release` (deployment branches: main only):
-#   AA_CI_BOT_APP_ID        variable, the App id (not a secret)
+# Configuration (AA-1183): the GitHub environment `ci-bot` (deployment branches: main only) holds
 #   AA_CI_BOT_PRIVATE_KEY   secret, the App private key (PEM)
+# and the repo variable AA_CI_BOT_APP_ID is the App id (an identifier, not a secret).
 #
 # A merged release PR changes only CHANGELOG.md, the manifest and backend/pyproject.toml: Deploy Dev ignores those
 # paths and Deploy Admin Dev only watches frontend/**, so a release never deploys by itself.
@@ -31,7 +31,7 @@ jobs:
     # A dispatch from another branch is skipped here rather than refused by the environment's branch rule.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ci-bot
     timeout-minutes: 10
     steps:
       - name: Mint an aa-ecosys-ci-bot token
