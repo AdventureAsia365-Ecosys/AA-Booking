@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.18.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.17.0...v0.18.0) (2026-11-28)
+
+
+### Features
+
+* add-on offers API, activity catalogue import, contract expiry alerts and staff Add-ons page ([#313](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/313)) ([4cdfc71](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/4cdfc718d4cf13e6472e77357ced2c59197a362a))
+* add-on offers, their places and the place add-on read model (bk-068) ([#310](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/310)) ([c5b46e8](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c5b46e82dd95f49aa9361f369ffc8efeffa8230a))
+* agency add-ons read GET /booking/b2b/v1/add-ons with per traveller B2B price and RRP ([#316](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/316)) ([1c32a10](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/1c32a10dd371f9c339cb2d181645350e3087549f))
+* agency tariff in twin share with a single supplement, availability per row and quote rules on terms ([#338](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/338)) ([c70d99d](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/c70d99d83117c002ee95f8e3362039c8683b42c6))
+* approval rules for a three-person team (pending suppliers, contract writers, payout approver, business-owner self-approval, billing entity changes, sellable needs a price) ([#300](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/300)) ([19f2fcf](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/19f2fcf1ed28314cd93dad4da7669151e4da80a5))
+* bk-064 approval rules for a three-person team (supplier activation, contract writers, payout approver, owner self-approval flags, billing entity changes) ([#299](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/299)) ([cf13013](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/cf13013d96fbbdb2c09fb0981504869b1c3866cf))
+* bk-070 booking.v_place_addons appends the add-on title for the TripPlanner day cards ([#315](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/315)) ([aa625e1](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/aa625e107be1828b2e940cf8f7b39b28ac2a6be4))
+* bk-071 supplier bank account approved only by the business owner or the tech lead (DB trigger) ([#317](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/317)) ([3c71dcc](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3c71dccd20060fe19cab26a407799e5332f5f3f2))
+* Dev-only E2E owner is a plain administrator in Booking, refused outside dev ([#308](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/308)) ([79ba5c2](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/79ba5c22976a0e9a3ddfdb8fffc274ebf412fc7b))
+* E2E pricing checker decides the E2E owner's band changes; pair enters and approves synthetic supplier bills ([#319](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/319)) ([32a4929](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/32a49292ea50f53c39ea10e3dfecbe89add7c2df))
+* group-size price bands as a pricing policy parameter (Pricing &gt; Policy) read by the cost sheet ([#307](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/307)) ([79a8b38](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/79a8b3897a210c6fcc079424d2af8f5c5c67c418))
+* hotel allotment and free sale make B2B room lines available per DMC, two-way hotel rate sheet ([#321](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/321)) ([0182e15](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/0182e15c2d150945698e40d1eeaf593a51be2fe7))
+* hotels sold by several DMCs, board basis on quotes, hotel child prices, checked DMC rate sheets with a review before publishing ([#314](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/314)) ([ef1cf75](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ef1cf7562afa028f2a9951d7aa6956d308334032))
+* My work leads the dashboard with more approval tiles and price setup progress ([#340](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/340)) ([6dacf91](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/6dacf911efe9da60fe671e6cfa9d5085f73ff968))
+* one supplier booking per sold tour component and a can-operate check with an admin sale exception ([#304](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/304)) ([bd8ed45](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/bd8ed4571a50c5ccaf3b66d45bd0416b85165d02))
+* owner view as a lower role in Booking, read-only and logged ([#301](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/301)) ([703a3f7](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/703a3f73d7c33ba11d3ddd7ffc8a86049afcce49))
+* pilot fence refuses the Dev-only E2E staff identities in the Booking API ([#344](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/344)) ([ea537ae](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/ea537ae3948e2996ed4920a222665d078bc81326))
+* roll back the api when the post-deploy verify is red ([#342](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/342)) ([3e2c15c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/3e2c15cf76b5f3c8dff6d0d18bd2caddf1cb81e5))
+* SaaS drafts and billing terms follow the CIS enabled currencies (USD only) ([#345](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/345)) ([e609351](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/e609351d244fd98365e5178b8654bb17f6c938ce))
+* security.txt (RFC 9116) with the vulnerability contact on the public host ([#339](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/339)) ([722cccd](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/722cccdd209b2a5ea3c2a27a99a9707e88454c06))
+* supplier bank accounts (KMS envelope, call-back approval, payout lock), supplier profile fields and admin-edited profile choices ([#311](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/311)) ([a84c479](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/a84c47936d09587760448101774757e4a1b99f80))
+* supplier bank changes approved by the business owner (tech lead fallback); E2E maker hotel link and desk quote on synthetic supply ([#318](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/318)) ([094d678](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/094d678de1f111d488da4b68881305f6b5a9c7fa))
+* supplier category dmc in the supplier API and forms (bk-073) ([#323](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/323)) ([400d07c](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/400d07c869406162602057b3c9d9239544f1386c))
+* supplier contract expiry e-mail, My work tile and the expiring list on the supplier pages ([#325](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/325)) ([2940750](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/294075085f061eb16b030cd135587c9bdc05072f))
+
+
+### Bug Fixes
+
+* Booking API image builds pull the base and re-run the apt upgrade (Debian libzstd fix) ([#332](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/332)) ([8844fd0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/8844fd00aaedd4a6dfe7bc29df5c839f48ab31b7))
+* Booking pools name savepoints by depth so pg_stat_statements stops churning ([#331](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/331)) ([2002e63](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/2002e63390032fc287873461e0c5442517bbff49))
+* price setup card shows its count and its help as two lines; tile clicks tested ([#341](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/341)) ([52ee56a](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/52ee56a7f7bb3d1dc786cc6f51050a0b3323c445))
+* price setup Components re-import keeps each hotel night's meal plan ([#337](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/337)) ([2a07d00](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/2a07d002a1c8eda32e8312a23bc9453cb5b749b9))
+* S291 Booking follow-ups (notifications mail record, rate review diff, Suppliers tab label, season sync rechecks) ([#328](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/328)) ([591d739](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/591d73975d985f08b76692e573596514b94d5219))
+* the agency billing tiles hide a disabled currency with nothing in it ([#347](https://github.com/AdventureAsia365-Ecosys/AA-Booking/issues/347)) ([2688266](https://github.com/AdventureAsia365-Ecosys/AA-Booking/commit/26882665f80480c16d0c08a88248395ced50575a))
+
 ## [0.17.0](https://github.com/AdventureAsia365-Ecosys/AA-Booking/compare/v0.16.0...v0.17.0) (2026-11-21)
 
 
