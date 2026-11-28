@@ -103,7 +103,7 @@ def test_release_workflow_uses_the_ci_bot_app_token() -> None:
         ("pull-requests", "write"),
         ("issues", "write"),
     ]
-    assert "environment: release" in text
+    assert "environment: ci-bot" in text
     assert "if: github.ref == 'refs/heads/main'" in text
     assert re.search(r"uses: actions/create-github-app-token@[0-9a-f]{40} # v3\.", text)
     assert "app-id: ${{ vars.AA_CI_BOT_APP_ID }}" in text

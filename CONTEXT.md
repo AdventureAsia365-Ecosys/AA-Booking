@@ -469,7 +469,7 @@ start-up fails without a DSN, the missing-DSN guard; off until Infra wires the D
 One version for the whole repo (API image and staff admin), kept by release-please in manifest mode
 (`release-please-config.json`, `.release-please-manifest.json`; `CHANGELOG.md`; tags `vX.Y.Z`; pre-1.0 a `feat` or a
 breaking change bumps the minor, a `fix` the patch). `.github/workflows/release-please.yml` keeps one release PR open on
-`main`, opened with a token of the GitHub App `aa-ecosys-ci-bot` (environment `release`) so the required checks run on
+`main`, opened with a token of the GitHub App `aa-ecosys-ci-bot` (environment `ci-bot`) so the required checks run on
 it; merging it tags the release. The version also lives in `backend/pyproject.toml` (an `extra-files` entry, bumped by the
 same PR). A release commit deploys nothing (Deploy Dev ignores those files, Deploy Admin Dev watches `frontend/**` only);
 the next backend deploy, or a Deploy Dev dispatch on `main`, bakes the new version, which `GET /booking/health` returns
