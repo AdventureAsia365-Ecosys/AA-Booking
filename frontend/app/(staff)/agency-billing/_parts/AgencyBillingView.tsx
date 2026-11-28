@@ -68,6 +68,17 @@ const TABS = [
   { key: "settings", label: "Settings" },
 ];
 
+/** AA-1191: the rows a money tile lists: every enabled currency, and a disabled one only when this tile holds an
+ * amount in it (an old record in a disabled currency never disappears). Without the list (older API) every row. */
+function tileRows<R extends { currency: string }>(
+  rows: R[],
+  data: { enabled_currencies?: string[] } | undefined,
+  pick: (r: R) => string,
+): R[] {
+  const enabled = data?.enabled_currencies;
+  return rows.filter((r) => !enabled || enabled.includes(r.currency) || Number(pick(r)) !== 0);
+}
+
 export function AgencyBillingView() {
   const t = useT(MSG);
   const { get } = useUrlFilters();
@@ -76,11 +87,13 @@ export function AgencyBillingView() {
   // AA-1116: agencies are billed in USD or VND (their CIS billing currency): each money tile lists every currency.
   const rows = summary.data?.by_currency ?? [];
   const loading = summary.isLoading ? undefined : null;
-  const perCurrency = (pick: (r: (typeof rows)[number]) => string) =>
-    summary.data ? (
-      rows.length ? (
+  // AA-1191: a currency the platform has not enabled shows only when this tile has an amount in it.
+  const perCurrency = (pick: (r: (typeof rows)[number]) => string) => {
+    const shown = tileRows(rows, summary.data, pick);
+    return summary.data ? (
+      shown.length ? (
         <span className="flex flex-col">
-          {rows.map((r) => (
+          {shown.map((r) => (
             <Money key={r.currency} amount={pick(r)} currency={r.currency} />
           ))}
         </span>
@@ -90,6 +103,7 @@ export function AgencyBillingView() {
     ) : (
       loading
     );
+  };
   const overdue = rows.some((r) => Number(r.overdue) > 0);
   return (
     <PageFrame
