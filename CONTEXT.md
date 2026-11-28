@@ -95,7 +95,7 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   discount of each row (`discount_pct`, `discount_kind`, detected on their own) is drafted as one negative `adjustment`
   line per discounted subscription (the only adjustment with a product, so a re-run replaces it and keeps finance's
   adjustments), rounded on the running total so the draft equals the CIS quote.
-  **Currency rule: USD only** (AA-1191, tech lead S295; CIS 497, contract 1.12): which currencies the platform shows
+  **Currency rule: USD only** (AA-1191, tech lead S295; CIS 498, contract 1.12): which currencies the platform shows
   and accepts is the CIS setting `cis.billing.enabled_currencies` (CIS Platform › Settings › Enabled currencies,
   default USD only, USD always enabled), read through `catalog.v_billing_currencies_v1` (one row, feature-detected:
   USD only without it; `app/agency_billing/currencies.py`). An agency whose CIS billing currency is not enabled is

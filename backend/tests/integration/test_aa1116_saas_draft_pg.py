@@ -13,7 +13,7 @@ exact 444 columns around each test).
 - a currency move (before the issue, and after the month was issued in USD) leaves no discount line in the old currency
   and drafts the next month in VND with its VND discount.
 
-AA-1191: VND is enabled in these tests through a stand-in of ``catalog.v_billing_currencies_v1`` (CIS 497, its exact
+AA-1191: VND is enabled in these tests through a stand-in of ``catalog.v_billing_currencies_v1`` (CIS 498, its exact
 columns); with USD only, a VND agency is drafted in USD from the USD list and its agreed VND price does not apply.
 
 Names and places are invented."""
@@ -49,8 +49,8 @@ CIS_444_COLUMNS = (
     "agreed_until date, billing_interval text, trial_ends_at timestamp with time zone, is_pilot boolean, "
     "bill_free boolean, discount_pct numeric(5,2), discount_kind text"
 )
-# CIS 497 (AA-1191, contract 1.12): copied from CIS tests/integration/test_aa1191_migration_497.py.
-CIS_497_COLUMNS = "enabled_currencies text[], base_currency text"
+# CIS 498 (AA-1191, contract 1.12): copied from CIS tests/integration/test_aa1191_migration_498.py.
+CIS_498_COLUMNS = "enabled_currencies text[], base_currency text"
 
 
 @pytest_asyncio.fixture
@@ -63,10 +63,10 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     missing = set(cis_view.DISCOUNT_VIEW.columns) - {c.split(" ", 1)[0] for c in CIS_444_COLUMNS.split(", ")}
     assert not missing, f"Booking selects {missing} that CIS 444 does not have"
     await conn.execute("DROP TABLE IF EXISTS catalog.v_billing_currencies_v1")
-    await conn.execute(f"CREATE TABLE catalog.v_billing_currencies_v1 ({CIS_497_COLUMNS})")
+    await conn.execute(f"CREATE TABLE catalog.v_billing_currencies_v1 ({CIS_498_COLUMNS})")
     await conn.execute("GRANT SELECT ON catalog.v_billing_currencies_v1 TO booking")
     await conn.execute("INSERT INTO catalog.v_billing_currencies_v1 VALUES (ARRAY['USD', 'VND'], 'USD')")
-    assert set(currencies.VIEW.columns) == {c.split(" ", 1)[0] for c in CIS_497_COLUMNS.split(", ")}
+    assert set(currencies.VIEW.columns) == {c.split(" ", 1)[0] for c in CIS_498_COLUMNS.split(", ")}
     liveness.reset_cache()
     try:
         yield conn

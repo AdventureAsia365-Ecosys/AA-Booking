@@ -15,7 +15,7 @@ its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CI
 - the invoice currency is the agency's CIS ``billing_currency`` (before CIS 438: the Booking ``saas_currency`` terms);
   USD lines read the USD list, VND lines the VND list (``price_vnd_monthly`` / ``price_extra_seat_vnd``); another
   currency is skipped (``currency_unsupported``); AA-1191: a currency that is not enabled in CIS (``catalog.
-  v_billing_currencies_v1``, CIS 497; USD only by default) drafts in USD from the USD list, counted
+  v_billing_currencies_v1``, CIS 498; USD only by default) drafts in USD from the USD list, counted
   ``currency_not_enabled`` (an agreed price in it does not apply; the draft of the period in the old currency loses
   its job lines like any currency move);
 - per subscription one ``subscription`` line: a per-seat plan bills max(seats, ``seats_min``, 1) seats; any other plan
@@ -447,7 +447,7 @@ async def _draft_agency_saas(conn: asyncpg.Connection, tid: Any, rows: list[dict
                             period: tuple[date, date], actor: str,
                             allowed: tuple[str, ...] = (currencies.BASE,)) -> dict[str, int]:  # fmt: skip
     """One agency's SaaS draft for the period (inside its transaction); the counts it adds to the run. ``allowed`` =
-    the enabled currencies (AA-1191, CIS 497): a billing currency that is not enabled drafts in USD."""
+    the enabled currencies (AA-1191, CIS 498): a billing currency that is not enabled drafts in USD."""
     terms = await config.terms_for(conn, tid)
     if terms is None:
         raise RuntimeError("no billing terms row")

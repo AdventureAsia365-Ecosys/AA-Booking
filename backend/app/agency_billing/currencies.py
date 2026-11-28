@@ -1,11 +1,11 @@
 """The enabled currencies (AA-1191): which currencies the platform shows and accepts, as CIS says.
 
 One CIS setting, ``cis.billing.enabled_currencies`` (CIS Platform › Settings › Enabled currencies; tech lead S295: USD
-only for now), read here through the contract view ``catalog.v_billing_currencies_v1`` (CIS 497, contract
+only for now), read here through the contract view ``catalog.v_billing_currencies_v1`` (CIS 498, contract
 tenant.entitlements.v1 1.12, SELECT to role ``booking`` only), like the billing terms of ``catalog.v_tenant_billing_v1``
 (no HTTP, no secret, no Booking copy of the value). USD is the base currency and always enabled.
 
-Feature-detected (:func:`app.catalog.liveness.view_ready`): before CIS 497 is applied the view is missing and Booking
+Feature-detected (:func:`app.catalog.liveness.view_ready`): before CIS 498 is applied the view is missing and Booking
 keeps USD only, the default of the setting. Readers:
 
 - the SaaS invoice drafts (:mod:`app.agency_billing.drafts`): an agency whose CIS ``billing_currency`` is not enabled
@@ -44,7 +44,7 @@ def normalise(values: Iterable[Any] | None) -> tuple[str, ...]:
 
 
 async def enabled(conn: asyncpg.Connection) -> tuple[str, ...]:
-    """The enabled currencies in force; USD only while the CIS view cannot be read (CIS 497 not applied)."""
+    """The enabled currencies in force; USD only while the CIS view cannot be read (CIS 498 not applied)."""
     if not await liveness.view_ready(conn, VIEW):
         return (BASE,)
     row = await conn.fetchrow(f"SELECT enabled_currencies FROM {VIEW.qualified} LIMIT 1")  # noqa: S608

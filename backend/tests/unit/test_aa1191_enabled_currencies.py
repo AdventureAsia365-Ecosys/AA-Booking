@@ -1,4 +1,4 @@
-"""AA-1191 without a database: the enabled currencies read from CIS (``catalog.v_billing_currencies_v1``, CIS 497), the
+"""AA-1191 without a database: the enabled currencies read from CIS (``catalog.v_billing_currencies_v1``, CIS 498), the
 SaaS draft of an agency whose CIS billing currency is not enabled (drafted in USD from the USD list), the refused SaaS
 currency on the billing terms write (422 ``currency_not_enabled``) and the terms list serving the enabled currencies.
 Names are invented."""
