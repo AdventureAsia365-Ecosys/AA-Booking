@@ -37,7 +37,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agency_billing import clauses, config, drafts, entity_changes, export, invoices, payments
+from app.agency_billing import clauses, config, currencies, drafts, entity_changes, export, invoices, payments
 from app.auth import self_approval
 from app.auth.staff import Staff, get_pool, require
 from app.errors import Forbidden
@@ -193,7 +193,8 @@ class BillingTermsIn(BaseModel):
     settlement_due_days: int = Field(ge=0, le=120)
     warn_after_days: int = Field(ge=0, le=365)
     suspend_after_days: int = Field(ge=1, le=365)
-    saas_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    # AA-1191: left out = keep the stored value (a new row: the default row's while enabled, else USD)
+    saas_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
 
 
 class TermsClauseIn(BaseModel):
@@ -441,7 +442,8 @@ async def update_tax_rule(rule_id: UUID, body: TaxRuleChanges, staff: CanConfigu
 @router.get("/billing-terms")
 async def list_billing_terms(_: CanRead, pool: Pool) -> dict[str, Any]:
     async with pool.acquire() as conn:
-        return {"items": await config.list_terms(conn)}
+        # AA-1191: the enabled currencies (CIS Platform › Settings), so the page hides what is not enabled
+        return {"items": await config.list_terms(conn), "enabled_currencies": list(await currencies.enabled(conn))}
 
 
 @router.put("/billing-terms/default")

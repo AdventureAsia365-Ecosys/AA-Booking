@@ -41,6 +41,15 @@ export function pctText(fraction: string | number): string {
   return String(Number((Number(fraction) * 100).toFixed(2)));
 }
 
+/** AA-1191: the enabled currencies as CIS serves them (USD first, always; USD only when the API does not say). */
+export function enabledCurrencies(list?: readonly string[] | null): string[] {
+  const out = ["USD"];
+  for (const c of list ?? []) if (typeof c === "string" && c && !out.includes(c.toUpperCase())) out.push(c.toUpperCase());
+  return out;
+}
+
+/** The terms as form text. AA-1191: the stored SaaS currency is kept as stored (shown read-only, and only while CIS
+ *  enables more than USD); it is never swapped for USD here, so a save converts nothing. */
 export function termsToText(t: BillingTerms): TermsText {
   const days = Object.fromEntries(DAY_KEYS.map((k) => [k, String(t[k] ?? "")])) as Record<DayKey, string>;
   return { deposit: pctText(t.deposit_pct), ...days, saas_currency: t.saas_currency || "USD" };
@@ -56,8 +65,13 @@ function dayError(key: DayKey, text: string): string | null {
   return n < min || n > max ? `Allowed: ${min}–${max} days.` : null;
 }
 
+/** The PUT body: the terms without the SaaS currency. AA-1191: the currency is read-only on this page (set in CIS
+ *  Tenant 360), so it is left out and the API keeps the stored value (a new row: the default row's while enabled,
+ *  else USD). Sending it back would let a not-enabled stored value be rewritten. */
+export type TermsBody = Omit<BillingTerms, "saas_currency">;
+
 /** The API body, or the errors per field (never an empty field sent as 0). */
-export function parseTerms(f: TermsText): { body: BillingTerms | null; errors: TermsErrors } {
+export function parseTerms(f: TermsText): { body: TermsBody | null; errors: TermsErrors } {
   const errors: TermsErrors = {};
   const deposit = f.deposit.trim().replace(",", ".");
   if (!/^\d{1,3}(\.\d{1,2})?$/.test(deposit) || Number(deposit) > 100) errors.deposit = "A percentage from 0 to 100, at most 2 decimals.";
@@ -70,5 +84,5 @@ export function parseTerms(f: TermsText): { body: BillingTerms | null; errors: T
   }
   if (Object.keys(errors).length) return { body: null, errors };
   const days = Object.fromEntries(DAY_KEYS.map((k) => [k, Number(f[k])])) as Record<DayKey, number>;
-  return { body: { deposit_pct: (Number(deposit) / 100).toFixed(4), ...days, saas_currency: f.saas_currency }, errors };
+  return { body: { deposit_pct: (Number(deposit) / 100).toFixed(4), ...days }, errors };
 }

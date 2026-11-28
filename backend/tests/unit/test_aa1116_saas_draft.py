@@ -278,6 +278,8 @@ def saas_conn(rows: list[dict[str, Any]], *, terms_ready: bool = True, discount_
     c.on(VIEW_READY_FRAGMENT, lambda *a: ("discount_pct" not in a[-1] or discount_ready)
          and (terms_ready or "billing_currency" not in a[-1]))  # fmt: skip
     c.on("FROM catalog.v_tenant_billing_v1", rows)
+    # AA-1191: VND is enabled here (these tests are about the VND list); USD only: test_aa1191_enabled_currencies.py
+    c.on("FROM catalog.v_billing_currencies_v1", {"enabled_currencies": ["USD", "VND"]})
     c.on("SELECT tenant_id, agency_name FROM booking.b2b_partners", [{"tenant_id": T1, "agency_name": "Juniper"}])
     c.on("FROM booking.billing_terms", TERMS)
     c.on("currency <> $3 AND status = 'draft'", others or [])
