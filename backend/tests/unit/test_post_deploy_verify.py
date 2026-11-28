@@ -500,7 +500,7 @@ def test_deploy_dev_calls_verify_after_deploy_and_result_needs_every_job() -> No
     text = DEPLOY_WF.read_text()
     jobs = _block(text, "jobs:", 0)
     names = re.findall(r"^  ([a-z][a-z-]*):$", jobs, re.M)
-    assert names == [*DEPLOY_JOBS, "result"]
+    assert names == [*DEPLOY_JOBS, "rollback", "report", "result"]  # AA-1193: rollback + report (conditional)
     verify = _block(jobs, "verify:", 2)
     assert "    uses: ./.github/workflows/post-deploy-verify.yml" in verify
     assert "    needs: deploy\n" in verify
@@ -592,3 +592,161 @@ def test_result_is_red_when_a_job_result_is_missing() -> None:
     needs = _needs()
     del needs["verify"]
     assert _result_step(needs).returncode == 1
+
+
+# ── AA-1193: rollback after a red verify, alert, drill ────────────────────────────────────────────────────────────
+
+GUARD = {"booking": "booking-deploy-preflight.sh", "crm": "partner-deploy-preflight.sh"}[APP]
+NEVER_IN_ROLLBACK = ("gh workflow", "docker push", "register-task-definition", "git " + "push")
+
+
+def _step(job: str, name: str) -> str:
+    """The lines of the step called ``name`` in a job block (up to the next step or key at its indent)."""
+    lines = job.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.strip() == f"- name: {name}")
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    out = [lines[start]]
+    for ln in lines[start + 1 :]:
+        if ln.strip() and len(ln) - len(ln.lstrip()) <= indent and not ln.lstrip().startswith("#"):
+            break
+        out.append(ln)
+    return "\n".join(out)
+
+
+def _jobs() -> str:
+    return _block(DEPLOY_WF.read_text(), "jobs:", 0)
+
+
+def test_aa1193_drill_input_reaches_the_verify() -> None:
+    on = _block(DEPLOY_WF.read_text(), "on:", 0)
+    drill = _block(_block(on, "workflow_dispatch:", 2), "drill_force_smoke_fail:", 6)
+    assert "type: boolean" in drill and "default: false" in drill and "required: false" in drill
+    verify = _block(_jobs(), "verify:", 2)
+    assert "      drill_force_fail: ${{ inputs.drill_force_smoke_fail == true }}" in verify
+
+
+def test_aa1193_previous_revision_is_recorded_before_update_service() -> None:
+    deploy = _block(_jobs(), "deploy:", 2)
+    assert "      previous_td: ${{ steps.before.outputs.previous_td }}" in _block(deploy, "outputs:", 4)
+    record = deploy.index("- name: Record the revision before this deploy (rollback target)")
+    assert record < deploy.index("- name: Register task definition and update service")
+    run = _run_script(_step(deploy, "Record the revision before this deploy (rollback target)"))
+    assert 'ecs_smoke_rollback.py previous --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE"' in run
+    assert '"previous_tag=${GITHUB_SHA}"' in run, "the drill refuses when Dev already runs this commit"
+
+
+def test_aa1193_rollback_runs_after_a_failed_verify_behind_the_deploy_gate() -> None:
+    job = _block(_jobs(), "rollback:", 2)
+    assert "    needs: [deploy, verify]" in job
+    cond = " ".join(_block(job, "if: >-", 4).split())
+    for part in (
+        "always()",
+        "github.ref == 'refs/heads/main'",
+        "needs.deploy.result == 'success'",
+        "needs.verify.result == 'failure'",
+    ):
+        assert part in cond, part
+    assert "    environment: dev" in job
+    step = _step(job, "Roll back to the revision before this deploy")
+    run = _run_script(step)
+    assert f"bash .github/scripts/{GUARD}" in run
+    assert run.index(GUARD) < run.index("ecs_api_rollback.py rollback")
+    assert '--target "${ECS_SERVICE},,${PREVIOUS_TD}"' in run and "--apply" in run
+    assert f'--health-url "${{BASE_URL%/}}{HEALTH}"' in run
+    assert "OVERRIDE: ${{ inputs.override_running_jobs }}" in step
+    assert "PREVIOUS_TD: ${{ needs.deploy.outputs.previous_td }}" in step
+    alert = _step(job, "Alert the ops topic")
+    assert "if: always()" in alert and "ecs_api_rollback.py alert" in alert and "--apply" in alert
+    assert "FAILED_CHECKS: ${{ needs.verify.outputs.failed_checks }}" in alert
+    for forbidden in NEVER_IN_ROLLBACK:
+        assert forbidden not in job, f"the rollback must never start a deploy: {forbidden}"
+    report = _block(_jobs(), "report:", 2)
+    assert "    needs: [deploy, verify, rollback]" in report and "issues: write" in report
+    assert "deploy-smoke-red" in report
+
+
+def _rollback_shell(
+    tmp_path: Path, guard_rc: int, guard_msg: str, outcome: str
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    scripts = tmp_path / ".github" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / GUARD).write_text(f"echo '{guard_msg}'\nexit {guard_rc}\n")
+    (scripts / "ecs_api_rollback.py").write_text(
+        f"import sys\nsys.stderr.write('called ' + ' '.join(sys.argv[1:]) + '\\n')\nprint({outcome!r})\n"
+    )
+    out = tmp_path / "out.txt"
+    run = _run_script(_step(_block(_jobs(), "rollback:", 2), "Roll back to the revision before this deploy"))
+    env = {
+        "PATH": os.environ["PATH"],
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+        "ECS_CLUSTER": "cluster-x",
+        "ECS_SERVICE": ECS_SVC,
+        "ECR_REPOSITORY": "repo-x",
+        "GITHUB_SHA": SHA,
+        "PREVIOUS_TD": f"{ECS_SVC}:6",
+        "BASE_URL": "http://api.test/",
+        "OVERRIDE": "",
+    }
+    script = run.replace("/tmp/", f"{tmp_path}/")  # noqa: S108 (the step's scratch files go to this test's tmp_path)
+    proc = subprocess.run(  # noqa: S603
+        [str(BASH), "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return proc, out.read_text() if out.exists() else ""
+
+
+@needs_tools
+def test_aa1193_a_held_gate_rolls_nothing_back(tmp_path: Path) -> None:
+    proc, out = _rollback_shell(tmp_path, 1, "::error::Deploy blocked: a retention job is running", "outcome=unused")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "called" not in proc.stdout
+    assert "outcome=not rolled back (held by the deploy gate: a retention job is running)" in out
+
+
+@needs_tools
+def test_aa1193_an_open_gate_runs_the_rollback_with_the_recorded_target(tmp_path: Path) -> None:
+    proc, out = _rollback_shell(tmp_path, 0, "safe", f"outcome=rolled back to {ECS_SVC}:6 (/health on {OLD_SHA[:12]})")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"--target {ECS_SVC},,{ECS_SVC}:6" in proc.stdout and f"--deployed-tag {SHA}" in proc.stdout
+    assert f"--health-url http://api.test{HEALTH}" in proc.stdout
+    assert f"outcome=rolled back to {ECS_SVC}:6" in out
+
+
+def test_aa1193_verify_workflow_has_the_drill_and_returns_the_failed_checks() -> None:
+    text = VERIFY_WF.read_text()
+    call = _block(_block(text, "on:", 0), "workflow_call:", 2)
+    assert "drill_force_fail:" in call and "value: ${{ jobs.verify.outputs.failed_checks }}" in call
+    assert "drill_force_fail" not in _block(_block(text, "on:", 0), "workflow_dispatch:", 2)
+    job = _block(text, "verify:", 2)
+    assert "      failed_checks: ${{ steps.failed.outputs.checks }}" in job
+    drill = _step(job, "Drill — force the post-deploy verify red")
+    assert "if: inputs.drill_force_fail" in drill and "exit 1" in drill
+    assert job.index("- name: Verify Dev") < job.index("- name: Drill") < job.index("- name: Failing checks")
+    assert "if: always()" in _step(job, "Failing checks")
+
+
+@needs_tools
+def test_aa1193_failing_checks_step_keeps_names_only(tmp_path: Path) -> None:
+    run = _run_script(_step(_block(VERIFY_WF.read_text(), "verify:", 2), "Failing checks"))
+    failed, out = tmp_path / "failed.txt", tmp_path / "out.txt"
+    failed.write_text("health\nhealth-ready\nhealth\n$(touch pwned)\ndrill-forced-fail\n")
+    env = {"PATH": os.environ["PATH"], "VERIFY_FAILED_FILE": str(failed), "GITHUB_OUTPUT": str(out)}
+    proc = subprocess.run([str(BASH), "-c", run], env=env, capture_output=True, text=True, timeout=30)  # noqa: S603
+    assert proc.returncode == 0, proc.stderr
+    assert out.read_text() == "checks=health,health-ready,drill-forced-fail\n"
+
+
+@needs_tools
+def test_aa1193_failed_check_names_go_to_the_failed_file(run_verify: Run, tmp_path: Path) -> None:
+    http, ecs = _good()
+    _health_sha_mismatch(http, ecs)
+    failed = tmp_path / "failed.txt"
+    r, summary = run_verify(http, ecs, VERIFY_FAILED_FILE=str(failed))
+    assert r.returncode == 1
+    names = failed.read_text().split()
+    assert "health" in names and set(names) == _failed_rows(summary)
