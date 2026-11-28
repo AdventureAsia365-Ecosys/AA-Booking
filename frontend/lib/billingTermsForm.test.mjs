@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseTerms, pctText, termsToText } from "./billingTermsForm.ts";
+import { enabledCurrencies, parseTerms, pctText, termsToText } from "./billingTermsForm.ts";
 
 const TERMS = {
   deposit_pct: "0.0700",
@@ -38,4 +38,13 @@ test("every day count is required, whole and inside the API range; suspend after
   assert.match(parseTerms({ ...text, suspend_after_days: "7" }).errors.suspend_after_days, /more than the warning/);
   assert.ok(parseTerms({ ...text, deposit: "101" }).errors.deposit);
   assert.ok(parseTerms({ ...text, deposit: "" }).errors.deposit);
+});
+
+// AA-1191: USD only unless CIS enables another currency.
+test("a stored SaaS currency that is not enabled reads as USD", () => {
+  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }, ["USD"]).saas_currency, "USD");
+  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }, ["USD", "VND"]).saas_currency, "VND");
+  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }).saas_currency, "VND");
+  assert.deepEqual(enabledCurrencies(undefined), ["USD"]);
+  assert.deepEqual(enabledCurrencies(["vnd", "USD"]), ["USD", "VND"]);
 });

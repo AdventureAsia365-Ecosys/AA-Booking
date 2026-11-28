@@ -13,6 +13,9 @@ exact 444 columns around each test).
 - a currency move (before the issue, and after the month was issued in USD) leaves no discount line in the old currency
   and drafts the next month in VND with its VND discount.
 
+AA-1191: VND is enabled in these tests through a stand-in of ``catalog.v_billing_currencies_v1`` (CIS 497, its exact
+columns); with USD only, a VND agency is drafted in USD from the USD list and its agreed VND price does not apply.
+
 Names and places are invented."""
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import pytest
 import pytest_asyncio
 
 from app.agency_billing import cis as cis_view
-from app.agency_billing import drafts, invoices
+from app.agency_billing import currencies, drafts, invoices
 from app.catalog import liveness
 from tests.integration.test_aa1037_agency_billing import COLUMNS_SQL, purge
 
@@ -46,6 +49,8 @@ CIS_444_COLUMNS = (
     "agreed_until date, billing_interval text, trial_ends_at timestamp with time zone, is_pilot boolean, "
     "bill_free boolean, discount_pct numeric(5,2), discount_kind text"
 )
+# CIS 497 (AA-1191, contract 1.12): copied from CIS tests/integration/test_aa1191_migration_497.py.
+CIS_497_COLUMNS = "enabled_currencies text[], base_currency text"
 
 
 @pytest_asyncio.fixture
@@ -57,11 +62,17 @@ async def admin(migrated_admin_dsn: str) -> AsyncIterator[asyncpg.Connection]:
     assert await conn.fetchval(COLUMNS_SQL, cis_view.DISCOUNT_VIEW.qualified) == CIS_444_COLUMNS
     missing = set(cis_view.DISCOUNT_VIEW.columns) - {c.split(" ", 1)[0] for c in CIS_444_COLUMNS.split(", ")}
     assert not missing, f"Booking selects {missing} that CIS 444 does not have"
+    await conn.execute("DROP TABLE IF EXISTS catalog.v_billing_currencies_v1")
+    await conn.execute(f"CREATE TABLE catalog.v_billing_currencies_v1 ({CIS_497_COLUMNS})")
+    await conn.execute("GRANT SELECT ON catalog.v_billing_currencies_v1 TO booking")
+    await conn.execute("INSERT INTO catalog.v_billing_currencies_v1 VALUES (ARRAY['USD', 'VND'], 'USD')")
+    assert set(currencies.VIEW.columns) == {c.split(" ", 1)[0] for c in CIS_497_COLUMNS.split(", ")}
     liveness.reset_cache()
     try:
         yield conn
     finally:
         await purge(conn)
+        await conn.execute("DROP TABLE IF EXISTS catalog.v_billing_currencies_v1")
         liveness.reset_cache()
         await conn.close()
 
@@ -137,6 +148,28 @@ async def test_vnd_agency_seat_minimum_agreed_and_annual(admin: asyncpg.Connecti
         "SELECT total FROM booking.agency_invoice WHERE party_tenant_id = $1::uuid AND invoice_kind = 'saas'", tid
     )
     assert total == Decimal("4990000.00")
+
+
+async def test_vnd_agency_is_drafted_in_usd_while_vnd_is_disabled(
+    admin: asyncpg.Connection, pool: asyncpg.Pool
+) -> None:
+    await admin.execute("UPDATE catalog.v_billing_currencies_v1 SET enabled_currencies = ARRAY['USD']")
+    liveness.reset_cache()
+    tid = await _partner(admin, "Moss Harbour")
+    await _subscription(admin, tid, "content", "content.growth", price_usd_monthly=Decimal("149.00"),
+                        price_vnd_monthly=Decimal(3790000), billing_currency="VND")  # fmt: skip
+    await _subscription(admin, tid, "crm", "crm.team", price_usd_monthly=Decimal("19.00"),
+                        price_vnd_monthly=Decimal(480000), price_unit="seat", seats=1, seats_min=3,
+                        billing_currency="VND", agreed_price_monthly=Decimal(400000), agreed_currency="VND",
+                        agreed_until=date(2027, 10, 31))  # fmt: skip
+    out = await drafts.run_saas(pool, period="2026-11", tenant_id=tid, actor="job:test")
+    assert (out["invoices_created"], out["currency_not_enabled"], out["agreed"]) == (1, 1, 0)
+    rows = await _invoices(admin, tid)
+    assert {r["currency"] for r in rows} == {"USD"}
+    assert [(r["line_role"], r["quantity"], r["amount"]) for r in rows] == [
+        ("subscription", Decimal("1.00"), Decimal("149.00")),
+        ("subscription", Decimal("3.00"), Decimal("57.00")),
+    ]
 
 
 COMBO = {"discount_pct": Decimal("10.00"), "discount_kind": "combo"}

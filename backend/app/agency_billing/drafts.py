@@ -14,7 +14,10 @@ its trial) of every agency from the CIS view ``catalog.v_tenant_billing_v1`` (CI
 
 - the invoice currency is the agency's CIS ``billing_currency`` (before CIS 438: the Booking ``saas_currency`` terms);
   USD lines read the USD list, VND lines the VND list (``price_vnd_monthly`` / ``price_extra_seat_vnd``); another
-  currency is skipped (``currency_unsupported``);
+  currency is skipped (``currency_unsupported``); AA-1191: a currency that is not enabled in CIS (``catalog.
+  v_billing_currencies_v1``, CIS 497; USD only by default) drafts in USD from the USD list, counted
+  ``currency_not_enabled`` (an agreed price in it does not apply; the draft of the period in the old currency loses
+  its job lines like any currency move);
 - per subscription one ``subscription`` line: a per-seat plan bills max(seats, ``seats_min``, 1) seats; any other plan
   bills the plan price and, with more seats than included, an ``extra_seats`` line at the extra-seat list price;
 - seat overage on a per-seat plan (AA-1116, S284; the CIS quote's ``seat_split``): the ``subscription`` line bills the
@@ -82,7 +85,7 @@ from typing import Any
 
 import asyncpg
 
-from app.agency_billing import cis, config, invoices
+from app.agency_billing import cis, config, currencies, invoices
 from app.errors import Invalid
 from app.jobs import queue
 from app.jobs.queue import Job
@@ -441,8 +444,10 @@ OTHER_CURRENCY_DRAFTS_SQL = (
 
 
 async def _draft_agency_saas(conn: asyncpg.Connection, tid: Any, rows: list[dict[str, Any]],
-                            period: tuple[date, date], actor: str) -> dict[str, int]:  # fmt: skip
-    """One agency's SaaS draft for the period (inside its transaction); the counts it adds to the run."""
+                            period: tuple[date, date], actor: str,
+                            allowed: tuple[str, ...] = (currencies.BASE,)) -> dict[str, int]:  # fmt: skip
+    """One agency's SaaS draft for the period (inside its transaction); the counts it adds to the run. ``allowed`` =
+    the enabled currencies (AA-1191, CIS 497): a billing currency that is not enabled drafts in USD."""
     terms = await config.terms_for(conn, tid)
     if terms is None:
         raise RuntimeError("no billing terms row")
@@ -450,11 +455,16 @@ async def _draft_agency_saas(conn: asyncpg.Connection, tid: Any, rows: list[dict
     currency = (rows[0].get("billing_currency") or terms["saas_currency"]).strip().upper()
     if currency not in SAAS_CURRENCIES:
         return {"currency_unsupported": 1}
+    disabled: dict[str, int] = {}
+    if currency not in allowed:
+        currency = currencies.effective(currency, allowed)
+        disabled = {"currency_not_enabled": 1}
     # A currency changed in CIS after the month was issued in the old one: no draft in the new currency (never two
     # software fees for one month); finance voids the issued invoice and the next run drafts the new currency.
     if await conn.fetchval(ISSUED_OTHER_CURRENCY_SQL, str(tid), period[0], currency) is not None:
         return {"period_issued": 1, "currency_moved_issued": 1}
     lines, done = saas_lines(rows, period[0], currency)
+    done.update(disabled)
     # A currency changed in CIS before the month was issued: the job lines of the period's draft in the old currency
     # go (never two live software fees for one month).
     for other in await conn.fetch(OTHER_CURRENCY_DRAFTS_SQL, str(tid), period[0], currency):
@@ -479,6 +489,7 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         if not await cis.ready(conn):
             return {"outcome": "skipped", "reason": f"{cis.VIEW.qualified} not readable (CIS 377)"}
         subs = await cis.subscriptions(conn, [tenant_id] if tenant_id else None)
+        allowed = await currencies.enabled(conn)
         partners = {r["tenant_id"]: r["agency_name"] for r in await conn.fetch(
             "SELECT tenant_id, agency_name FROM booking.b2b_partners")}  # fmt: skip
     by_tenant: dict[Any, list[dict[str, Any]]] = defaultdict(list)
@@ -488,7 +499,7 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         by_tenant[s["tenant_id"]].append(s)
     counts = {**_empty_counts(), "price_missing": 0, "no_partner": 0, "currency_unsupported": 0, "agreed": 0,
               "annual_manual": 0, "pilot_free": 0, "currency_moved": 0, "currency_moved_issued": 0,
-              "discounted": 0}  # fmt: skip
+              "discounted": 0, "currency_not_enabled": 0}  # fmt: skip
     for tid, rows in by_tenant.items():
         if tid not in partners:
             counts["no_partner"] += 1  # bk_tenant_pull has not projected the tenant yet: next run
@@ -496,7 +507,7 @@ async def run_saas(pool: asyncpg.Pool, *, period: str | None, tenant_id: str | N
         counts["agencies"] += 1
         try:
             async with pool.acquire() as conn, conn.transaction():
-                done = await _draft_agency_saas(conn, tid, rows, (start, end), actor)
+                done = await _draft_agency_saas(conn, tid, rows, (start, end), actor, allowed)
             for k, v in done.items():
                 counts[k] += v
         except Exception:  # noqa: BLE001 — one agency never holds the others; the run raises at the end

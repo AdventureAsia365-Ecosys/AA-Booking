@@ -11,13 +11,16 @@
 // being sent as 0 or answered with a generic error.
 //
 // AA-1116 (option B): the software fee is drafted in the agency's CIS billing currency (Tenant 360); the field here is
-// read-only and only the fallback when CIS sends no currency.
+// read-only and only the fallback when CIS sends no currency. AA-1191: it shows only while CIS enables more than USD
+// (CIS Platform › Settings › Enabled currencies); a stored currency that is not enabled reads, and is saved, as USD.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agencyBillingApi, type BillingTerms } from "@/lib/api/agencyBilling";
 import { agencyOpsApi } from "@/lib/api/agencyOps";
-import { DAY_RANGE, parseTerms, pctText, termsToText, type DayKey, type TermsErrors, type TermsText } from "@/lib/billingTermsForm";
+import {
+  DAY_RANGE, enabledCurrencies, parseTerms, pctText, termsToText, type DayKey, type TermsErrors, type TermsText,
+} from "@/lib/billingTermsForm";
 import { Button, ConfirmDialog, Field, FormDrawer, Input, Section, Select, useCan, useToast } from "@/ui";
 import { errorText } from "./shared";
 import { useT } from "@/ui/core/useI18n";
@@ -33,7 +36,8 @@ const TERM_FIELDS: { key: DayKey; label: string; hint: string }[] = [
 ];
 
 /** The terms fields, shared by the default terms and an agency's drawer. */
-function TermsFields({ value, errors, disabled, onChange }: {
+function TermsFields({ value, errors, disabled, onChange, currencyShown = false }: {
+  currencyShown?: boolean;
   value: TermsText;
   errors: TermsErrors;
   disabled: boolean;
@@ -58,9 +62,11 @@ function TermsFields({ value, errors, disabled, onChange }: {
           />
         </Field>
       ))}
-      <Field label={tr("Software fee currency")} hint={tr("Set in CIS Tenant 360 (the agency's billing currency). This value is used only when CIS sends none.")}>
-        <Input value={value.saas_currency} disabled />
-      </Field>
+      {currencyShown && (
+        <Field label={tr("Software fee currency")} hint={tr("Set in CIS Tenant 360 (the agency's billing currency). This value is used only when CIS sends none.")}>
+          <Input value={value.saas_currency} disabled />
+        </Field>
+      )}
     </div>
   );
 }
@@ -80,7 +86,9 @@ function termsLine(t: BillingTerms, tx: <S extends string | null | undefined>(s:
 
 type Editing = { tenantId: string; name: string | null; text: TermsText; isNew: boolean };
 
-function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; taken: Set<string>; onClose: () => void }) {
+function AgencyTermsDrawer({ editing, taken, currencyShown, onClose }: {
+  editing: Editing; taken: Set<string>; currencyShown: boolean; onClose: () => void;
+}) {
   const tr = useT(MSG);
   const toast = useToast();
   const qc = useQueryClient();
@@ -125,13 +133,16 @@ function AgencyTermsDrawer({ editing, taken, onClose }: { editing: Editing; take
             />
           </Field>
         )}
-        <TermsFields value={form.text} errors={errors} disabled={false} onChange={(text) => setForm({ ...form, text })} />
+        <TermsFields value={form.text} errors={errors} disabled={false} currencyShown={currencyShown}
+          onChange={(text) => setForm({ ...form, text })} />
       </div>
     </FormDrawer>
   );
 }
 
-function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]; defaults: BillingTerms | null; canEdit: boolean }) {
+function Overrides({ overrides, defaults, canEdit, enabled }: {
+  overrides: BillingTerms[]; defaults: BillingTerms | null; canEdit: boolean; enabled: string[];
+}) {
   const tr = useT(MSG);
   const tx = useTx();
   const toast = useToast();
@@ -153,7 +164,7 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold">{tr("Agency terms")}</h3>
         {canEdit && defaults && (
-          <Button size="sm" variant="secondary" onClick={() => setEditing({ tenantId: "", name: null, text: termsToText(defaults), isNew: true })}>
+          <Button size="sm" variant="secondary" onClick={() => setEditing({ tenantId: "", name: null, text: termsToText(defaults, enabled), isNew: true })}>
             {tr("Add agency terms")}
           </Button>
         )}
@@ -168,7 +179,7 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
               <span className="min-w-0 break-words text-body">{termsLine(o, tx)}</span>
               {canEdit && (
                 <span className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing({ tenantId: o.party_tenant_id ?? "", name: o.agency_name ?? null, text: termsToText(o), isNew: false })}>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing({ tenantId: o.party_tenant_id ?? "", name: o.agency_name ?? null, text: termsToText(o, enabled), isNew: false })}>
                     {tr("Edit")}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setRemoving(o)}>{tr("Use the default")}</Button>
@@ -178,7 +189,7 @@ function Overrides({ overrides, defaults, canEdit }: { overrides: BillingTerms[]
           ))}
         </ul>
       )}
-      {editing && <AgencyTermsDrawer editing={editing} taken={taken} onClose={() => setEditing(null)} />}
+      {editing && <AgencyTermsDrawer editing={editing} taken={taken} currencyShown={enabled.length > 1} onClose={() => setEditing(null)} />}
       <ConfirmDialog
         open={removing !== null}
         onClose={() => setRemoving(null)}
@@ -203,8 +214,8 @@ function SaveBar({ busy, onCancel, onSave }: { busy: boolean; onCancel: () => vo
 }
 
 /** The terms shown: the edited draft, else the stored default row, else nothing yet. */
-function shownTerms(draft: TermsText | null, current: BillingTerms | null): TermsText | null {
-  return draft ?? (current ? termsToText(current) : null);
+function shownTerms(draft: TermsText | null, current: BillingTerms | null, enabled: string[]): TermsText | null {
+  return draft ?? (current ? termsToText(current, enabled) : null);
 }
 
 export function TermsSection() {
@@ -214,6 +225,7 @@ export function TermsSection() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["agency-billing", "terms"], queryFn: agencyBillingApi.terms });
   const current = list.data?.items.find((t) => !t.party_tenant_id) ?? null;
+  const enabled = enabledCurrencies(list.data?.enabled_currencies);
   const [draft, setDraft] = useState<TermsText | null>(null);
   const [errors, setErrors] = useState<TermsErrors>({});
   const save = useMutation({
@@ -231,7 +243,7 @@ export function TermsSection() {
     setErrors(found);
     if (body) save.mutate(body);
   }
-  const shown = shownTerms(draft, current);
+  const shown = shownTerms(draft, current, enabled);
   return (
     <Section
       title={tr("Payment terms")}
@@ -239,11 +251,12 @@ export function TermsSection() {
       actions={canEdit && draft ? <SaveBar busy={save.isPending} onCancel={() => { setDraft(null); setErrors({}); }} onSave={submit} /> : undefined}
     >
       {shown ? (
-        <TermsFields value={shown} errors={errors} disabled={!canEdit} onChange={setDraft} />
+        <TermsFields value={shown} errors={errors} disabled={!canEdit} currencyShown={enabled.length > 1} onChange={setDraft} />
       ) : (
         <p className="text-[13px] text-muted">{list.isLoading ? tr("Loading…") : tr("No default terms row.")}</p>
       )}
-      <Overrides overrides={(list.data?.items ?? []).filter((t) => t.party_tenant_id)} defaults={current} canEdit={canEdit} />
+      <Overrides overrides={(list.data?.items ?? []).filter((t) => t.party_tenant_id)} defaults={current} canEdit={canEdit}
+        enabled={enabled} />
     </Section>
   );
 }

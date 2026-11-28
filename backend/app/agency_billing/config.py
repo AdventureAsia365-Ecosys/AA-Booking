@@ -23,7 +23,7 @@ from typing import Any
 import asyncpg
 
 from app import audit
-from app.agency_billing import entity_changes
+from app.agency_billing import currencies, entity_changes
 from app.errors import Conflict, Invalid, NotFound
 
 ENTITY_COLUMNS = (
@@ -322,6 +322,7 @@ async def put_terms(
     """Replaces the default terms (``tenant_id`` None) or an agency's override (created when missing)."""
     _check_terms(body)
     values = [body[k] for k in TERMS_FIELDS]
+    allowed = await currencies.enabled(conn)
     async with conn.transaction():
         if tenant_id is not None and not await conn.fetchval(
             "SELECT 1 FROM booking.b2b_partners WHERE tenant_id = $1::uuid", tenant_id
@@ -332,6 +333,9 @@ async def put_terms(
             " FOR UPDATE",
             tenant_id,
         )
+        # AA-1191: a SaaS currency that is not enabled in CIS is refused, unless it is the stored value sent back
+        if before is None or before["saas_currency"] != body["saas_currency"]:
+            currencies.refuse_unless_enabled(body["saas_currency"], allowed, "saas_currency")
         if before is None:
             row = await conn.fetchrow(
                 "INSERT INTO booking.billing_terms (party_tenant_id, deposit_pct, balance_days_before_departure,"  # noqa: S608

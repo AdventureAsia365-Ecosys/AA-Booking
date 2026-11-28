@@ -316,7 +316,8 @@ export const agencyBillingApi = {
   createTaxRule: (body: Partial<TaxRule>) => bkSend<TaxRule>("tax-rules", { body }),
   updateTaxRule: (id: string, body: Partial<TaxRule>) =>
     bkSend<TaxRule>(`tax-rules/${enc(id)}`, { method: "PATCH", body }),
-  terms: () => bkGet<{ items: BillingTerms[] }>("billing-terms"),
+  // AA-1191: enabled_currencies = the CIS enabled currencies (USD first), absent from an older API
+  terms: () => bkGet<{ items: BillingTerms[]; enabled_currencies?: string[] }>("billing-terms"),
   putDefaultTerms: (body: BillingTerms) => bkSend<BillingTerms>("billing-terms/default", { method: "PUT", body }),
   putAgencyTerms: (tenantId: string, body: BillingTerms) =>
     bkSend<BillingTerms>(`billing-terms/agencies/${enc(tenantId)}`, { method: "PUT", body }),

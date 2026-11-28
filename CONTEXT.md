@@ -95,6 +95,16 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   discount of each row (`discount_pct`, `discount_kind`, detected on their own) is drafted as one negative `adjustment`
   line per discounted subscription (the only adjustment with a product, so a re-run replaces it and keeps finance's
   adjustments), rounded on the running total so the draft equals the CIS quote.
+  **Currency rule: USD only** (AA-1191, tech lead S295; CIS 497, contract 1.12): which currencies the platform shows
+  and accepts is the CIS setting `cis.billing.enabled_currencies` (CIS Platform › Settings › Enabled currencies,
+  default USD only, USD always enabled), read through `catalog.v_billing_currencies_v1` (one row, feature-detected:
+  USD only without it; `app/agency_billing/currencies.py`). An agency whose CIS billing currency is not enabled is
+  drafted in USD from the USD list (`currency_not_enabled` in the run counts; an agreed price in that currency does not
+  apply; the period's draft in the old currency loses its job lines like any currency move); `PUT /booking/billing-terms/*`
+  refuses a SaaS currency that is not enabled (422 `currency_not_enabled`, a stored value sent back is accepted); `GET
+  /booking/billing-terms` serves `enabled_currencies` and the Settings page hides the SaaS currency field while only
+  USD is enabled. No column or row is dropped or converted. Supplier cost currencies (rate sheets, FX), the B2B quote
+  currency and the pricing policy `agency_currency_by_country` are outside this rule.
   `catalog.v_tour_place_name` (CIS 298, AA-996: list destinations; the names and positions of `v_tour_place` without
   its per-place card / destination / segment lookups) is read too; the list never reads `v_tour_place`.
   **Parse-backed views** (`v_tour_day`, `v_tour_place`, `v_tour_place_name`; their day text parses every live

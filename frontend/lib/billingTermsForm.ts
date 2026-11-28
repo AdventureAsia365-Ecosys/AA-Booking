@@ -41,9 +41,20 @@ export function pctText(fraction: string | number): string {
   return String(Number((Number(fraction) * 100).toFixed(2)));
 }
 
-export function termsToText(t: BillingTerms): TermsText {
+/** AA-1191: the enabled currencies as CIS serves them (USD first, always; USD only when the API does not say). */
+export function enabledCurrencies(list?: readonly string[] | null): string[] {
+  const out = ["USD"];
+  for (const c of list ?? []) if (typeof c === "string" && c && !out.includes(c.toUpperCase())) out.push(c.toUpperCase());
+  return out;
+}
+
+/** The terms as form text. AA-1191: a stored SaaS currency that is not enabled reads as USD (the currency the agency
+ *  is drafted in); without ``enabled`` the stored value is kept. */
+export function termsToText(t: BillingTerms, enabled?: readonly string[] | null): TermsText {
   const days = Object.fromEntries(DAY_KEYS.map((k) => [k, String(t[k] ?? "")])) as Record<DayKey, string>;
-  return { deposit: pctText(t.deposit_pct), ...days, saas_currency: t.saas_currency || "USD" };
+  const stored = t.saas_currency || "USD";
+  const saas_currency = enabled === undefined || enabledCurrencies(enabled).includes(stored) ? stored : "USD";
+  return { deposit: pctText(t.deposit_pct), ...days, saas_currency };
 }
 
 export type TermsErrors = Partial<Record<DayKey | "deposit", string>>;
