@@ -9,6 +9,7 @@ from collections.abc import Iterator
 
 import pytest
 
+from app.auth import pilot_fence
 from app.catalog import liveness, trip_plans
 
 # S272 incident: under a git hook git exports GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE; a test that runs git in tmp_path
@@ -30,6 +31,8 @@ for _name in (
 def _fresh_catalog_detection() -> Iterator[None]:
     liveness.reset_cache()
     trip_plans.DESTINATIONS_CACHE.clear()
+    pilot_fence.reset()
     yield
     liveness.reset_cache()
     trip_plans.DESTINATIONS_CACHE.clear()
+    pilot_fence.reset()
