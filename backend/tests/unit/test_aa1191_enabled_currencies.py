@@ -176,6 +176,35 @@ async def test_put_terms_accepts_a_stored_value_sent_back_and_an_enabled_one() -
     assert out["saas_currency"] == "VND"
 
 
+@pytest.mark.asyncio
+async def test_a_save_without_the_currency_keeps_the_stored_vnd() -> None:
+    """A deposit-only save from the staff page (no saas_currency sent) leaves a stored VND row in VND."""
+    body = {k: v for k, v in TERMS.items() if k != "saas_currency"} | {"deposit_pct": Decimal("0.2500")}
+    override = {**TERMS, "party_tenant_id": T1, "saas_currency": "VND"}
+    out = await config.put_terms(_terms_conn(override, ["USD"]), str(T1), body, "fin-1")
+    assert out["saas_currency"] == "VND"
+    out = await config.put_terms(_terms_conn({**TERMS, "saas_currency": "VND"}, ["USD"]), None, body, "fin-1")
+    assert out["saas_currency"] == "VND"
+
+
+@pytest.mark.asyncio
+async def test_a_new_override_without_the_currency_takes_the_enabled_default_else_usd() -> None:
+    body = {k: v for k, v in TERMS.items() if k != "saas_currency"}
+    c = _terms_conn(None, ["USD"]).on("WHERE party_tenant_id IS NULL", "VND")
+    assert (await config.put_terms(c, str(T1), body, "fin-1"))["saas_currency"] == "USD"
+    c = _terms_conn(None, ["USD", "VND"]).on("WHERE party_tenant_id IS NULL", "VND")
+    assert (await config.put_terms(c, str(T1), body, "fin-1"))["saas_currency"] == "VND"
+    assert (await config.put_terms(_terms_conn(None, ["USD"]), None, body, "fin-1"))["saas_currency"] == "USD"
+
+
+def test_the_route_keeps_the_stored_currency_when_the_body_leaves_it_out() -> None:
+    stored = {**TERMS, "saas_currency": "VND"}
+    c = _client(_terms_conn(stored, ["USD"]))
+    body = {k: v for k, v in BODY.items() if k != "saas_currency"}
+    resp = c.put("/booking/billing-terms/default", json=body)
+    assert resp.status_code == 200 and resp.json()["saas_currency"] == "VND"
+
+
 def _client(conn: ScriptedConn) -> TestClient:
     app = create_app(Settings(database_url=None, environment="test"))
     app.dependency_overrides[current_staff] = lambda: FIN

@@ -40,11 +40,14 @@ test("every day count is required, whole and inside the API range; suspend after
   assert.ok(parseTerms({ ...text, deposit: "" }).errors.deposit);
 });
 
-// AA-1191: USD only unless CIS enables another currency.
-test("a stored SaaS currency that is not enabled reads as USD", () => {
-  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }, ["USD"]).saas_currency, "USD");
-  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }, ["USD", "VND"]).saas_currency, "VND");
-  assert.equal(termsToText({ ...TERMS, saas_currency: "VND" }).saas_currency, "VND");
+// AA-1191: USD only unless CIS enables another currency; a save never converts the stored SaaS currency.
+test("a stored SaaS currency is kept in the form and never sent back on save", () => {
+  const text = termsToText({ ...TERMS, saas_currency: "VND" });
+  assert.equal(text.saas_currency, "VND");
+  const { body, errors } = parseTerms({ ...text, deposit: "25" });
+  assert.deepEqual(errors, {});
+  assert.equal(body.deposit_pct, "0.2500");
+  assert.equal("saas_currency" in body, false);
   assert.deepEqual(enabledCurrencies(undefined), ["USD"]);
   assert.deepEqual(enabledCurrencies(["vnd", "USD"]), ["USD", "VND"]);
 });

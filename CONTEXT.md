@@ -101,7 +101,8 @@ admin at `/admin/docs?path=docs/architecture/diagrams/README.md`.
   USD only without it; `app/agency_billing/currencies.py`). An agency whose CIS billing currency is not enabled is
   drafted in USD from the USD list (`currency_not_enabled` in the run counts; an agreed price in that currency does not
   apply; the period's draft in the old currency loses its job lines like any currency move); `PUT /booking/billing-terms/*`
-  refuses a SaaS currency that is not enabled (422 `currency_not_enabled`, a stored value sent back is accepted); `GET
+  refuses a SaaS currency that is not enabled (422 `currency_not_enabled`, a stored value sent back is accepted; a body
+  without `saas_currency` keeps the stored value, which is what the staff page sends, so a save never converts); `GET
   /booking/billing-terms` serves `enabled_currencies` and the Settings page hides the SaaS currency field while only
   USD is enabled. No column or row is dropped or converted. Supplier cost currencies (rate sheets, FX), the B2B quote
   currency and the pricing policy `agency_currency_by_country` are outside this rule.

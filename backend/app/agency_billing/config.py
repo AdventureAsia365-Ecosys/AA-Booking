@@ -316,12 +316,21 @@ def _check_terms(t: dict[str, Any]) -> None:
         raise Invalid("invalid_terms", "suspend_after_days must be more than warn_after_days")
 
 
+async def _new_terms_currency(conn: asyncpg.Connection, tenant_id: str | None, allowed: tuple[str, ...]) -> str:
+    """AA-1191: the SaaS currency of a new terms row sent without one: the default row's while enabled, else USD."""
+    default = (
+        await conn.fetchval("SELECT saas_currency FROM booking.billing_terms WHERE party_tenant_id IS NULL")
+        if tenant_id is not None
+        else None
+    )
+    return currencies.effective(default, allowed)
+
+
 async def put_terms(
     conn: asyncpg.Connection, tenant_id: str | None, body: dict[str, Any], actor: str
 ) -> dict[str, Any]:
     """Replaces the default terms (``tenant_id`` None) or an agency's override (created when missing)."""
     _check_terms(body)
-    values = [body[k] for k in TERMS_FIELDS]
     allowed = await currencies.enabled(conn)
     async with conn.transaction():
         if tenant_id is not None and not await conn.fetchval(
@@ -333,9 +342,15 @@ async def put_terms(
             " FOR UPDATE",
             tenant_id,
         )
-        # AA-1191: a SaaS currency that is not enabled in CIS is refused, unless it is the stored value sent back
-        if before is None or before["saas_currency"] != body["saas_currency"]:
-            currencies.refuse_unless_enabled(body["saas_currency"], allowed, "saas_currency")
+        # AA-1191: the staff page never sends the (read-only) SaaS currency, so a save keeps the stored value: no
+        # VND -> USD conversion happens here (that is a later reviewed step). A new row takes the default row's value
+        # while it is enabled, else USD. A currency sent that is not enabled is refused, unless it is the stored one.
+        currency = body.get("saas_currency")
+        if currency is None:
+            currency = before["saas_currency"] if before else await _new_terms_currency(conn, tenant_id, allowed)
+        elif before is None or before["saas_currency"] != currency:
+            currencies.refuse_unless_enabled(currency, allowed, "saas_currency")
+        values = [currency if k == "saas_currency" else body[k] for k in TERMS_FIELDS]
         if before is None:
             row = await conn.fetchrow(
                 "INSERT INTO booking.billing_terms (party_tenant_id, deposit_pct, balance_days_before_departure,"  # noqa: S608

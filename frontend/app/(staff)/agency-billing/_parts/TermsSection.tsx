@@ -12,14 +12,15 @@
 //
 // AA-1116 (option B): the software fee is drafted in the agency's CIS billing currency (Tenant 360); the field here is
 // read-only and only the fallback when CIS sends no currency. AA-1191: it shows only while CIS enables more than USD
-// (CIS Platform › Settings › Enabled currencies); a stored currency that is not enabled reads, and is saved, as USD.
+// (CIS Platform › Settings › Enabled currencies). The stored value is never sent back on save (the API keeps it), so a
+// save never converts a stored VND row to USD.
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agencyBillingApi, type BillingTerms } from "@/lib/api/agencyBilling";
 import { agencyOpsApi } from "@/lib/api/agencyOps";
 import {
-  DAY_RANGE, enabledCurrencies, parseTerms, pctText, termsToText, type DayKey, type TermsErrors, type TermsText,
+  DAY_RANGE, enabledCurrencies, parseTerms, pctText, termsToText, type DayKey, type TermsBody, type TermsErrors, type TermsText,
 } from "@/lib/billingTermsForm";
 import { Button, ConfirmDialog, Field, FormDrawer, Input, Section, Select, useCan, useToast } from "@/ui";
 import { errorText } from "./shared";
@@ -97,7 +98,7 @@ function AgencyTermsDrawer({ editing, taken, currencyShown, onClose }: {
   const [missing, setMissing] = useState(false);
   const agencies = useQuery({ queryKey: ["b2b-desk", "agencies"], queryFn: agencyOpsApi.agencies, enabled: editing.isNew, retry: false });
   const save = useMutation({
-    mutationFn: (body: BillingTerms) => agencyBillingApi.putAgencyTerms(form.tenantId, body),
+    mutationFn: (body: TermsBody) => agencyBillingApi.putAgencyTerms(form.tenantId, body),
     onSuccess: () => {
       toast.success(tr("Agency terms saved"));
       qc.invalidateQueries({ queryKey: ["agency-billing"] });
@@ -164,7 +165,7 @@ function Overrides({ overrides, defaults, canEdit, enabled }: {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold">{tr("Agency terms")}</h3>
         {canEdit && defaults && (
-          <Button size="sm" variant="secondary" onClick={() => setEditing({ tenantId: "", name: null, text: termsToText(defaults, enabled), isNew: true })}>
+          <Button size="sm" variant="secondary" onClick={() => setEditing({ tenantId: "", name: null, text: termsToText(defaults), isNew: true })}>
             {tr("Add agency terms")}
           </Button>
         )}
@@ -179,7 +180,7 @@ function Overrides({ overrides, defaults, canEdit, enabled }: {
               <span className="min-w-0 break-words text-body">{termsLine(o, tx)}</span>
               {canEdit && (
                 <span className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setEditing({ tenantId: o.party_tenant_id ?? "", name: o.agency_name ?? null, text: termsToText(o, enabled), isNew: false })}>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing({ tenantId: o.party_tenant_id ?? "", name: o.agency_name ?? null, text: termsToText(o), isNew: false })}>
                     {tr("Edit")}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setRemoving(o)}>{tr("Use the default")}</Button>
@@ -214,8 +215,8 @@ function SaveBar({ busy, onCancel, onSave }: { busy: boolean; onCancel: () => vo
 }
 
 /** The terms shown: the edited draft, else the stored default row, else nothing yet. */
-function shownTerms(draft: TermsText | null, current: BillingTerms | null, enabled: string[]): TermsText | null {
-  return draft ?? (current ? termsToText(current, enabled) : null);
+function shownTerms(draft: TermsText | null, current: BillingTerms | null): TermsText | null {
+  return draft ?? (current ? termsToText(current) : null);
 }
 
 export function TermsSection() {
@@ -229,7 +230,7 @@ export function TermsSection() {
   const [draft, setDraft] = useState<TermsText | null>(null);
   const [errors, setErrors] = useState<TermsErrors>({});
   const save = useMutation({
-    mutationFn: (body: BillingTerms) => agencyBillingApi.putDefaultTerms(body),
+    mutationFn: (body: TermsBody) => agencyBillingApi.putDefaultTerms(body),
     onSuccess: () => {
       toast.success(tr("Default terms saved"));
       setDraft(null);
@@ -243,7 +244,7 @@ export function TermsSection() {
     setErrors(found);
     if (body) save.mutate(body);
   }
-  const shown = shownTerms(draft, current, enabled);
+  const shown = shownTerms(draft, current);
   return (
     <Section
       title={tr("Payment terms")}

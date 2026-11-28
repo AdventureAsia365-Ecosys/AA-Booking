@@ -318,8 +318,10 @@ export const agencyBillingApi = {
     bkSend<TaxRule>(`tax-rules/${enc(id)}`, { method: "PATCH", body }),
   // AA-1191: enabled_currencies = the CIS enabled currencies (USD first), absent from an older API
   terms: () => bkGet<{ items: BillingTerms[]; enabled_currencies?: string[] }>("billing-terms"),
-  putDefaultTerms: (body: BillingTerms) => bkSend<BillingTerms>("billing-terms/default", { method: "PUT", body }),
-  putAgencyTerms: (tenantId: string, body: BillingTerms) =>
+  // AA-1191: the PUT body leaves out saas_currency (read-only here; the API keeps the stored value)
+  putDefaultTerms: (body: Omit<BillingTerms, "saas_currency">) =>
+    bkSend<BillingTerms>("billing-terms/default", { method: "PUT", body }),
+  putAgencyTerms: (tenantId: string, body: Omit<BillingTerms, "saas_currency">) =>
     bkSend<BillingTerms>(`billing-terms/agencies/${enc(tenantId)}`, { method: "PUT", body }),
   deleteAgencyTerms: (tenantId: string) => bkSend<void>(`billing-terms/agencies/${enc(tenantId)}`, { method: "DELETE" }),
   // AA-1037 extras: the accountant export (G5) and the partner terms clauses (G6).

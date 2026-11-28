@@ -360,6 +360,11 @@ async def test_configuration(client: Client, admin: asyncpg.Connection, pool: as
     override = await _ok(await c.put(f"/billing-terms/agencies/{tid}", json={**terms, "suspend_after_days": 45},
                                      headers=_as(cis, FIN_A)))  # fmt: skip
     assert override["suspend_after_days"] == 45
+    # AA-1191: a save that leaves out the read-only SaaS currency keeps a stored VND, even while only USD is enabled
+    await admin.execute("UPDATE booking.billing_terms SET saas_currency = 'VND' WHERE party_tenant_id = $1::uuid", tid)
+    kept = await _ok(await c.put(f"/billing-terms/agencies/{tid}", json={**terms, "deposit_pct": "0.2500",
+                                 "suspend_after_days": 45}, headers=_as(cis, FIN_A)))  # fmt: skip
+    assert (kept["saas_currency"], kept["deposit_pct"]) == ("VND", "0.2500")
     listed = await _ok(await c.get("/billing-terms", headers=_as(cis, FIN_B)))
     assert {t["agency_name"] for t in listed["items"]} >= {None, f"{NAME} Driftwood Isles"}
     rule = {"code": "IT1037TH", "invoice_kind": "saas", "recipient_country": "TH", "rate": "0.0700",

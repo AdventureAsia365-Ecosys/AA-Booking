@@ -193,7 +193,8 @@ class BillingTermsIn(BaseModel):
     settlement_due_days: int = Field(ge=0, le=120)
     warn_after_days: int = Field(ge=0, le=365)
     suspend_after_days: int = Field(ge=1, le=365)
-    saas_currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    # AA-1191: left out = keep the stored value (a new row: the default row's while enabled, else USD)
+    saas_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
 
 
 class TermsClauseIn(BaseModel):

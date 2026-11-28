@@ -1680,10 +1680,16 @@
             "title": "Deposit Pct"
           },
           "saas_currency": {
-            "default": "USD",
-            "pattern": "^[A-Z]{3}$",
-            "title": "Saas Currency",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[A-Z]{3}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saas Currency"
           },
           "saas_due_days": {
             "maximum": 120.0,
