@@ -214,3 +214,16 @@ GRANT USAGE ON SCHEMA catalog TO booking;
 GRANT SELECT ON catalog.v_tour, catalog.v_tour_day, catalog.v_tour_photo, catalog.v_tour_place,
     catalog.v_tour_place_name, catalog.v_destination, catalog.v_destination_photo, catalog.v_country,
     catalog.v_destination_redirect TO booking;
+
+-- catalog.v_pilot_fence_v1 (CIS 496, AA-1054): the pilot fence switch in force (fence_on, version, effective_from),
+-- one row; here a plain table holding the default (off, version 0), so the E2E sessions of the integration tests work.
+-- A test of the fence updates the row inside its own transaction or puts it back (tests/integration/
+-- test_aa1054_pilot_fence.py).
+CREATE TABLE IF NOT EXISTS catalog.v_pilot_fence_v1 (
+    fence_on        BOOLEAN NOT NULL,
+    version         INTEGER NOT NULL,
+    effective_from  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO catalog.v_pilot_fence_v1 (fence_on, version)
+SELECT false, 0 WHERE NOT EXISTS (SELECT 1 FROM catalog.v_pilot_fence_v1);
+GRANT SELECT ON catalog.v_pilot_fence_v1 TO booking;

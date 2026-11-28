@@ -63,6 +63,12 @@ address ``e2e-owner@`` with exactly ``cis-admin`` + ``booking-admin`` is a plain
 refused outside ``ENVIRONMENT`` exactly ``dev`` and with any other group set, before any DB access; exempt from the
 administrator MFA switch below; named "E2E owner (agent, Dev only)" on its staff row.
 
+**Pilot fence (AA-1054, S297, root ADR 0006a; :mod:`app.auth.pilot_fence`).** A WORKFORCE token whose ``email`` is of
+the E2E mailbox domain is refused before its first database read (after the checks that need none: Preview cap, E2E
+scope and environment, read-only E2E writes), 403 ``e2e_pilot_fence``, while the CIS platform setting
+``cis.platform.pilot_e2e_fence`` is on (read through ``catalog.v_pilot_fence_v1``, CIS 496), and 403
+``e2e_pilot_fence_unknown`` when that view cannot be read (fail closed). Real staff never read it.
+
 **Administrator MFA (AA-1111 S2, root ADR 0006c, bk-061; :mod:`app.auth.admin_mfa`).** A WORKFORCE ``booking-admin``
 session (not Preview, not a Dev-only E2E identity) whose access token's ``amr`` lacks ``otp`` (no authenticator code)
 is refused 403 ``mfa_required`` while the pricing policy parameter ``staff_admin_mfa_required`` is on; off, it is only
@@ -101,7 +107,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import audit
-from app.auth import admin_mfa, custom_roles, e2e_owner, e2e_staff, identity_config, view_as
+from app.auth import admin_mfa, custom_roles, e2e_owner, e2e_staff, identity_config, pilot_fence, view_as
 from app.auth.identity_verifier import AuthUnavailable, InvalidToken, Principal
 
 log = logging.getLogger(__name__)
@@ -719,6 +725,10 @@ async def current_staff(
             body = await _json_body(request)
             e2e_staff.check_body(writer, request.method, route, body)
         pool = await get_pool(request)
+        # AA-1054: the pilot fence (CIS setting cis.platform.pilot_e2e_fence through catalog.v_pilot_fence_v1) refuses
+        # every Dev-only E2E identity before its first database read, whatever its own Dev-only rules allow (the
+        # checks above only refuse more, without any DB access).
+        await pilot_fence.check(pool, principal.email, sub=principal.sub)
         role, custom = await _custom_role(pool, principal, role, writer, request.method, route_obj, body)
         # AA-1111 (root ADR 0006c): an administrator without an authenticator code, 403 mfa_required while the
         # pricing policy parameter staff_admin_mfa_required is on (logged only while it is off).
